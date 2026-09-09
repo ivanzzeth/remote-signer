@@ -1,5 +1,16 @@
 # Preset: Polymarket EOA (Polygon). Auth + enable_trading + trading. No create_safe.
 # Use: remote-signer-cli preset create-from polymarket_eoa_polygon [--config config.yaml --write] [--set allowed_safe_addresses=0x...]
+#
+# 2026-09-09: switched from the evm_solidity_expression capability templates
+# (polymarket_auth / polymarket_enable_trading / polymarket_trading) to the
+# evm_js ones. Solidity rules are opt-in and off by default — evaluating one
+# forks `forge script` inside the key-holding process, on the signing path —
+# so a preset that needs them cannot be applied out of the box.
+#
+# Same coverage, no new code: evm/polymarket carries clob-auth, order-signature
+# and polymarket-transactions (the inner-calldata check, which its own comment
+# documents as working "for direct EOA calls or as Safe template delegate_to
+# target"); evm/safe carries the SafeTx shell the solidity templates had.
 name: "Polymarket EOA (Polygon)"
 chain_type: "evm"
 chain_id: "137"
@@ -12,15 +23,17 @@ variables:
   safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
   allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
+  allowed_safe_tx_to_addresses: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,0xC5d563A36AE78145C45a50134d48A1215220f80a"
+  delegate_to: "polymarket-transactions"
+  delegate_mode: "single"
   clob_auth_domain_name: "ClobAuthDomain"
   clob_auth_domain_version: "1"
   ctf_exchange_domain_name: "Polymarket CTF Exchange"
   ctf_exchange_domain_version: "1"
   safe_factory_domain_name: "Polymarket Contract Proxy Factory"
 template_ids:
-  - evm/polymarket_auth
-  - evm/polymarket_enable_trading
-  - evm/polymarket_trading
+  - evm/polymarket
+  - evm/safe
 operator_overrides:
   - name: allowed_safe_addresses
     required: false

@@ -1,5 +1,10 @@
 # Preset: Polymarket V2 EOA (Polygon). Auth + V2 order + V2 transactions.
 # Use: remote-signer-cli preset create-from polymarket_v2_eoa_polygon [--config config.yaml --write]
+#
+# 2026-09-09: auth switched from evm/polymarket_auth (evm_solidity_expression,
+# needs forge, off by default) to evm/polymarket_auth_js. evm/polymarket_v2 was
+# already evm_js and carries no auth rule of its own, so the split auth template
+# is genuinely needed here.
 name: "Polymarket V2 EOA (Polygon)"
 chain_type: "evm"
 chain_id: "137"
@@ -23,7 +28,7 @@ variables:
   v2_exchange_domain_version: "2"
   safe_factory_domain_name: "Polymarket Contract Proxy Factory"
 template_ids:
-  - evm/polymarket_auth
+  - evm/polymarket_auth_js
   - evm/polymarket_v2
 operator_overrides:
   - name: allowed_safe_addresses

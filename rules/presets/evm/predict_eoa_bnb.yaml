@@ -1,6 +1,12 @@
 # Preset: Predict.fun EOA (BNB Chain). Auth + enable_trading + trading.
 # Use: remote-signer-cli preset create-from predict_eoa_bnb [--config config.yaml --write]
 # Composes auth (PersonalSign) + enable_trading (approve/setApprovalForAll) + trading (Order + split/merge/redeem + NegRiskAdapter).
+#
+# 2026-09-09: switched to the evm_js templates. Solidity rules are opt-in and
+# off by default (they fork `forge script` on the signing path, inside the
+# process holding the keys), so the solidity variant could not be applied out
+# of the box. The predict_eoa_bnb_js twin preset, which existed only to offer
+# this same composition, has been removed — this id is the one to use.
 
 name: "Predict.fun EOA (BNB)"
 chain_type: "evm"
@@ -21,6 +27,6 @@ variables:
   neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
 template_ids:
   - evm/predict_auth
-  - evm/predict_enable_trading
-  - evm/predict_trading
+  - evm/predict_enable_trading_js
+  - evm/predict_trading_js
 operator_overrides:

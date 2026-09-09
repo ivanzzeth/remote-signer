@@ -1,0 +1,161 @@
+# Polymarket Auth (CLOB login) — evm_js port of polymarket_auth.yaml.
+# Same validation, no Foundry/Forge: the solidity engine forks `forge script`
+# on the signing path inside the key-holding process, and is off by default.
+# Capability template only. Use with polymarket_eoa_polygon or composite Safe presets.
+
+name: Polymarket CLOB Auth Signature (JS)
+variables:
+  - name: clob_auth_domain_name
+    type: string
+    description: "ClobAuth EIP-712 domain name"
+    required: true
+  - name: clob_auth_domain_version
+    type: string
+    description: "ClobAuth EIP-712 domain version"
+    required: true
+  - name: allowed_safe_address
+    type: address
+    description: "Allowed Safe address for ClobAuth test payloads"
+    required: false
+    default: ""
+test_variables:
+  chain_id: "137"
+  clob_auth_domain_name: "ClobAuthDomain"
+  clob_auth_domain_version: "1"
+  allowed_safe_address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+rules:
+  - id: "polymarket-clob-auth-js"
+    name: "Polymarket CLOB Auth Signature (JS)"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate ClobAuth signatures for Polymarket API key authentication"
+    config:
+      sign_type_filter: "typed_data"
+      description: "ClobAuth login signature with domain and message validation"
+      script: |
+        // ClobAuth is a login attestation, not a transfer: it authorises the CLOB
+        // API to issue an API key for this wallet. The only thing standing between
+        // "log me in" and "sign whatever the site asks" is that the attestation
+        // text is fixed, so compare it exactly — no prefix/substring matching.
+        var ATTESTATION = 'This message attests that I control the given wallet';
+
+        function validate(input) {
+          var ctx = rs.typedData.require(input, 'ClobAuth');
+
+          // ClobAuth's domain carries no verifyingContract (it is not bound to a
+          // contract), so requireVerifyingContract must be false — the helper
+          // defaults to true and would reject every genuine login.
+          rs.typedData.requireDomain(ctx.domain, {
+            name: config.clob_auth_domain_name,
+            version: config.clob_auth_domain_version,
+            chainId: parseInt(config.chain_id, 10),
+            requireVerifyingContract: false
+          }, 'must be on Polygon');
+
+          var msg = ctx.message || {};
+          var text = (msg.message === null || msg.message === undefined) ? '' : String(msg.message);
+          require(text === ATTESTATION, 'invalid attestation message');
+
+          return ok();
+        }
+    test_cases:
+      - name: "should pass valid ClobAuth"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "${clob_auth_domain_name}"
+              version: "${clob_auth_domain_version}"
+              chainId: "${chain_id}"
+            message:
+              address: "${allowed_safe_address}"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: true
+      - name: "should reject invalid domain"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "WrongDomain"
+              version: "${clob_auth_domain_version}"
+              chainId: "${chain_id}"
+            message:
+              address: "${allowed_safe_address}"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: false
+        expect_reason: "invalid domain name"
+      - name: "should reject invalid domain version"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "${clob_auth_domain_name}"
+              version: "99"
+              chainId: "${chain_id}"
+            message:
+              address: "${allowed_safe_address}"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: false
+        expect_reason: "invalid domain version"
+      - name: "should reject wrong chainId"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "${clob_auth_domain_name}"
+              version: "${clob_auth_domain_version}"
+              chainId: "56"
+            message:
+              address: "${allowed_safe_address}"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: false
+        expect_reason: "must be on Polygon"
+      - name: "should reject tampered attestation message"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "${clob_auth_domain_name}"
+              version: "${clob_auth_domain_version}"
+              chainId: "${chain_id}"
+            message:
+              address: "${allowed_safe_address}"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet and approve all transfers"
+        expect_pass: false
+        expect_reason: "invalid attestation message"
+      - name: "should reject a different primaryType"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "${clob_auth_domain_name}"
+              version: "${clob_auth_domain_version}"
+              chainId: "${chain_id}"
+            message:
+              message: "This message attests that I control the given wallet"
+        expect_pass: false
+        expect_reason: "not ClobAuth"

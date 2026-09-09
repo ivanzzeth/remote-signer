@@ -4,14 +4,16 @@
 # 2026-09-09 已把 solidity 改成 opt-in、默认关。棘轮保证这次迁移不会停在半路,
 # 更不会反向长回去。
 #
-# ⚠️ rules_declarations 这个数字有个刺眼的含义:出厂配置默认关着 solidity,
-# 而 rules/ 里还有 73 条真实的 solidity 规则声明 —— 带它们的模板在默认配置下装不上。
-# presets_needing_forge 是那件事的终点线:降到 0,solidity 引擎才真的能删。
+# ✅ presets_needing_forge 已经是 0(2026-09-09):没有任何出厂 preset 还需要 forge。
+#    polymarket_eoa_polygon → evm/polymarket + evm/safe(复用已验证的 JS 规则)
+#    polymarket_v2_eoa_polygon → evm/polymarket_auth_js + evm/polymarket_v2
+#    predict_eoa_bnb → evm/predict_*_js(其 _js 孪生 preset 已删)
+#    ⛔ 它只许留在 0。涨回去 = 又有出厂 preset 在默认配置下装不上。
 #
-# 今天的 3 个:polymarket_eoa_polygon / polymarket_v2_eoa_polygon / predict_eoa_bnb。
-# 其余 25 个出厂 preset 已经是纯 evm_js;predict_eoa_bnb 甚至已经有 _js 版可参照。
+# ⚠️ rules_declarations 仍有 73 条:那些 solidity 模板文件还在树里(有人可能直接
+#    引用),只是没有出厂 preset 依赖它们了。它降到 0 的那天,solidity 引擎才能删。
 
 solidity_lines         4162   # arch_prod_files internal | grep solidity 的总行数
 solidity_files           11   # 同上的文件数
 rules_declarations       73   # rules/ 下 `type: evm_solidity_expression` 的声明数(不是提及数)
-presets_needing_forge     3   # 引用了带 solidity 模板、因而默认配置下装不上的出厂 preset
+presets_needing_forge     0   # 引用了带 solidity 模板、因而默认配置下装不上的出厂 preset
