@@ -105,8 +105,10 @@ chains:
       #     path: "/secrets/keystore.json"
       #     password_env: "KEYSTORE_PASSWORD"
       #     enabled: true
+    # Solidity expression rules — opt-in. Leaving this false (the default) keeps
+    # `forge script` out of the process that holds the keys. See docs/configuration.md.
     foundry:
-      enabled: true
+      enabled: false
       forge_path: ""
       cache_dir: "./data/forge-cache"
       timeout: "30s"

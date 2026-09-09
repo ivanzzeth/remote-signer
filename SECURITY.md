@@ -76,7 +76,8 @@ The two-tier rule engine (blocklist → whitelist) is the core authorization bou
 - 13+ blocked global APIs (eval, Function, fetch, setTimeout, Reflect, Proxy, etc.)
 - Only `input` (parsed request), `config` (variables), and helpers exposed
 
-**Solidity rules** (Foundry):
+**Solidity rules** (Foundry) — **off by default**, opt in with `chains.evm.foundry.enabled: true`:
+- Disabled by default because evaluation forks `forge script` (Solidity compiler + EVM) inside the key-holding process, on the signing path. The mitigations below apply once you opt in; not running the subprocess at all is the stronger control
 - Static analysis blocks 24 dangerous patterns pre-execution (vm.ffi, vm.readFile, vm.envOr, etc.)
 - Runtime: `FOUNDRY_FFI=false`, `FOUNDRY_FS_PERMISSIONS=[]`, 30s timeout
 - Temporary file cleanup after execution

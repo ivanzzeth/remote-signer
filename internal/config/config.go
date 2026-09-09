@@ -222,18 +222,38 @@ type SignerMaterialCheckConfig struct {
 	Interval     time.Duration `yaml:"interval"`
 }
 
-// FoundryConfig contains Foundry (forge) configuration for Solidity rules
+// FoundryConfig contains Foundry (forge) configuration for Solidity rules.
+//
+// Solidity expression rules are an OPT-IN feature. Leaving this block out
+// disables them; there is no auto-detection.
 type FoundryConfig struct {
-	Enabled   *bool         `yaml:"enabled"`    // nil = auto-detect (default), true = enable, false = explicitly disable
+	Enabled   *bool         `yaml:"enabled"`    // nil or false = disabled (default), true = opt in
 	ForgePath string        `yaml:"forge_path"` // path to forge binary, empty = auto-detect from PATH
 	CacheDir  string        `yaml:"cache_dir"`  // cache directory for compiled scripts
 	TempDir   string        `yaml:"temp_dir"`   // workspace dir for rule scripts and lib/forge-std; empty = os.TempDir()/remote-signer-rules. For Docker, set to /app/data/forge-workspace and mount repo data/forge-workspace.
 	Timeout   time.Duration `yaml:"timeout"`    // max execution time per rule (default: 30s)
 }
 
-// FoundryEnabled returns true if Foundry is not explicitly disabled.
+// FoundryEnabled reports whether Solidity expression rules are turned on.
+//
+// It is OPT-IN: nil (block absent) means disabled. This used to be
+// auto-detect — "forge is on PATH, so enable it" — which made the feature
+// switch itself on based on what happened to be installed on the host.
+// Two reasons that default was wrong:
+//
+//   - Evaluating one of these rules forks `forge script`, compiling Solidity
+//     and running an EVM, INSIDE the daemon that holds the private keys, ON
+//     the signing path. That is hundreds of milliseconds to seconds per
+//     signature, and it pulls forge's whole attack surface into the one
+//     process that must not be compromised.
+//   - Auto-detect makes the deployment non-reproducible: the same config and
+//     the same binary give a different rule engine on a machine that happens
+//     to have foundryup installed.
+//
+// evm_js (sobek, in-process, no subprocess) covers the same ground and is the
+// intended path; see docs/rule-syntax.md.
 func (f FoundryConfig) FoundryEnabled() bool {
-	return f.Enabled == nil || *f.Enabled
+	return f.Enabled != nil && *f.Enabled
 }
 
 // SimulationConfig contains transaction simulation engine configuration.

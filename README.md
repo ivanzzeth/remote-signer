@@ -21,11 +21,22 @@ A secure, policy-driven signing service for EVM chains. Controls **what** gets s
 | **Go SDK** | `pkg/client` — resource-based Go client (`client.EVM.Sign.Execute`, `client.Templates.Get`, etc.) |
 | **Rust SDK** | `pkg/rs-client` — native Rust client with Ed25519 authentication |
 
-### Solidity Expression Rules
+### Solidity Expression Rules (opt-in, off by default)
 
-The `evm_solidity_expression` rule type requires **forge** (Foundry) to compile and evaluate Solidity expressions at sign-time. If forge is unavailable, the server starts without Solidity support, and all Solidity rule operations (create, update, instantiate, preset apply) return HTTP 503.
+The `evm_solidity_expression` rule type is **disabled unless you turn it on** with
+`chains.evm.foundry.enabled: true`. While it is off, all Solidity rule operations
+(create, update, instantiate, preset apply) return HTTP 503, and a config that
+still declares an enabled Solidity rule aborts startup rather than run with a rule
+it cannot evaluate.
 
-**Install forge:**
+It is opt-in because evaluating one of these rules forks `forge script` — compiling
+Solidity and running an EVM — inside the daemon that holds your private keys, on the
+signing path. That costs hundreds of milliseconds to seconds per signature and puts
+forge's attack surface in the one process that must not be compromised.
+[`evm_js`](docs/rule-syntax.md#rule-type-evm_js) runs in-process, spawns nothing, and
+covers the same ground.
+
+**If you do opt in, install forge:**
 
 ```bash
 # Recommended: foundryup (macOS, Linux, WSL)

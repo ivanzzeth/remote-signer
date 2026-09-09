@@ -230,6 +230,17 @@ These are reserved by the Solidity language:
 
 ## Rule Type: `evm_solidity_expression`
 
+> **Off by default — opt in with `chains.evm.foundry.enabled: true`.**
+>
+> Evaluating one of these rules forks `forge script`, compiling Solidity and
+> running an EVM, inside the daemon that holds the private keys, on the signing
+> path: hundreds of milliseconds to seconds per signature, and forge's attack
+> surface lands in the one process that must not be compromised.
+>
+> [`evm_js`](#rule-type-evm_js) runs in-process (sobek), spawns nothing, and
+> covers the same ground. Prefer it for anything new; port existing rules when
+> you touch them.
+
 Foundry-based Solidity expression rules. Validate signing requests by generating and executing Solidity code via Forge.
 
 ### Config Schema

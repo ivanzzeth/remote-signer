@@ -223,7 +223,9 @@ func Run(args []string) error {
 	if solidityEval == nil {
 		for _, r := range expandedRulesWithFiles {
 			if r.Type == string(types.RuleTypeEVMSolidityExpression) && r.Enabled {
-				return fmt.Errorf("config contains enabled evm_solidity_expression rule %q but Foundry is unavailable; install forge (brew install foundry / foundryup) or remove the rule", r.Name)
+				return fmt.Errorf("config contains enabled evm_solidity_expression rule %q but the Solidity rule engine is off; "+
+					"it is opt-in — set chains.evm.foundry.enabled: true (and install forge: brew install foundry / foundryup), "+
+					"or port the rule to evm_js, or disable it", r.Name)
 			}
 		}
 		// Warn about DB rules too — API may have created solidity rules
@@ -234,7 +236,7 @@ func Run(args []string) error {
 		} else {
 			for _, r := range dbRules {
 				if r.Type == types.RuleTypeEVMSolidityExpression && r.Enabled {
-					log.Warn("evm_solidity_expression rule exists in DB but Foundry is unavailable; enable forge or disable the rule",
+					log.Warn("evm_solidity_expression rule exists in DB but the Solidity rule engine is off (opt-in: chains.evm.foundry.enabled)",
 						"rule_id", r.ID,
 						"rule_name", r.Name,
 					)

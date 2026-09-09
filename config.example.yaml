@@ -111,10 +111,15 @@ chains:
       batch_window: "1s"                   # accumulation window for future batch sign fallback
       batch_max_size: 20                   # max txs per batch
 
-    # Foundry (forge) for Solidity expression rules. Default: auto-detect from PATH.
-    # Uncomment to explicitly disable, or to override default paths:
+    # Foundry (forge) for evm_solidity_expression rules. OFF by default — opt in.
+    #
+    # Turning this on means every matching signature forks `forge script`,
+    # compiling Solidity and running an EVM inside the process that holds your
+    # private keys: hundreds of ms to seconds per signature, plus forge's
+    # attack surface in the one process that must not be compromised.
+    # Prefer evm_js (sobek, in-process, no subprocess) — see docs/rule-syntax.md.
     #foundry:
-    #  enabled: false
+    #  enabled: true                     # opt in; absent or false = Solidity rules disabled
     #  forge_path: ""                    # empty = auto-detect from PATH
     #  cache_dir: "./data/forge-cache"   # compiled script cache
     #  temp_dir: "./data/forge-workspace"

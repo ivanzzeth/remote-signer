@@ -114,13 +114,20 @@ Keystores and HD wallets can also be created dynamically after server startup vi
 
 ## Foundry
 
-Required for `evm_solidity_expression` rules.
+Required for `evm_solidity_expression` rules, which are **off by default**.
+
+Turning this on means a matching signature forks `forge script` — compiling
+Solidity and running an EVM — inside the daemon that holds the private keys,
+on the signing path. Budget hundreds of milliseconds to seconds per signature,
+and note that it puts forge's attack surface in the one process that must not
+be compromised. `evm_js` (sobek, in-process, no subprocess) covers the same
+ground; see [rule-syntax.md](rule-syntax.md).
 
 ```yaml
 chains:
   evm:
     foundry:
-      enabled: true
+      enabled: true                        # opt in; absent or false = disabled
       forge_path: ""                       # Empty = auto-detect from PATH
       cache_dir: "./data/forge-cache"      # Compiled script cache
       temp_dir: "./data/forge-workspace"   # Workspace with forge-std
@@ -135,13 +142,27 @@ chains:
 | `temp_dir` | string | -- | Workspace directory with forge-std |
 | `timeout` | duration | `30s` | Max execution time per rule evaluation |
 
-### Auto-detection
+### Opting in
 
-When `forge_path` is empty, the server auto-detects `forge` from `$PATH`. If found, the Solidity rule evaluator is enabled automatically.
+`enabled` must be set to `true` explicitly. Omitting the `foundry:` block, or
+setting `enabled: false`, leaves the Solidity rule engine off.
 
-If forge is not found:
+It used to auto-detect: forge on `$PATH` switched the feature on by itself.
+That was dropped because it made the deployment non-reproducible — the same
+config and the same binary produced a different rule engine on a host that
+happened to have run `foundryup` — and because a feature that forks a compiler
+on the signing path should be a decision someone made, not a side effect of
+what is installed.
+
+Once `enabled: true`, `forge_path` still auto-detects from `$PATH` when empty.
+If forge cannot be found:
 - **Auto-detect** (`forge_path: ""`): a warning is logged and the server starts without Solidity support. All Solidity-related API operations (rule creation/update, template instantiation, preset apply) return **503 Service Unavailable**.
 - **Explicit path** (e.g. `forge_path: "/usr/bin/forge"`): a fatal error is raised — the admin explicitly configured a path that doesn't exist.
+
+Startup is **fail-closed** either way: if the engine is off but config or the
+database still holds an enabled `evm_solidity_expression` rule, the config case
+aborts startup rather than run with a rule it cannot evaluate. Silently dropping
+one would be fail-open for a blocklist rule.
 
 Installing forge after startup requires a server restart. Use `foundryup` (recommended) or any other installation method. In the Docker image, `forge` is included via multi-stage build from `ghcr.io/foundry-rs/foundry`.
 

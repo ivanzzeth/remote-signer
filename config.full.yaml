@@ -105,9 +105,12 @@ chains:
       batch_window: "1s"                   # accumulation window for future batch sign fallback
       batch_max_size: 20                   # max txs per batch
 
-    # Foundry configuration for Solidity expression rules
+    # Foundry configuration for evm_solidity_expression rules.
+    # OFF by default (this file shows every knob, so it is spelled out here).
+    # Enabling it forks `forge script` on the signing path, inside the process
+    # that holds the private keys. Prefer evm_js. See docs/rule-syntax.md.
     foundry:
-      enabled: true
+      enabled: false
       forge_path: ""
       cache_dir: "./data/forge-cache"
       temp_dir: "./data/forge-workspace"

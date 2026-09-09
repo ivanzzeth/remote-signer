@@ -6,11 +6,18 @@
 
 面向 EVM 链的安全、策略驱动的签名服务。通过规则引擎控制**签什么**，而不仅是**谁可以签**。
 
-### Solidity 表达式规则
+### Solidity 表达式规则（可选特性，默认关闭）
 
-`evm_solidity_expression` 规则类型需要 **forge**（Foundry）在签名时编译和评估 Solidity 表达式。如果 forge 不可用，服务器启动时将禁用 Solidity 支持，所有 Solidity 规则操作（创建、更新、实例化、预设应用）返回 HTTP 503。
+`evm_solidity_expression` 规则类型**默认关闭**，需显式打开 `chains.evm.foundry.enabled: true`。
+关闭期间所有 Solidity 规则操作（创建、更新、实例化、预设应用）返回 HTTP 503；若配置里仍有
+启用状态的 Solidity 规则，服务器会**拒绝启动**，而不是带着一条求值不了的规则继续跑。
 
-**安装 forge：**
+之所以做成可选：求值一条这样的规则会 fork `forge script`，在**持有私钥的进程里**编译 Solidity
+并跑一个 EVM，而且就在签名路径上——每笔签名几百毫秒到秒级，同时把 forge 的攻击面拉进了那个
+最不该被攻破的进程。[`evm_js`](docs/rule-syntax.md#rule-type-evm_js) 在进程内跑（sobek），
+不 fork 任何子进程，能力覆盖相同。
+
+**确实要打开的话，安装 forge：**
 
 ```bash
 # 推荐：foundryup（macOS、Linux、WSL）
