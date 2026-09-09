@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"gorm.io/gorm"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
@@ -155,7 +157,7 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.list(w, r)
 			return
 		}
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 	// Detect known sub-actions. Anything matching
@@ -173,12 +175,12 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := url.PathUnescape(encodedID)
 	if err != nil {
-		h.writeError(w, "invalid preset id", http.StatusBadRequest)
+		respond.Error(w, "invalid preset id", http.StatusBadRequest, h.logger)
 		return
 	}
 	if sub == "" {
 		if r.Method != http.MethodGet {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		h.detail(w, r, id)
@@ -186,7 +188,7 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if sub == "apply" {
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		h.apply(w, r, id)
@@ -194,17 +196,17 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if sub == "validate" {
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		if !middleware.GetAPIKey(r.Context()).IsAdmin() {
-			h.writeError(w, "forbidden: admin role required", http.StatusForbidden)
+			respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
 			return
 		}
 		h.validatePreset(w, r, id)
 		return
 	}
-	h.writeError(w, "not found", http.StatusNotFound)
+	respond.Error(w, "not found", http.StatusNotFound, h.logger)
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +229,7 @@ func (h *PresetHandler) list(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.presetRepo.List(r.Context(), storage.PresetFilter{})
 	if err != nil {
 		h.logger.Error("list presets failed", "error", err)
-		h.writeError(w, "failed to list presets", http.StatusInternalServerError)
+		respond.Error(w, "failed to list presets", http.StatusInternalServerError, h.logger)
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -248,7 +250,7 @@ func (h *PresetHandler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	h.writeJSON(w, map[string]interface{}{"presets": out}, http.StatusOK)
+	respond.JSON(w, map[string]interface{}{"presets": out}, http.StatusOK, h.logger)
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +288,7 @@ type PresetDetailResponse struct {
 func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string) {
 	p, err := h.presetRepo.Get(r.Context(), id)
 	if err != nil {
-		h.writeError(w, "preset not found", http.StatusNotFound)
+		respond.Error(w, "preset not found", http.StatusNotFound, h.logger)
 		return
 	}
 
@@ -320,7 +322,7 @@ func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string
 		out = append(out, entry)
 	}
 
-	h.writeJSON(w, PresetDetailResponse{
+	respond.JSON(w, PresetDetailResponse{
 		ID:          p.ID,
 		Name:        p.Name,
 		Description: p.Description,
@@ -330,7 +332,8 @@ func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string
 		TemplateIDs: templateIDs,
 		Variables:   out,
 		Matrix:      p.Matrix,
-	}, http.StatusOK)
+	}, http.StatusOK, h.logger)
+
 }
 
 // collectTemplateVarDefs looks up each template_id in the repo and
@@ -383,19 +386,19 @@ type validatePresetResponse struct {
 // each rule's test cases through the JS evaluator.
 func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, id string) {
 	if h.jsEvaluator == nil {
-		h.writeError(w, "JS evaluator not available", http.StatusServiceUnavailable)
+		respond.Error(w, "JS evaluator not available", http.StatusServiceUnavailable, h.logger)
 		return
 	}
 
 	p, err := h.presetRepo.Get(r.Context(), id)
 	if err != nil {
-		h.writeError(w, "preset not found", http.StatusNotFound)
+		respond.Error(w, "preset not found", http.StatusNotFound, h.logger)
 		return
 	}
 
 	templateIDs, err := decodeStringSlice(p.TemplateIDs)
 	if err != nil || len(templateIDs) == 0 {
-		h.writeError(w, "preset has no template_ids", http.StatusBadRequest)
+		respond.Error(w, "preset has no template_ids", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -488,7 +491,7 @@ func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, i
 		Passed:     totalPassed,
 		Failed:     totalFailed,
 	}
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // runTemplateValidation runs test cases via the shared ValidateTemplateConfig path.
@@ -516,35 +519,35 @@ type ApplyPresetRequest struct {
 func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil || !middleware.HasPermission(apiKey.Role, middleware.PermApplyPreset) {
-		h.writeError(w, "forbidden: apply_preset permission required", http.StatusForbidden)
+		respond.Error(w, "forbidden: apply_preset permission required", http.StatusForbidden, h.logger)
 		return
 	}
 	if h.readOnly {
-		h.writeError(w, "preset apply is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "preset apply is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 	if h.templateSvc == nil {
-		h.writeError(w, "template service not configured", http.StatusServiceUnavailable)
+		respond.Error(w, "template service not configured", http.StatusServiceUnavailable, h.logger)
 		return
 	}
 	if h.db == nil {
-		h.writeError(w, "database not configured for preset apply", http.StatusServiceUnavailable)
+		respond.Error(w, "database not configured for preset apply", http.StatusServiceUnavailable, h.logger)
 		return
 	}
 	p, err := h.presetRepo.Get(r.Context(), id)
 	if err != nil {
-		h.writeError(w, "preset not found", http.StatusNotFound)
+		respond.Error(w, "preset not found", http.StatusNotFound, h.logger)
 		return
 	}
 	if !p.Enabled {
-		h.writeError(w, "preset is disabled", http.StatusBadRequest)
+		respond.Error(w, "preset is disabled", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	var body ApplyPresetRequest
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			h.writeError(w, fmt.Sprintf("invalid request body: %s", err.Error()), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("invalid request body: %s", err.Error()), http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -554,7 +557,7 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 
 	templateIDs, err := decodeStringSlice(p.TemplateIDs)
 	if err != nil || len(templateIDs) == 0 {
-		h.writeError(w, "preset has no template_ids", http.StatusBadRequest)
+		respond.Error(w, "preset has no template_ids", http.StatusBadRequest, h.logger)
 		return
 	}
 	presetVars, _ := decodeStringMap(p.Variables)
@@ -568,7 +571,7 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 			continue
 		}
 		if v, ok := body.Variables[ov.Name]; !ok || v == "" {
-			h.writeError(w, fmt.Sprintf("required override %q not supplied", ov.Name), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("required override %q not supplied", ov.Name), http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -581,7 +584,7 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 				continue
 			}
 			if templateContainsSolidity(tmpl) {
-				h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
+				respond.Error(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable, h.logger)
 				return
 			}
 		}
@@ -615,14 +618,14 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	// ⚠️ 原写的 //nolint:staticcheck 是 golangci-lint 语法,staticcheck 不认 —— 等于没抑制。
 	budgetBytes, err := service.SubstituteVariables(p.Budget, mergedVarsStrings)
 	if err != nil {
-		h.writeError(w, fmt.Sprintf("substitute preset budget: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("substitute preset budget: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 	//lint:ignore SA1019 R8 迁移未完成:SubstituteTyped 需要 []types.TemplateVariable 定义,不是 drop-in。
 	// ⚠️ 原写的 //nolint:staticcheck 是 golangci-lint 语法,staticcheck 不认 —— 等于没抑制。
 	scheduleBytes, err := service.SubstituteVariables(p.Schedule, mergedVarsStrings)
 	if err != nil {
-		h.writeError(w, fmt.Sprintf("substitute preset schedule: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("substitute preset schedule: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 	budget, _ := decodeAnyMap(budgetBytes)
@@ -630,11 +633,11 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 
 	// FORCED VALIDATION — see validation_mandatory.go. Do not restore optional skip.
 	if body.SkipValidation {
-		h.writeError(w, errSkipValidationForbidden, http.StatusBadRequest)
+		respond.Error(w, errSkipValidationForbidden, http.StatusBadRequest, h.logger)
 		return
 	}
 	if h.jsEvaluator == nil {
-		h.writeError(w, "test case validation required for preset apply but JS evaluator is unavailable", http.StatusServiceUnavailable)
+		respond.Error(w, "test case validation required for preset apply but JS evaluator is unavailable", http.StatusServiceUnavailable, h.logger)
 		return
 	}
 	// Previously (REMOVED — fund-loss risk):
@@ -673,7 +676,7 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 					failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
 				}
 			}
-			h.writeError(w, fmt.Sprintf("preset %q: test case validation failed for template %q: %s", id, tid, strings.Join(failures, "; ")), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("preset %q: test case validation failed for template %q: %s", id, tid, strings.Join(failures, "; ")), http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -687,14 +690,14 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	// the entire point of a multi-template preset.
 	resolved, err := h.resolveInstances(r.Context(), apiKey, body.AppliedTo, p, templateIDs, mergedVars, budget, schedule)
 	if err != nil {
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 		return
 	}
 
 	results, err := h.commitInstances(r.Context(), resolved)
 	if err != nil {
 		h.logger.Error("preset apply failed", "error", err, "preset_id", id)
-		h.writeError(w, fmt.Sprintf("preset apply failed: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("preset apply failed: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -707,7 +710,7 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 		h.auditLogger.LogPresetApplied(r.Context(), apiKeyID, clientIP, id, len(results))
 	}
 
-	h.writeJSON(w, map[string]interface{}{"results": results}, http.StatusCreated)
+	respond.JSON(w, map[string]interface{}{"results": results}, http.StatusCreated, h.logger)
 }
 
 type resolvedInstance struct {
@@ -971,19 +974,3 @@ func strPtrIfNotEmpty(s string) *string {
 // ---------------------------------------------------------------------------
 // Response helpers
 // ---------------------------------------------------------------------------
-
-func (h *PresetHandler) writeError(w http.ResponseWriter, message string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if _, err := w.Write([]byte(fmt.Sprintf(`{"error":%q}`, message))); err != nil {
-		h.logger.Error("write error response failed", "error", err)
-	}
-}
-
-func (h *PresetHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("write JSON failed", "error", err)
-	}
-}

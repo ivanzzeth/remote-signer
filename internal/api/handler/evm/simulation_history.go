@@ -4,12 +4,13 @@
 package evm
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -59,12 +60,12 @@ type SimulationHistoryItem struct {
 // ServeHTTP handles GET /api/v1/evm/simulations.
 func (h *SimulationHistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -91,7 +92,7 @@ func (h *SimulationHistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	rows, hasMore, err := h.simRepo.List(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("list simulations failed", slog.String("error", err.Error()))
-		h.writeError(w, "list failed", http.StatusInternalServerError)
+		respond.Error(w, "list failed", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -120,7 +121,7 @@ func (h *SimulationHistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		resp.NextCursorID = last.SignRequestID
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func parseIntDefault(s string, def int) int {
@@ -132,16 +133,4 @@ func parseIntDefault(s string, def int) int {
 		return def
 	}
 	return n
-}
-
-func (h *SimulationHistoryHandler) writeError(w http.ResponseWriter, msg string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func (h *SimulationHistoryHandler) writeJSON(w http.ResponseWriter, body any, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }

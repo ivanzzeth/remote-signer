@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
@@ -116,15 +118,15 @@ type jsonRPCError struct {
 // fault.
 func (h *RPCProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeHTTPError(w, http.StatusMethodNotAllowed, "method not allowed: use POST")
+		respond.Error(w, "method not allowed: use POST", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	chainID := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/rpc/")
 	chainID = strings.TrimSuffix(chainID, "/")
 	if chainID == "" || strings.Contains(chainID, "/") {
-		h.writeHTTPError(w, http.StatusBadRequest,
-			"chain id is required: POST /api/v1/evm/rpc/{chainID}")
+		respond.Error(w, "chain id is required: POST /api/v1/evm/rpc/{chainID}", http.StatusBadRequest, h.logger)
+
 		return
 	}
 
@@ -133,8 +135,8 @@ func (h *RPCProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Pre-envelope failure — body isn't JSON-RPC, so we can't
 		// reflect an id back. Surface as an HTTP-level 400 so curl
 		// users get a sensible signal too.
-		h.writeHTTPError(w, http.StatusBadRequest,
-			fmt.Sprintf("invalid JSON-RPC body: %s", err))
+		respond.Error(w, fmt.Sprintf("invalid JSON-RPC body: %s", err), http.StatusBadRequest, h.logger)
+
 		return
 	}
 	if body.Method == "" {
@@ -178,11 +180,11 @@ func (h *RPCProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.recordBroadcastAsync(chainID, body.Params)
 	}
 
-	h.writeJSON(w, jsonRPCEnvelope{
+	respond.JSON(w, jsonRPCEnvelope{
 		JSONRPC: "2.0",
 		ID:      body.ID,
 		Result:  result,
-	}, http.StatusOK)
+	}, http.StatusOK, h.logger)
 
 }
 
@@ -222,26 +224,10 @@ func (h *RPCProxyHandler) recordBroadcastAsync(chainID string, params []interfac
 func (h *RPCProxyHandler) writeRPCError(
 	w http.ResponseWriter, id json.RawMessage, code int, msg string,
 ) {
-	h.writeJSON(w, jsonRPCEnvelope{
+	respond.JSON(w, jsonRPCEnvelope{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error:   &jsonRPCError{Code: code, Message: msg},
-	}, http.StatusOK)
+	}, http.StatusOK, h.logger)
 
-}
-
-// writeHTTPError emits a daemon-flat `{"error":"..."}` body matching
-// the SDK transport's error contract for genuine transport faults
-// (wrong HTTP method, malformed body) — these aren't JSON-RPC at
-// all, so use the standard daemon error shape.
-func (h *RPCProxyHandler) writeHTTPError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func (h *RPCProxyHandler) writeJSON(w http.ResponseWriter, body jsonRPCEnvelope, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }

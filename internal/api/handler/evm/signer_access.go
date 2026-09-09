@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 )
 
@@ -18,12 +20,12 @@ func (h *SignerHandler) handleGrantAccess(w http.ResponseWriter, r *http.Request
 
 	var req GrantAccessRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	if req.APIKeyID == "" {
-		h.writeError(w, "api_key_id is required", http.StatusBadRequest)
+		respond.Error(w, "api_key_id is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -32,11 +34,11 @@ func (h *SignerHandler) handleGrantAccess(w http.ResponseWriter, r *http.Request
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, err.Error(), http.StatusForbidden)
+		respond.Error(w, err.Error(), http.StatusForbidden, h.logger)
 		return
 	}
 
-	h.writeJSON(w, map[string]string{"status": "granted", "signer_address": address, "api_key_id": req.APIKeyID}, http.StatusOK)
+	respond.JSON(w, map[string]string{"status": "granted", "signer_address": address, "api_key_id": req.APIKeyID}, http.StatusOK, h.logger)
 }
 
 // handleRevokeAccess handles DELETE /api/v1/evm/signers/{address}/access/{keyID}
@@ -48,11 +50,11 @@ func (h *SignerHandler) handleRevokeAccess(w http.ResponseWriter, r *http.Reques
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, err.Error(), http.StatusForbidden)
+		respond.Error(w, err.Error(), http.StatusForbidden, h.logger)
 		return
 	}
 
-	h.writeJSON(w, map[string]string{"status": "revoked", "signer_address": address, "api_key_id": keyID}, http.StatusOK)
+	respond.JSON(w, map[string]string{"status": "revoked", "signer_address": address, "api_key_id": keyID}, http.StatusOK, h.logger)
 }
 
 // handleListAccess handles GET /api/v1/evm/signers/{address}/access
@@ -65,7 +67,7 @@ func (h *SignerHandler) handleListAccess(w http.ResponseWriter, r *http.Request,
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, err.Error(), http.StatusForbidden)
+		respond.Error(w, err.Error(), http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -78,5 +80,5 @@ func (h *SignerHandler) handleListAccess(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }

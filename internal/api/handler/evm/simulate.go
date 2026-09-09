@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"net/http"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
@@ -109,30 +111,30 @@ type SimulateResultJSON struct {
 // ServeHTTP handles POST /api/v1/evm/simulate.
 func (h *SimulateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	var req SimulateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	if req.ChainID == "" || !validate.IsValidChainID(req.ChainID) {
-		h.writeError(w, "chain_id is required and must be a positive decimal integer", http.StatusBadRequest)
+		respond.Error(w, "chain_id is required and must be a positive decimal integer", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.From == "" || !validate.IsValidEthereumAddress(req.From) {
-		h.writeError(w, "from is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest)
+		respond.Error(w, "from is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.To == "" || !validate.IsValidEthereumAddress(req.To) {
-		h.writeError(w, "to is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest)
+		respond.Error(w, "to is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.Data != "" && !validate.IsValidHexData(req.Data) {
-		h.writeError(w, "data must be valid 0x-prefixed hex calldata", http.StatusBadRequest)
+		respond.Error(w, "data must be valid 0x-prefixed hex calldata", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -148,7 +150,7 @@ func (h *SimulateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result, err := h.simulator.Simulate(r.Context(), simReq)
 	if err != nil {
 		h.logger.Error("simulation failed", "chain_id", req.ChainID, "from", req.From, "error", err)
-		h.writeError(w, "simulation failed: "+err.Error(), http.StatusInternalServerError)
+		respond.Error(w, "simulation failed: "+err.Error(), http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -168,7 +170,7 @@ func (h *SimulateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RevertArgs:       result.RevertArgs,
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // maxBatchSimulateSize is the maximum number of transactions in a single batch simulate request.
@@ -178,41 +180,41 @@ const maxBatchSimulateSize = 20
 // ServeBatchHTTP handles POST /api/v1/evm/simulate/batch.
 func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	var req BatchSimulateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	if req.ChainID == "" || !validate.IsValidChainID(req.ChainID) {
-		h.writeError(w, "chain_id is required and must be a positive decimal integer", http.StatusBadRequest)
+		respond.Error(w, "chain_id is required and must be a positive decimal integer", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.From == "" || !validate.IsValidEthereumAddress(req.From) {
-		h.writeError(w, "from is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest)
+		respond.Error(w, "from is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest, h.logger)
 		return
 	}
 	if len(req.Transactions) == 0 {
-		h.writeError(w, "transactions is required and must not be empty", http.StatusBadRequest)
+		respond.Error(w, "transactions is required and must not be empty", http.StatusBadRequest, h.logger)
 		return
 	}
 	if len(req.Transactions) > maxBatchSimulateSize {
-		h.writeError(w, fmt.Sprintf("batch size %d exceeds maximum %d", len(req.Transactions), maxBatchSimulateSize), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("batch size %d exceeds maximum %d", len(req.Transactions), maxBatchSimulateSize), http.StatusBadRequest, h.logger)
 		return
 	}
 
 	txs := make([]simulation.TxParams, len(req.Transactions))
 	for i, tx := range req.Transactions {
 		if tx.To == "" || !validate.IsValidEthereumAddress(tx.To) {
-			h.writeError(w, fmt.Sprintf("transactions[%d].to must be a valid 0x-prefixed Ethereum address", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("transactions[%d].to must be a valid 0x-prefixed Ethereum address", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if tx.Data != "" && !validate.IsValidHexData(tx.Data) {
-			h.writeError(w, fmt.Sprintf("transactions[%d].data must be valid 0x-prefixed hex calldata", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("transactions[%d].data must be valid 0x-prefixed hex calldata", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		txs[i] = simulation.TxParams{
@@ -232,7 +234,7 @@ func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request)
 	result, err := h.simulator.SimulateBatch(r.Context(), batchReq)
 	if err != nil {
 		h.logger.Error("batch simulation failed", "chain_id", req.ChainID, "from", req.From, "error", err)
-		h.writeError(w, "batch simulation failed: "+err.Error(), http.StatusInternalServerError)
+		respond.Error(w, "batch simulation failed: "+err.Error(), http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -261,18 +263,18 @@ func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request)
 		NetBalanceChanges: toBalanceChangeJSON(result.NetBalanceChanges),
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // ServeStatusHTTP handles GET /api/v1/evm/simulate/status.
 func (h *SimulateHandler) ServeStatusHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	status := h.simulator.Status(r.Context())
-	h.writeJSON(w, status, http.StatusOK)
+	respond.JSON(w, status, http.StatusOK, h.logger)
 }
 
 // toBalanceChangeJSON converts simulation BalanceChange to JSON-friendly format.
@@ -298,16 +300,4 @@ func bigIntToString(n *big.Int) string {
 		return "0"
 	}
 	return n.String()
-}
-
-func (h *SimulateHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *SimulateHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }

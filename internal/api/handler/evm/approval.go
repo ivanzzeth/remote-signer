@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -72,14 +74,14 @@ type PreviewRuleAPIRequest struct {
 // ServeHTTP handles POST /api/v1/evm/requests/{id}/approve
 func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -87,7 +89,7 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Expected: /api/v1/evm/requests/{id}/approve
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 6 {
-		h.writeError(w, "invalid path", http.StatusBadRequest)
+		respond.Error(w, "invalid path", http.StatusBadRequest, h.logger)
 		return
 	}
 	requestID := parts[len(parts)-2] // {id} is second to last
@@ -96,7 +98,7 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req ApprovalAPIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Warn("failed to decode approval request", "error", err, "path", r.URL.Path)
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -104,18 +106,18 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	signReq, err := h.signService.GetRequest(r.Context(), types.SignRequestID(requestID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "request not found", http.StatusNotFound)
+			respond.Error(w, "request not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get request", "error", err)
-		h.writeError(w, "failed to get request", http.StatusInternalServerError)
+		respond.Error(w, "failed to get request", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	ownership, err := h.accessService.GetOwnership(r.Context(), signReq.SignerAddress)
 	if err != nil {
 		h.logger.Error("failed to get signer ownership", "signer", signReq.SignerAddress, "error", err)
-		h.writeError(w, "failed to verify signer ownership", http.StatusInternalServerError)
+		respond.Error(w, "failed to verify signer ownership", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -132,14 +134,14 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"signer_owner", ownership.OwnerID,
 				"signer_address", signReq.SignerAddress,
 			)
-			h.writeError(w, "not authorized: only the signer owner can approve requests", http.StatusForbidden)
+			respond.Error(w, "not authorized: only the signer owner can approve requests", http.StatusForbidden, h.logger)
 			return
 		}
 	}
 
 	// Block auto-rule creation when rules API is readonly
 	if req.RuleType != "" && h.rulesReadOnly {
-		h.writeError(w, "auto-rule creation during approval is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "auto-rule creation during approval is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -147,21 +149,21 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var ruleOpts *rule.RuleGenerateOptions
 	if req.RuleType != "" {
 		if !validate.IsValidRuleType(req.RuleType) {
-			h.writeError(w, "invalid rule_type", http.StatusBadRequest)
+			respond.Error(w, "invalid rule_type", http.StatusBadRequest, h.logger)
 			return
 		}
 		if req.RuleMode != "" {
 			if err := validate.ValidateRuleMode(req.RuleMode); err != nil {
-				h.writeError(w, err.Error(), http.StatusBadRequest)
+				respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 				return
 			}
 		}
 		if len(req.RuleName) > 255 {
-			h.writeError(w, "rule_name must be at most 255 characters", http.StatusBadRequest)
+			respond.Error(w, "rule_name must be at most 255 characters", http.StatusBadRequest, h.logger)
 			return
 		}
 		if req.MaxValue != "" && !validate.IsValidWeiDecimal(req.MaxValue) {
-			h.writeError(w, "max_value must be a non-empty decimal string", http.StatusBadRequest)
+			respond.Error(w, "max_value must be a non-empty decimal string", http.StatusBadRequest, h.logger)
 			return
 		}
 		ruleOpts = &rule.RuleGenerateOptions{
@@ -185,7 +187,7 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("failed to process approval", "error", err, "request_id", requestID)
 		if errors.Is(err, service.ErrApprovalConflict) {
-			h.writeError(w, err.Error(), http.StatusConflict)
+			respond.Error(w, err.Error(), http.StatusConflict, h.logger)
 			return
 		}
 		// A locked signer is an operator-actionable state, not an internal
@@ -193,10 +195,10 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// prompt the user to unlock before retrying. Any wording containing
 		// "is locked" comes from chain adapters' GetSigner path.
 		if strings.Contains(err.Error(), "is locked") {
-			h.writeError(w, "signer is locked — unlock it before approving", http.StatusLocked)
+			respond.Error(w, "signer is locked — unlock it before approving", http.StatusLocked, h.logger)
 			return
 		}
-		h.writeError(w, "failed to process approval", http.StatusInternalServerError)
+		respond.Error(w, "failed to process approval", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -214,7 +216,7 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		approvalResp.SignedData = fmt.Sprintf("0x%x", resp.SignResponse.SignedData)
 	}
 
-	h.writeJSON(w, approvalResp, http.StatusOK)
+	respond.JSON(w, approvalResp, http.StatusOK, h.logger)
 }
 
 // PreviewRuleHandler handles POST /api/v1/evm/requests/{id}/preview-rule
@@ -240,14 +242,14 @@ func NewPreviewRuleHandler(signService service.SignServiceAPI, logger *slog.Logg
 // ServeHTTP handles POST /api/v1/evm/requests/{id}/preview-rule
 func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -255,7 +257,7 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Expected: /api/v1/evm/requests/{id}/preview-rule
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 6 {
-		h.writeError(w, "invalid path", http.StatusBadRequest)
+		respond.Error(w, "invalid path", http.StatusBadRequest, h.logger)
 		return
 	}
 	requestID := parts[len(parts)-2] // {id} is second to last
@@ -264,33 +266,33 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req PreviewRuleAPIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Warn("failed to decode preview-rule request", "error", err, "path", r.URL.Path)
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate required fields and formats
 	if req.RuleType == "" {
-		h.writeError(w, "rule_type is required", http.StatusBadRequest)
+		respond.Error(w, "rule_type is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if !validate.IsValidRuleType(req.RuleType) {
-		h.writeError(w, "invalid rule_type", http.StatusBadRequest)
+		respond.Error(w, "invalid rule_type", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.RuleMode == "" {
-		h.writeError(w, "rule_mode is required", http.StatusBadRequest)
+		respond.Error(w, "rule_mode is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if err := validate.ValidateRuleMode(req.RuleMode); err != nil {
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 		return
 	}
 	if len(req.RuleName) > 255 {
-		h.writeError(w, "rule_name must be at most 255 characters", http.StatusBadRequest)
+		respond.Error(w, "rule_name must be at most 255 characters", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.MaxValue != "" && !validate.IsValidWeiDecimal(req.MaxValue) {
-		h.writeError(w, "max_value must be a non-empty decimal string", http.StatusBadRequest)
+		respond.Error(w, "max_value must be a non-empty decimal string", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -298,11 +300,11 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	signReq, err := h.signService.GetRequest(r.Context(), types.SignRequestID(requestID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "request not found", http.StatusNotFound)
+			respond.Error(w, "request not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get request", "error", err)
-		h.writeError(w, "failed to get request", http.StatusInternalServerError)
+		respond.Error(w, "failed to get request", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -311,7 +313,7 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// - Everyone else may preview only requests they submitted.
 	if !middleware.HasPermission(apiKey.Role, middleware.PermApproveRequest) &&
 		signReq.APIKeyID != apiKey.ID {
-		h.writeError(w, "not authorized to preview rule for this request", http.StatusForbidden)
+		respond.Error(w, "not authorized to preview rule for this request", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -329,11 +331,11 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	preview, err := h.signService.PreviewRuleForRequest(r.Context(), types.SignRequestID(requestID), ruleOpts)
 	if err != nil {
 		h.logger.Error("failed to preview rule", "error", err, "request_id", requestID)
-		h.writeError(w, previewRuleClientError(err), http.StatusBadRequest)
+		respond.Error(w, previewRuleClientError(err), http.StatusBadRequest, h.logger)
 		return
 	}
 
-	h.writeJSON(w, preview, http.StatusOK)
+	respond.JSON(w, preview, http.StatusOK, h.logger)
 }
 
 // previewRuleClientError maps generator/service failures to operator-facing text.
@@ -355,28 +357,4 @@ func previewRuleClientError(err error) string {
 	default:
 		return "failed to preview rule"
 	}
-}
-
-func (h *PreviewRuleHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *PreviewRuleHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
-}
-
-func (h *ApprovalHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *ApprovalHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }

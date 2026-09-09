@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -19,32 +21,32 @@ func (h *TemplateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request,
 	tmpl, err := h.templateRepo.Get(r.Context(), templateID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "template not found", http.StatusNotFound)
+			respond.Error(w, "template not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get template", "error", err, "template_id", templateID)
-		h.writeError(w, "failed to get template", http.StatusInternalServerError)
+		respond.Error(w, "failed to get template", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	if h.readOnly {
-		h.writeError(w, "template deletion via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "template deletion via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Protect config-sourced templates
 	if tmpl.Source == types.RuleSourceConfig {
-		h.writeError(w, "cannot delete config-sourced templates via API", http.StatusForbidden)
+		respond.Error(w, "cannot delete config-sourced templates via API", http.StatusForbidden, h.logger)
 		return
 	}
 
 	if err := h.templateRepo.Delete(r.Context(), templateID); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "template not found", http.StatusNotFound)
+			respond.Error(w, "template not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to delete template", "error", err, "template_id", templateID)
-		h.writeError(w, "failed to delete template", http.StatusInternalServerError)
+		respond.Error(w, "failed to delete template", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -54,13 +56,13 @@ func (h *TemplateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request,
 
 func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Request, templateID string) {
 	if h.readOnly {
-		h.writeError(w, "template instantiation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "template instantiation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	var req InstantiateTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -81,7 +83,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	if req.ExpiresIn != nil {
 		d, err := time.ParseDuration(*req.ExpiresIn)
 		if err != nil {
-			h.writeError(w, fmt.Sprintf("invalid expires_in duration: %s", *req.ExpiresIn), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("invalid expires_in duration: %s", *req.ExpiresIn), http.StatusBadRequest, h.logger)
 			return
 		}
 		instanceReq.ExpiresIn = &d
@@ -101,7 +103,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	if req.Schedule != nil {
 		d, err := time.ParseDuration(req.Schedule.Period)
 		if err != nil {
-			h.writeError(w, fmt.Sprintf("invalid schedule period: %s", req.Schedule.Period), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("invalid schedule period: %s", req.Schedule.Period), http.StatusBadRequest, h.logger)
 			return
 		}
 		instanceReq.Schedule = &service.ScheduleConfig{
@@ -113,13 +115,13 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	// Resolve template for RBAC ownership and validation
 	tmpl, err := h.templateService.ResolveTemplate(r.Context(), instanceReq)
 	if err != nil {
-		h.writeError(w, fmt.Sprintf("failed to resolve template: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("failed to resolve template: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Reject solidity templates when forge is unavailable
 	if h.solidityValidator == nil && templateContainsSolidity(tmpl) {
-		h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
+		respond.Error(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable, h.logger)
 		return
 	}
 
@@ -131,7 +133,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 			tmpl.Mode, h.requireApproval, h.apiKeyRepo,
 		)
 		if err != nil {
-			h.writeError(w, err.Error(), http.StatusBadRequest)
+			respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 			return
 		}
 		instanceReq.Owner = ownership.Owner
@@ -141,11 +143,11 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 
 	// FORCED VALIDATION — see validation_mandatory.go. Do not restore optional skip.
 	if req.SkipValidation {
-		h.writeError(w, errSkipValidationForbidden, http.StatusBadRequest)
+		respond.Error(w, errSkipValidationForbidden, http.StatusBadRequest, h.logger)
 		return
 	}
 	if h.jsEvaluator == nil {
-		h.writeError(w, "test case validation required for template instantiate but JS evaluator is unavailable", http.StatusServiceUnavailable)
+		respond.Error(w, "test case validation required for template instantiate but JS evaluator is unavailable", http.StatusServiceUnavailable, h.logger)
 		return
 	}
 	// Previously (REMOVED — fund-loss risk):
@@ -166,7 +168,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 				failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
 			}
 		}
-		h.writeError(w, fmt.Sprintf("test case validation failed: %s", strings.Join(failures, "; ")), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("test case validation failed: %s", strings.Join(failures, "; ")), http.StatusBadRequest, h.logger)
 		return
 	}
 	h.logger.Debug("template test case validation passed",
@@ -178,7 +180,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	result, err := h.templateService.CreateInstance(r.Context(), instanceReq)
 	if err != nil {
 		h.logger.Error("failed to create instance", "error", err, "template_id", templateID)
-		h.writeError(w, fmt.Sprintf("failed to create instance: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("failed to create instance: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -188,7 +190,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	ruleJSON, err := json.Marshal(result.Rule)
 	if err != nil {
 		h.logger.Error("failed to marshal rule", "error", err)
-		h.writeError(w, "failed to marshal response", http.StatusInternalServerError)
+		respond.Error(w, "failed to marshal response", http.StatusInternalServerError, h.logger)
 		return
 	}
 	resp["rule"] = json.RawMessage(ruleJSON)
@@ -224,25 +226,25 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 		"template_id", templateID,
 		"rule_id", result.Rule.ID,
 	)
-	h.writeJSON(w, resp, http.StatusCreated)
+	respond.JSON(w, resp, http.StatusCreated, h.logger)
 }
 
 func (h *TemplateHandler) revokeInstance(w http.ResponseWriter, r *http.Request, ruleID string) {
 	if h.readOnly {
-		h.writeError(w, "instance revocation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "instance revocation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	if err := h.templateService.RevokeInstance(r.Context(), types.RuleID(ruleID)); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "instance not found", http.StatusNotFound)
+			respond.Error(w, "instance not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to revoke instance", "error", err, "rule_id", ruleID)
-		h.writeError(w, fmt.Sprintf("failed to revoke instance: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("failed to revoke instance: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 
 	h.logger.Info("instance revoked", "rule_id", ruleID)
-	h.writeJSON(w, map[string]string{"status": "revoked", "rule_id": ruleID}, http.StatusOK)
+	respond.JSON(w, map[string]string{"status": "revoked", "rule_id": ruleID}, http.StatusOK, h.logger)
 }

@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -51,7 +53,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	var signerType *types.SignerType
 	if typeStr := query.Get("type"); typeStr != "" {
 		if !validate.IsValidSignerType(typeStr) {
-			h.writeError(w, "invalid type filter: must be private_key or keystore", http.StatusBadRequest)
+			respond.Error(w, "invalid type filter: must be private_key or keystore", http.StatusBadRequest, h.logger)
 			return
 		}
 		st := types.SignerType(typeStr)
@@ -61,7 +63,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	if offsetStr := query.Get("offset"); offsetStr != "" {
 		offset, err := strconv.Atoi(offsetStr)
 		if err != nil || offset < 0 {
-			h.writeError(w, "invalid offset parameter", http.StatusBadRequest)
+			respond.Error(w, "invalid offset parameter", http.StatusBadRequest, h.logger)
 			return
 		}
 		requestedOffset = offset
@@ -70,7 +72,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	if limitStr := query.Get("limit"); limitStr != "" {
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil || limit < 0 {
-			h.writeError(w, "invalid limit parameter", http.StatusBadRequest)
+			respond.Error(w, "invalid limit parameter", http.StatusBadRequest, h.logger)
 			return
 		}
 		if limit > 100 {
@@ -89,7 +91,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	targetKeyID := apiKey.ID
 	if v := strings.TrimSpace(query.Get("api_key_id")); v != "" {
 		if !apiKey.IsAdmin() && v != apiKey.ID {
-			h.writeError(w, "forbidden: only admins can filter by another api key", http.StatusForbidden)
+			respond.Error(w, "forbidden: only admins can filter by another api key", http.StatusForbidden, h.logger)
 			return
 		}
 		targetKeyID = v
@@ -101,23 +103,23 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	// becoming "no filter".
 	lockedFilter, err := parseTriBool(query.Get("locked"))
 	if err != nil {
-		h.writeError(w, "invalid locked filter: must be true or false", http.StatusBadRequest)
+		respond.Error(w, "invalid locked filter: must be true or false", http.StatusBadRequest, h.logger)
 		return
 	}
 	enabledFilter, err := parseTriBool(query.Get("enabled"))
 	if err != nil {
-		h.writeError(w, "invalid enabled filter: must be true or false", http.StatusBadRequest)
+		respond.Error(w, "invalid enabled filter: must be true or false", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	ownershipStatusFilter := strings.TrimSpace(query.Get("ownership_status"))
 	if ownershipStatusFilter != "" {
 		if ownershipStatusFilter != string(types.SignerOwnershipPendingApproval) {
-			h.writeError(w, "invalid ownership_status filter: must be pending_approval", http.StatusBadRequest)
+			respond.Error(w, "invalid ownership_status filter: must be pending_approval", http.StatusBadRequest, h.logger)
 			return
 		}
 		if !apiKey.IsAdmin() {
-			h.writeError(w, "forbidden: only admins can list signers pending approval", http.StatusForbidden)
+			respond.Error(w, "forbidden: only admins can list signers pending approval", http.StatusForbidden, h.logger)
 			return
 		}
 	}
@@ -131,7 +133,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	result, err := h.signerManager.ListSigners(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list signers", slog.String("error", err.Error()))
-		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		respond.Error(w, "failed to list signers", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -148,7 +150,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		pendingAddrs, pErr := h.accessService.GetAddressesByOwnershipStatus(r.Context(), types.SignerOwnershipPendingApproval)
 		if pErr != nil {
 			h.logger.Error("failed to get pending approval signers", slog.String("error", pErr.Error()))
-			h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+			respond.Error(w, "failed to list signers", http.StatusInternalServerError, h.logger)
 			return
 		}
 		for _, a := range pendingAddrs {
@@ -158,13 +160,13 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), targetKeyID)
 		if err != nil {
 			h.logger.Error("failed to get owned addresses", slog.String("error", err.Error()))
-			h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+			respond.Error(w, "failed to list signers", http.StatusInternalServerError, h.logger)
 			return
 		}
 		grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), targetKeyID)
 		if err != nil {
 			h.logger.Error("failed to get accessible addresses", slog.String("error", err.Error()))
-			h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+			respond.Error(w, "failed to list signers", http.StatusInternalServerError, h.logger)
 			return
 		}
 
@@ -290,7 +292,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		HasMore: hasMore,
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // handleDeleteSigner handles DELETE /api/v1/evm/signers/{address}
@@ -301,16 +303,16 @@ func (h *SignerHandler) handleDeleteSigner(w http.ResponseWriter, r *http.Reques
 	isOwner, err := h.accessService.IsOwner(r.Context(), apiKey.ID, address)
 	if err != nil {
 		h.logger.Error("failed to check ownership", slog.String("error", err.Error()))
-		h.writeError(w, "failed to check ownership", http.StatusInternalServerError)
+		respond.Error(w, "failed to check ownership", http.StatusInternalServerError, h.logger)
 		return
 	}
 	if !isOwner {
 		// Distinguish 404 from 403: if no ownership record exists at all, treat as not found
 		if _, oErr := h.accessService.GetOwnership(r.Context(), address); oErr != nil && types.IsNotFound(oErr) {
-			h.writeError(w, "signer not found", http.StatusNotFound)
+			respond.Error(w, "signer not found", http.StatusNotFound, h.logger)
 			return
 		}
-		h.writeError(w, "only the signer owner can delete", http.StatusForbidden)
+		respond.Error(w, "only the signer owner can delete", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -330,14 +332,14 @@ func (h *SignerHandler) handleDeleteSigner(w http.ResponseWriter, r *http.Reques
 	// This is critical for HD wallets to clean derived addresses too
 	if err := h.signerManager.DeleteSigner(r.Context(), address); err != nil {
 		if types.IsSignerNotFound(err) {
-			h.writeError(w, "signer not found", http.StatusNotFound)
+			respond.Error(w, "signer not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to delete signer from provider",
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, "failed to delete signer", http.StatusInternalServerError)
+		respond.Error(w, "failed to delete signer", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -368,7 +370,7 @@ func (h *SignerHandler) handleDeleteSigner(w http.ResponseWriter, r *http.Reques
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, "failed to delete signer ownership", http.StatusInternalServerError)
+		respond.Error(w, "failed to delete signer ownership", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -385,40 +387,40 @@ func (h *SignerHandler) handlePatchSignerLabels(w http.ResponseWriter, r *http.R
 
 	var req PatchSignerLabelsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.DisplayName == nil && req.Tags == nil {
-		h.writeError(w, "at least one of display_name or tags is required", http.StatusBadRequest)
+		respond.Error(w, "at least one of display_name or tags is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	patch := types.SignerLabelPatch{DisplayName: req.DisplayName, Tags: req.Tags}
 	if err := h.accessService.PatchSignerLabels(r.Context(), apiKey.ID, address, patch); err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, "not the owner") {
-			h.writeError(w, msg, http.StatusForbidden)
+			respond.Error(w, msg, http.StatusForbidden, h.logger)
 			return
 		}
 		if types.IsNotFound(err) {
-			h.writeError(w, "ownership not found for signer", http.StatusNotFound)
+			respond.Error(w, "ownership not found for signer", http.StatusNotFound, h.logger)
 			return
 		}
-		h.writeError(w, msg, http.StatusBadRequest)
+		respond.Error(w, msg, http.StatusBadRequest, h.logger)
 		return
 	}
 
 	info, err := h.signerInfoByAddress(r.Context(), address)
 	if err != nil {
 		if errors.Is(err, types.ErrSignerNotFound) {
-			h.writeError(w, "signer not found", http.StatusNotFound)
+			respond.Error(w, "signer not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to load signer after label patch", slog.String("address", address), slog.String("error", err.Error()))
-		h.writeError(w, "failed to load signer", http.StatusInternalServerError)
+		respond.Error(w, "failed to load signer", http.StatusInternalServerError, h.logger)
 		return
 	}
 
-	h.writeJSON(w, h.newSignerResponse(r.Context(), info), http.StatusOK)
+	respond.JSON(w, h.newSignerResponse(r.Context(), info), http.StatusOK, h.logger)
 }
 
 // signerIsHDDerivedNonPrimary reports whether address is an HD-derived signer (derivation index > 0).

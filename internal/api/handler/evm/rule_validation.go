@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -58,16 +60,16 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	if rule.Type != types.RuleTypeEVMJS {
-		h.writeError(w, "validation only supported for evm_js rules", http.StatusBadRequest)
+		respond.Error(w, "validation only supported for evm_js rules", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -75,17 +77,18 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 	// using the test input's chain_id (required for matrix presets).
 	testCases, err := testCasesFromConfig(rule.Config)
 	if err != nil {
-		h.writeError(w, fmt.Sprintf("failed to parse test_cases from config: %v", err), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("failed to parse test_cases from config: %v", err), http.StatusBadRequest, h.logger)
 		return
 	}
 	if len(testCases) == 0 {
-		h.writeJSON(w, ValidateRuleResponse{
+		respond.JSON(w, ValidateRuleResponse{
 			RuleID:   string(rule.ID),
 			RuleName: rule.Name,
 			Type:     string(rule.Type),
 			Valid:    true,
 			Results:  nil,
-		}, http.StatusOK)
+		}, http.StatusOK, h.logger)
+
 		return
 	}
 
@@ -100,7 +103,7 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 	if !valid {
 		resp.Error = "one or more test cases failed"
 	}
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // runJSTestCases runs test cases against a rule and returns per-case results plus overall validity.
@@ -153,7 +156,7 @@ func (h *RuleHandler) validateRules(w http.ResponseWriter, r *http.Request) {
 	allRules, err := h.ruleRepo.List(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list rules for batch validate", "error", err)
-		h.writeError(w, "failed to list rules", http.StatusInternalServerError)
+		respond.Error(w, "failed to list rules", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -186,12 +189,13 @@ func (h *RuleHandler) validateRules(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.writeJSON(w, BatchValidateResponse{
+	respond.JSON(w, BatchValidateResponse{
 		Results: results,
 		Total:   len(results),
 		Passed:  totalPassed,
 		Failed:  totalFailed,
-	}, http.StatusOK)
+	}, http.StatusOK, h.logger)
+
 }
 
 // validateRuleIsolated runs a single rule's test cases in isolated mode (no cross-rule interference check).

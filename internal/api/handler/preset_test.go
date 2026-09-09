@@ -954,19 +954,6 @@ func TestCollectTemplateVarDefs_TemplateNotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// writeError
-// ---------------------------------------------------------------------------
-
-func TestWriteError_EncodesJSON(t *testing.T) {
-	h := &PresetHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	w := httptest.NewRecorder()
-	h.writeError(w, "test message", http.StatusTeapot)
-	assert.Equal(t, http.StatusTeapot, w.Code)
-	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
-	assert.Contains(t, w.Body.String(), `"test message"`)
-}
-
-// ---------------------------------------------------------------------------
 // ServeHTTP — additional branches
 // ---------------------------------------------------------------------------
 

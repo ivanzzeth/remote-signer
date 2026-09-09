@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
@@ -119,7 +121,7 @@ type deriveResponse struct {
 func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -133,20 +135,20 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPost:
 			// Create/import requires admin
 			if !apiKey.IsAdmin() {
-				h.writeError(w, "admin access required", http.StatusForbidden)
+				respond.Error(w, "admin access required", http.StatusForbidden, h.logger)
 				return
 			}
 			h.createOrImport(w, r)
 		case http.MethodGet:
 			h.listWallets(w, r)
 		default:
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		}
 	default:
 		// Parse: /{address}/derive or /{address}/derived
 		parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 2)
 		if len(parts) < 1 || !validate.IsValidEthereumAddress(parts[0]) {
-			h.writeError(w, "invalid path or address", http.StatusBadRequest)
+			respond.Error(w, "invalid path or address", http.StatusBadRequest, h.logger)
 			return
 		}
 		address := parts[0]
@@ -154,11 +156,11 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Per-wallet actions: check ownership/access
 		allowed, accessErr := h.accessService.CheckAccess(r.Context(), apiKey.ID, address)
 		if accessErr != nil {
-			h.writeError(w, "failed to check access", http.StatusInternalServerError)
+			respond.Error(w, "failed to check access", http.StatusInternalServerError, h.logger)
 			return
 		}
 		if !allowed {
-			h.writeError(w, "not authorized for this HD wallet", http.StatusForbidden)
+			respond.Error(w, "not authorized for this HD wallet", http.StatusForbidden, h.logger)
 			return
 		}
 
@@ -170,25 +172,25 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		switch action {
 		case "derive":
 			if r.Method != http.MethodPost {
-				h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 				return
 			}
 			h.deriveAddresses(w, r, address)
 		case "derived":
 			if r.Method != http.MethodGet {
-				h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 				return
 			}
 			h.listDerived(w, r, address)
 		default:
-			h.writeError(w, "unknown action", http.StatusNotFound)
+			respond.Error(w, "unknown action", http.StatusNotFound, h.logger)
 		}
 	}
 }
 
 func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request) {
 	if h.readOnly {
-		h.writeError(w, "HD wallet creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "HD wallet creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -200,11 +202,11 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 			count, countErr := h.accessService.CountOwnedHDWallets(r.Context(), apiKey.ID)
 			if countErr != nil {
 				h.logger.Error("failed to count owned HD wallets", slog.String("error", countErr.Error()))
-				h.writeError(w, "failed to check resource limits", http.StatusInternalServerError)
+				respond.Error(w, "failed to check resource limits", http.StatusInternalServerError, h.logger)
 				return
 			}
 			if int(count) >= h.maxHDWalletsPerKey {
-				h.writeError(w, fmt.Sprintf("resource limit exceeded: maximum %d HD wallets per API key", h.maxHDWalletsPerKey), http.StatusForbidden)
+				respond.Error(w, fmt.Sprintf("resource limit exceeded: maximum %d HD wallets per API key", h.maxHDWalletsPerKey), http.StatusForbidden, h.logger)
 				return
 			}
 		}
@@ -212,13 +214,13 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 
 	mgr, err := h.signerManager.HDWalletManager()
 	if err != nil {
-		h.writeError(w, err.Error(), http.StatusNotImplemented)
+		respond.Error(w, err.Error(), http.StatusNotImplemented, h.logger)
 		return
 	}
 
 	var req createHDWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 	defer func() {
@@ -230,7 +232,7 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 	}()
 
 	if req.Password == "" {
-		h.writeError(w, "password is required", http.StatusBadRequest)
+		respond.Error(w, "password is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -239,11 +241,11 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 	switch req.Action {
 	case "import":
 		if req.Mnemonic == "" && req.WalletJSON == "" {
-			h.writeError(w, "mnemonic or wallet_json is required for import", http.StatusBadRequest)
+			respond.Error(w, "mnemonic or wallet_json is required for import", http.StatusBadRequest, h.logger)
 			return
 		}
 		if req.Mnemonic != "" && req.WalletJSON != "" {
-			h.writeError(w, "specify either mnemonic or wallet_json, not both", http.StatusBadRequest)
+			respond.Error(w, "specify either mnemonic or wallet_json, not both", http.StatusBadRequest, h.logger)
 			return
 		}
 		info, err = mgr.ImportHDWallet(r.Context(), types.ImportHDWalletParams{
@@ -257,7 +259,7 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 			EntropyBits: req.EntropyBits,
 		})
 	default:
-		h.writeError(w, "action must be 'create' or 'import'", http.StatusBadRequest)
+		respond.Error(w, "action must be 'create' or 'import'", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -267,10 +269,10 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 			slog.String("error", err.Error()),
 		)
 		if strings.Contains(err.Error(), "already exists") {
-			h.writeError(w, err.Error(), http.StatusConflict)
+			respond.Error(w, err.Error(), http.StatusConflict, h.logger)
 			return
 		}
-		h.writeError(w, err.Error(), http.StatusInternalServerError)
+		respond.Error(w, err.Error(), http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -311,14 +313,14 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		h.auditLogger.LogHDWalletCreated(r.Context(), keyID, r.RemoteAddr, info.PrimaryAddress, action)
 	}
 
-	h.writeJSON(w, h.hdWalletResponse(r.Context(), info), http.StatusCreated)
+	respond.JSON(w, h.hdWalletResponse(r.Context(), info), http.StatusCreated, h.logger)
 }
 
 func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	mgr, err := h.signerManager.HDWalletManager()
 	if err != nil {
-		h.writeError(w, err.Error(), http.StatusNotImplemented)
+		respond.Error(w, err.Error(), http.StatusNotImplemented, h.logger)
 		return
 	}
 
@@ -343,24 +345,24 @@ func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 		resp.Wallets[i] = h.hdWalletResponse(r.Context(), &filtered[i])
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request, primaryAddr string) {
 	if h.readOnly {
-		h.writeError(w, "HD wallet derive via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "HD wallet derive via API is disabled (security.signers_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	mgr, err := h.signerManager.HDWalletManager()
 	if err != nil {
-		h.writeError(w, err.Error(), http.StatusNotImplemented)
+		respond.Error(w, err.Error(), http.StatusNotImplemented, h.logger)
 		return
 	}
 
 	var req deriveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -371,38 +373,38 @@ func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request
 		info, err := mgr.DeriveAddress(r.Context(), primaryAddr, *req.Index)
 		if err != nil {
 			if strings.Contains(err.Error(), "is locked") {
-				h.writeError(w, err.Error(), http.StatusLocked)
+				respond.Error(w, err.Error(), http.StatusLocked, h.logger)
 				return
 			}
 			h.logger.Error("derive address failed",
 				slog.String("primary_address", primaryAddr),
 				slog.String("error", err.Error()),
 			)
-			h.writeError(w, err.Error(), http.StatusInternalServerError)
+			respond.Error(w, err.Error(), http.StatusInternalServerError, h.logger)
 			return
 		}
 		derived = append(derived, *info)
 	} else if req.Start != nil && req.Count != nil {
 		if *req.Count == 0 || *req.Count > 100 {
-			h.writeError(w, "count must be between 1 and 100", http.StatusBadRequest)
+			respond.Error(w, "count must be between 1 and 100", http.StatusBadRequest, h.logger)
 			return
 		}
 		infos, err := mgr.DeriveAddresses(r.Context(), primaryAddr, *req.Start, *req.Count)
 		if err != nil {
 			if strings.Contains(err.Error(), "is locked") {
-				h.writeError(w, err.Error(), http.StatusLocked)
+				respond.Error(w, err.Error(), http.StatusLocked, h.logger)
 				return
 			}
 			h.logger.Error("derive addresses failed",
 				slog.String("primary_address", primaryAddr),
 				slog.String("error", err.Error()),
 			)
-			h.writeError(w, err.Error(), http.StatusInternalServerError)
+			respond.Error(w, err.Error(), http.StatusInternalServerError, h.logger)
 			return
 		}
 		derived = infos
 	} else {
-		h.writeError(w, "either 'index' or 'start'+'count' is required", http.StatusBadRequest)
+		respond.Error(w, "either 'index' or 'start'+'count' is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -418,13 +420,13 @@ func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request
 	resp := deriveResponse{
 		Derived: toSignerInfoResponseList(derived),
 	}
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *HDWalletHandler) listDerived(w http.ResponseWriter, r *http.Request, primaryAddr string) {
 	mgr, err := h.signerManager.HDWalletManager()
 	if err != nil {
-		h.writeError(w, err.Error(), http.StatusNotImplemented)
+		respond.Error(w, err.Error(), http.StatusNotImplemented, h.logger)
 		return
 	}
 
@@ -434,21 +436,21 @@ func (h *HDWalletHandler) listDerived(w http.ResponseWriter, r *http.Request, pr
 		// internal error — return 423 so the UI can render a friendly
 		// "Unlock first" hint without staring at a 500.
 		if strings.Contains(err.Error(), "is locked") {
-			h.writeError(w, err.Error(), http.StatusLocked)
+			respond.Error(w, err.Error(), http.StatusLocked, h.logger)
 			return
 		}
 		h.logger.Error("list derived addresses failed",
 			slog.String("primary_address", primaryAddr),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, err.Error(), http.StatusInternalServerError)
+		respond.Error(w, err.Error(), http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	resp := listDerivedResponse{
 		Derived: toSignerInfoResponseList(derived),
 	}
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // --- Helpers ---
@@ -481,19 +483,4 @@ func toSignerInfoResponseList(infos []types.SignerInfo) []signerInfoResponse {
 		}
 	}
 	return result
-}
-
-func (h *HDWalletHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", slog.String("error", err.Error()))
-	}
-}
-
-func (h *HDWalletHandler) writeError(w http.ResponseWriter, message string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

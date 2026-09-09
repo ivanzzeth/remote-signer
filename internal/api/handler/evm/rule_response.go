@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -315,16 +314,4 @@ func stringifyDefault(v any) string {
 		}
 		return string(b)
 	}
-}
-
-func (h *RuleHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *RuleHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }

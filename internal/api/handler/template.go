@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -92,7 +94,7 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context (for audit)
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -110,7 +112,7 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPost:
 			h.createTemplate(w, r)
 		default:
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		}
 		return
 	}
@@ -127,7 +129,7 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	templateID, err := url.PathUnescape(encodedID)
 	if err != nil {
-		h.writeError(w, "invalid template id", http.StatusBadRequest)
+		respond.Error(w, "invalid template id", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -135,19 +137,19 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			h.instantiateTemplate(w, r, templateID)
 		} else {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		}
 		return
 	}
 
 	if sub == "validate" {
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		// Validate is admin-only (RBAC via role check)
 		if !apiKey.IsAdmin() {
-			h.writeError(w, "forbidden: admin role required", http.StatusForbidden)
+			respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
 			return
 		}
 		h.validateTemplate(w, r, templateID)
@@ -162,7 +164,7 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPatch:
 		h.updateTemplate(w, r, templateID)
 	default:
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
 }
 
@@ -170,7 +172,7 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *TemplateHandler) ServeInstanceHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -182,12 +184,12 @@ func (h *TemplateHandler) ServeInstanceHTTP(w http.ResponseWriter, r *http.Reque
 		if r.Method == http.MethodPost {
 			h.revokeInstance(w, r, ruleID)
 		} else {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		}
 		return
 	}
 
-	h.writeError(w, "not found", http.StatusNotFound)
+	respond.Error(w, "not found", http.StatusNotFound, h.logger)
 }
 
 // validateTemplateResponse is the response for POST /api/v1/templates/{id}/validate.
@@ -217,16 +219,16 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	tmpl, err := h.templateRepo.Get(r.Context(), templateID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "template not found", http.StatusNotFound)
+			respond.Error(w, "template not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get template", "error", err, "template_id", templateID)
-		h.writeError(w, "failed to get template", http.StatusInternalServerError)
+		respond.Error(w, "failed to get template", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	if h.jsEvaluator == nil {
-		h.writeError(w, "JS evaluator not available", http.StatusServiceUnavailable)
+		respond.Error(w, "JS evaluator not available", http.StatusServiceUnavailable, h.logger)
 		return
 	}
 
@@ -246,7 +248,7 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	var varDefs []types.TemplateVariable
 	if len(tmpl.Variables) > 0 {
 		if err := json.Unmarshal(tmpl.Variables, &varDefs); err != nil {
-			h.writeError(w, "failed to parse template variables", http.StatusInternalServerError)
+			respond.Error(w, "failed to parse template variables", http.StatusInternalServerError, h.logger)
 			return
 		}
 	}
@@ -259,7 +261,7 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := validateRequiredTemplateVars(varDefs, resolvedVars); err != nil {
-		h.writeError(w, fmt.Sprintf("variable substitution failed: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("variable substitution failed: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 	// Dry-run: ensure all ${var} placeholders in config resolve (without mutating config;
@@ -268,13 +270,13 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	// 而这里只要一次「占位符是否都能解析」的 dry-run。换过去要先确认 typed 版对
 	// 未解析占位符的报错行为一致 —— 那是 R8 的范围,不是本次重构的。
 	if _, err := service.SubstituteVariables(tmpl.Config, resolvedVars); err != nil {
-		h.writeError(w, fmt.Sprintf("variable substitution failed: %s", err.Error()), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("variable substitution failed: %s", err.Error()), http.StatusBadRequest, h.logger)
 		return
 	}
 
 	configForValidate := normalizeTemplateConfigForValidation(tmpl, tmpl.Config)
 	if isUnrecognizedTemplateConfig(tmpl.Config) {
-		h.writeJSON(w, validateTemplateResponse{
+		respond.JSON(w, validateTemplateResponse{
 			TemplateID:   templateID,
 			TemplateName: tmpl.Name,
 			Results: []*validateRuleResultItem{{
@@ -287,7 +289,8 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 			Total:  1,
 			Passed: 1,
 			Failed: 0,
-		}, http.StatusOK)
+		}, http.StatusOK, h.logger)
+
 		return
 	}
 
@@ -311,7 +314,7 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 		Passed:       totalPassed,
 		Failed:       totalFailed,
 	}
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // evmhandlerJSRuleTestCase mirrors evm.JSRuleTestCase for template validation.

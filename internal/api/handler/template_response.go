@@ -4,7 +4,6 @@ package handler
 
 import (
 	"encoding/json"
-	"net/http"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -247,16 +246,4 @@ func aggregateRuleModes(configJSON []byte) string {
 		}
 	}
 	return "mixed"
-}
-
-func (h *TemplateHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *TemplateHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }

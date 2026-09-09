@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
@@ -113,14 +115,14 @@ type BatchSignResultItem struct {
 // ServeHTTP handles POST /api/v1/evm/sign/batch.
 func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -128,17 +130,17 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req BatchSignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Warn("failed to decode batch sign request", "error", err)
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate batch
 	if len(req.Requests) == 0 {
-		h.writeError(w, "requests array is required and must not be empty", http.StatusBadRequest)
+		respond.Error(w, "requests array is required and must not be empty", http.StatusBadRequest, h.logger)
 		return
 	}
 	if len(req.Requests) > maxBatchSize {
-		h.writeError(w, fmt.Sprintf("batch size %d exceeds maximum %d", len(req.Requests), maxBatchSize), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("batch size %d exceeds maximum %d", len(req.Requests), maxBatchSize), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -148,39 +150,39 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	for i, item := range req.Requests {
 		if item.ChainID == "" {
-			h.writeError(w, fmt.Sprintf("requests[%d].chain_id is required", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("requests[%d].chain_id is required", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if _, err := strconv.ParseUint(item.ChainID, 10, 64); err != nil {
-			h.writeError(w, fmt.Sprintf("requests[%d].chain_id must be a positive decimal integer", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("requests[%d].chain_id must be a positive decimal integer", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if item.SignerAddress == "" {
-			h.writeError(w, fmt.Sprintf("requests[%d].signer_address is required", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("requests[%d].signer_address is required", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if !validate.IsValidEthereumAddress(item.SignerAddress) {
-			h.writeError(w, fmt.Sprintf("requests[%d].signer_address is invalid", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("requests[%d].signer_address is invalid", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if item.SignType == "" {
-			h.writeError(w, fmt.Sprintf("requests[%d].sign_type is required", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("requests[%d].sign_type is required", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if item.SignType != "transaction" {
-			h.writeError(w, fmt.Sprintf("requests[%d].sign_type must be 'transaction' for batch sign", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("requests[%d].sign_type must be 'transaction' for batch sign", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if len(item.Transaction) == 0 {
-			h.writeError(w, fmt.Sprintf("requests[%d].transaction is required", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("requests[%d].transaction is required", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		if item.ChainID != firstChainID {
-			h.writeError(w, "all requests must have the same chain_id", http.StatusBadRequest)
+			respond.Error(w, "all requests must have the same chain_id", http.StatusBadRequest, h.logger)
 			return
 		}
 		if item.SignerAddress != firstSigner {
-			h.writeError(w, "all requests must have the same signer_address", http.StatusBadRequest)
+			respond.Error(w, "all requests must have the same signer_address", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -189,7 +191,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	allowed, err := h.accessService.CheckAccess(r.Context(), apiKey.ID, firstSigner)
 	if err != nil {
 		h.logger.Error("signer access check failed", "api_key_id", apiKey.ID, "signer_address", firstSigner, "error", err)
-		h.writeError(w, "failed to check signer access", http.StatusInternalServerError)
+		respond.Error(w, "failed to check signer access", http.StatusInternalServerError, h.logger)
 		return
 	}
 	if !allowed {
@@ -201,7 +203,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					apiKey.ID, apiKey.Name, clientIP, firstSigner, len(req.Requests),
 					time.Now().UTC().Format(time.RFC3339)))
 		}
-		h.writeError(w, "not authorized for this signer", http.StatusForbidden)
+		respond.Error(w, "not authorized for this signer", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -227,14 +229,14 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"transaction": item.Transaction,
 		})
 		if wrapErr != nil {
-			h.writeError(w, fmt.Sprintf("failed to build payload for requests[%d]", i), http.StatusInternalServerError)
+			respond.Error(w, fmt.Sprintf("failed to build payload for requests[%d]", i), http.StatusInternalServerError, h.logger)
 			return
 		}
 		payloads[i] = wrapped
 
 		var evmPayload evm.EVMSignPayload
 		if parseErr := json.Unmarshal(wrapped, &evmPayload); parseErr != nil {
-			h.writeError(w, fmt.Sprintf("invalid transaction payload for requests[%d]", i), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("invalid transaction payload for requests[%d]", i), http.StatusBadRequest, h.logger)
 			return
 		}
 		evmPayloads[i] = &evmPayload
@@ -285,7 +287,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// to help agents and clients understand which security policy blocked their request.
 				// Rule names are generic (e.g., "Agent Safety") and do not expose specific configuration
 				// details. Accepted risk per security audit v3.
-				h.writeError(w, fmt.Sprintf("batch rejected: tx %d blocked by rule %s: %s", i, blockedErr.RuleName, blockedErr.Reason), http.StatusForbidden)
+				respond.Error(w, fmt.Sprintf("batch rejected: tx %d blocked by rule %s: %s", i, blockedErr.RuleName, blockedErr.Reason), http.StatusForbidden, h.logger)
 				return
 			}
 			h.logger.Error("rule evaluation error for batch tx", "index", i, "error", evalErr)
@@ -304,7 +306,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			txParams := make([]simulation.TxParams, len(req.Requests))
 			for i, ep := range evmPayloads {
 				if ep.Transaction == nil {
-					h.writeError(w, fmt.Sprintf("missing transaction in requests[%d]", i), http.StatusBadRequest)
+					respond.Error(w, fmt.Sprintf("missing transaction in requests[%d]", i), http.StatusBadRequest, h.logger)
 					return
 				}
 				to := ""
@@ -324,7 +326,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			outcome, simErr := h.simulationRule.EvaluateBatch(signCtx, firstChainID, firstSigner, txParams)
 			if simErr != nil {
 				h.logger.Error("batch simulation evaluation error", "error", simErr)
-				h.writeError(w, "batch simulation failed", http.StatusInternalServerError)
+				respond.Error(w, "batch simulation failed", http.StatusInternalServerError, h.logger)
 				return
 			}
 
@@ -336,20 +338,20 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case "no_match":
 				// Approval detected or simulator issue — batch sign does not support manual approval
 				metrics.RecordSignRequestDuration(string(types.ChainTypeEVM), "transaction", metrics.SignOutcomeRejected, time.Since(start))
-				h.writeError(w, "no matching rule for batch and simulation could not auto-approve (approval detected or simulator unavailable)", http.StatusForbidden)
+				respond.Error(w, "no matching rule for batch and simulation could not auto-approve (approval detected or simulator unavailable)", http.StatusForbidden, h.logger)
 				return
 			case "deny":
 				metrics.RecordSignRequestDuration(string(types.ChainTypeEVM), "transaction", metrics.SignOutcomeRejected, time.Since(start))
-				h.writeError(w, "batch rejected by simulation budget check", http.StatusForbidden)
+				respond.Error(w, "batch rejected by simulation budget check", http.StatusForbidden, h.logger)
 				return
 			default:
-				h.writeError(w, "unexpected simulation outcome", http.StatusInternalServerError)
+				respond.Error(w, "unexpected simulation outcome", http.StatusInternalServerError, h.logger)
 				return
 			}
 		} else {
 			// No simulation available and not all rules matched
 			metrics.RecordSignRequestDuration(string(types.ChainTypeEVM), "transaction", metrics.SignOutcomeRejected, time.Since(start))
-			h.writeError(w, "no matching rule for one or more transactions in batch", http.StatusForbidden)
+			respond.Error(w, "no matching rule for one or more transactions in batch", http.StatusForbidden, h.logger)
 			return
 		}
 	}
@@ -373,7 +375,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			errResult := categorizeSignError(signErr, item.SignerAddress)
 			h.logger.Error("batch sign failed for tx", "index", i, "error", signErr)
 			metrics.RecordSignRequestDuration(string(types.ChainTypeEVM), "transaction", metrics.SignOutcomeError, time.Since(start))
-			h.writeError(w, fmt.Sprintf("batch sign failed at tx %d: %s", i, errResult.Message), errResult.StatusCode)
+			respond.Error(w, fmt.Sprintf("batch sign failed at tx %d: %s", i, errResult.Message), errResult.StatusCode, h.logger)
 			return
 		}
 
@@ -414,19 +416,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp.NetBalanceChanges = toBalanceChangeJSON(batchSimResult.NetBalanceChanges)
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
-}
-
-func (h *BatchSignHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *BatchSignHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // decimalToHex converts a decimal string value to hex format for JSON-RPC.

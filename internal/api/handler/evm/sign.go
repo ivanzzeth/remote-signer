@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -90,14 +92,14 @@ type ErrorResponse struct {
 // ServeHTTP handles the sign request
 func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -106,42 +108,42 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req SignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Warn("failed to decode sign request", "error", err, "path", r.URL.Path)
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate required fields and formats
 	if req.ChainID == "" {
-		h.writeError(w, "chain_id is required", http.StatusBadRequest)
+		respond.Error(w, "chain_id is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if _, err := strconv.ParseUint(req.ChainID, 10, 64); err != nil {
-		h.writeError(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest)
+		respond.Error(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.SignerAddress == "" {
-		h.writeError(w, "signer_address is required", http.StatusBadRequest)
+		respond.Error(w, "signer_address is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if !validate.IsValidEthereumAddress(req.SignerAddress) {
-		h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+		respond.Error(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.SignType == "" {
-		h.writeError(w, "sign_type is required", http.StatusBadRequest)
+		respond.Error(w, "sign_type is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if !validate.ValidSignTypes[req.SignType] {
-		h.writeError(w, "invalid sign_type: must be one of hash, raw_message, eip191, personal, typed_data, transaction", http.StatusBadRequest)
+		respond.Error(w, "invalid sign_type: must be one of hash, raw_message, eip191, personal, typed_data, transaction", http.StatusBadRequest, h.logger)
 		return
 	}
 	if len(req.Payload) == 0 {
-		h.writeError(w, "payload is required", http.StatusBadRequest)
+		respond.Error(w, "payload is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	const maxPayloadSize = 2 * 1024 * 1024 // 2 MB
 	if len(req.Payload) > maxPayloadSize {
-		h.writeError(w, "payload exceeds maximum size", http.StatusBadRequest)
+		respond.Error(w, "payload exceeds maximum size", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -153,7 +155,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"signer_address", req.SignerAddress,
 			"error", err,
 		)
-		h.writeError(w, "failed to check signer access", http.StatusInternalServerError)
+		respond.Error(w, "failed to check signer access", http.StatusInternalServerError, h.logger)
 		return
 	}
 	if !allowed {
@@ -163,7 +165,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		)
 		if ownership, ownErr := h.accessService.GetOwnership(r.Context(), req.SignerAddress); ownErr == nil && ownership != nil &&
 			ownership.Status == types.SignerOwnershipPendingApproval {
-			h.writeError(w, "signer pending admin approval (run: evm signer approve <address>)", http.StatusForbidden)
+			respond.Error(w, "signer pending admin approval (run: evm signer approve <address>)", http.StatusForbidden, h.logger)
 			return
 		}
 		if h.alertService != nil {
@@ -173,14 +175,14 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					apiKey.ID, apiKey.Name, clientIP, req.SignerAddress,
 					time.Now().UTC().Format(time.RFC3339)))
 		}
-		h.writeError(w, "not authorized for this signer", http.StatusForbidden)
+		respond.Error(w, "not authorized for this signer", http.StatusForbidden, h.logger)
 		return
 	}
 	if h.signerRepo != nil {
 		rec, recErr := h.signerRepo.Get(r.Context(), req.SignerAddress)
 		if recErr == nil && rec != nil {
 			if rec.MaterialStatus != types.SignerMaterialStatusPresent {
-				h.writeError(w, fmt.Sprintf("signer material unavailable: %s", rec.MaterialStatus), http.StatusConflict)
+				respond.Error(w, fmt.Sprintf("signer material unavailable: %s", rec.MaterialStatus), http.StatusConflict, h.logger)
 				return
 			}
 		}
@@ -254,7 +256,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		metrics.RecordSignRequestDuration(chainType, req.SignType, outcome, duration)
-		h.writeError(w, errResult.Message, errResult.StatusCode)
+		respond.Error(w, errResult.Message, errResult.StatusCode, h.logger)
 		return
 	}
 
@@ -272,17 +274,5 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		signResp.SignedData = fmt.Sprintf("0x%x", resp.SignedData)
 	}
 
-	h.writeJSON(w, signResp, http.StatusOK)
-}
-
-func (h *SignHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *SignHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
+	respond.JSON(w, signResp, http.StatusOK, h.logger)
 }

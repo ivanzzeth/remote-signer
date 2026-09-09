@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -26,7 +28,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters (strict: unknown enum values return 400)
 	if chainType := query.Get("chain_type"); chainType != "" {
 		if !validate.IsValidChainType(chainType) {
-			h.writeError(w, "invalid chain_type filter", http.StatusBadRequest)
+			respond.Error(w, "invalid chain_type filter", http.StatusBadRequest, h.logger)
 			return
 		}
 		ct := types.ChainType(chainType)
@@ -39,7 +41,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 
 	if signerAddress := query.Get("signer_address"); signerAddress != "" {
 		if !validate.IsValidEthereumAddress(signerAddress) {
-			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			respond.Error(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.SignerAddress = &signerAddress
@@ -49,7 +51,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 	if ruleType := query.Get("type"); ruleType != "" {
 		if !validate.IsValidRuleType(ruleType) {
-			h.writeError(w, "invalid type filter", http.StatusBadRequest)
+			respond.Error(w, "invalid type filter", http.StatusBadRequest, h.logger)
 			return
 		}
 		rt := types.RuleType(validate.NormalizeRuleType(ruleType))
@@ -57,7 +59,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 	if source := query.Get("source"); source != "" {
 		if !validate.IsValidRuleSource(source) {
-			h.writeError(w, "invalid source filter", http.StatusBadRequest)
+			respond.Error(w, "invalid source filter", http.StatusBadRequest, h.logger)
 			return
 		}
 		rs := types.RuleSource(source)
@@ -85,7 +87,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	rules, err := h.ruleRepo.List(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list rules", "error", err)
-		h.writeError(w, "failed to list rules", http.StatusInternalServerError)
+		respond.Error(w, "failed to list rules", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -96,7 +98,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	total, err := h.ruleRepo.Count(r.Context(), countFilter)
 	if err != nil {
 		h.logger.Error("failed to count rules", "error", err)
-		h.writeError(w, "failed to count rules", http.StatusInternalServerError)
+		respond.Error(w, "failed to count rules", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -127,18 +129,18 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 		resp.Rules = append(resp.Rules, rr)
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID string) {
 	gotRule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -147,7 +149,7 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 	if apiKey != nil && !apiKey.IsAdmin() && !apiKey.IsDev() {
 		filtered := rule.FilterRulesForCaller([]*types.Rule{gotRule}, apiKey.ID)
 		if len(filtered) == 0 {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 	}
@@ -159,14 +161,14 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 	} else {
 		h.enrichVariableDefs(&rr, gotRule)
 	}
-	h.writeJSON(w, rr, http.StatusOK)
+	respond.JSON(w, rr, http.StatusOK, h.logger)
 }
 
 func (h *RuleHandler) listBudgets(w http.ResponseWriter, r *http.Request, ruleID string) {
 	budgets, err := h.budgetRepo.ListByRuleID(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		h.logger.Error("failed to list budgets", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to list budgets", http.StatusInternalServerError)
+		respond.Error(w, "failed to list budgets", http.StatusInternalServerError, h.logger)
 		return
 	}
 	if budgets == nil {
@@ -201,7 +203,7 @@ func (h *RuleHandler) listBudgets(w http.ResponseWriter, r *http.Request, ruleID
 		}
 		items = append(items, ruleBudgetListItem(gotRule, b, siblingUnits))
 	}
-	h.writeJSON(w, items, http.StatusOK)
+	respond.JSON(w, items, http.StatusOK, h.logger)
 }
 
 // resetAllBudgets handles POST /api/v1/evm/rules/{id}/budgets/reset — clears
@@ -209,33 +211,33 @@ func (h *RuleHandler) listBudgets(w http.ResponseWriter, r *http.Request, ruleID
 func (h *RuleHandler) resetAllBudgets(w http.ResponseWriter, r *http.Request, ruleID string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 	if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-		h.writeError(w, "forbidden", http.StatusForbidden)
+		respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
 		return
 	}
 	if h.budgetRepo == nil {
-		h.writeError(w, "budget repository not configured", http.StatusInternalServerError)
+		respond.Error(w, "budget repository not configured", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	gotRule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get rule for budget reset", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	budgets, err := h.budgetRepo.ListByRuleID(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		h.logger.Error("failed to list budgets", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to list budgets", http.StatusInternalServerError)
+		respond.Error(w, "failed to list budgets", http.StatusInternalServerError, h.logger)
 		return
 	}
 	siblingUnits := make([]string, 0, len(budgets))
@@ -259,37 +261,37 @@ func (h *RuleHandler) resetAllBudgets(w http.ResponseWriter, r *http.Request, ru
 				continue
 			}
 			h.logger.Error("failed to reset budget", "error", err, "rule_id", ruleID, "unit", b.Unit)
-			h.writeError(w, "failed to reset budgets", http.StatusInternalServerError)
+			respond.Error(w, "failed to reset budgets", http.StatusInternalServerError, h.logger)
 			return
 		}
 		reset++
 	}
-	h.writeJSON(w, map[string]int{"reset": reset}, http.StatusOK)
+	respond.JSON(w, map[string]int{"reset": reset}, http.StatusOK, h.logger)
 }
 
 // approveRule handles POST /api/v1/evm/rules/{id}/approve (admin only via RBAC)
 func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	// Only admin can approve (enforced by RBAC middleware PermApproveRule,
 	// but double-check here for defense in depth)
 	if !apiKey.IsAdmin() {
-		h.writeError(w, "permission denied: only admin can approve rules", http.StatusForbidden)
+		respond.Error(w, "permission denied: only admin can approve rules", http.StatusForbidden, h.logger)
 		return
 	}
 
 	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -301,7 +303,7 @@ func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID
 
 	// Idempotent: already active rules can be "approved" again without error.
 	if rule.Status != types.RuleStatusPendingApproval && rule.Status != types.RuleStatusActive {
-		h.writeError(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -314,7 +316,7 @@ func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID
 
 	if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
 		h.logger.Error("failed to approve rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to approve rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to approve rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -329,19 +331,19 @@ func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID
 		go h.onRuleActivated("rule-approved:" + ruleID)
 	}
 
-	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
+	respond.JSON(w, h.toRuleResponse(rule), http.StatusOK, h.logger)
 }
 
 // rejectRule handles POST /api/v1/evm/rules/{id}/reject (admin only via RBAC)
 func (h *RuleHandler) rejectRule(w http.ResponseWriter, r *http.Request, ruleID string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	if !apiKey.IsAdmin() {
-		h.writeError(w, "permission denied: only admin can reject rules", http.StatusForbidden)
+		respond.Error(w, "permission denied: only admin can reject rules", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -354,17 +356,17 @@ func (h *RuleHandler) rejectRule(w http.ResponseWriter, r *http.Request, ruleID 
 	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	// Allow rejecting pending_approval or active rules (idempotent for rejected).
 	if rule.Status != types.RuleStatusPendingApproval && rule.Status != types.RuleStatusActive {
-		h.writeError(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -376,7 +378,7 @@ func (h *RuleHandler) rejectRule(w http.ResponseWriter, r *http.Request, ruleID 
 
 	if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
 		h.logger.Error("failed to reject rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to reject rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to reject rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -385,7 +387,7 @@ func (h *RuleHandler) rejectRule(w http.ResponseWriter, r *http.Request, ruleID 
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
 		h.auditLogger.LogRuleRejected(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Owner, req.Reason)
 	}
-	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
+	respond.JSON(w, h.toRuleResponse(rule), http.StatusOK, h.logger)
 }
 
 // approveProposal applies a proposal's changes to its target rule.
@@ -404,16 +406,16 @@ func (h *RuleHandler) approveProposal(w http.ResponseWriter, r *http.Request, pr
 			proposal.RejectionReason = &reason
 			proposal.UpdatedAt = time.Now()
 			_ = h.ruleRepo.Update(r.Context(), proposal)
-			h.writeError(w, "target rule no longer exists: proposal rejected", http.StatusConflict)
+			respond.Error(w, "target rule no longer exists: proposal rejected", http.StatusConflict, h.logger)
 			return
 		}
 		h.logger.Error("failed to get target rule", "error", err, "rule_id", targetRuleID)
-		h.writeError(w, "failed to get target rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get target rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	if target.Immutable {
-		h.writeError(w, "target rule has been marked immutable", http.StatusForbidden)
+		respond.Error(w, "target rule has been marked immutable", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -492,13 +494,13 @@ func (h *RuleHandler) approveProposal(w http.ResponseWriter, r *http.Request, pr
 			})
 			if err != nil {
 				h.logger.Error("failed to update target rule with budget sync from proposal", "error", err)
-				h.writeError(w, "failed to apply proposal changes", http.StatusInternalServerError)
+				respond.Error(w, "failed to apply proposal changes", http.StatusInternalServerError, h.logger)
 				return
 			}
 		} else {
 			if err := h.ruleRepo.Update(r.Context(), target); err != nil {
 				h.logger.Error("failed to update target rule from proposal", "error", err)
-				h.writeError(w, "failed to apply proposal changes", http.StatusInternalServerError)
+				respond.Error(w, "failed to apply proposal changes", http.StatusInternalServerError, h.logger)
 				return
 			}
 			if len(budgetRequests) > 0 {
@@ -508,7 +510,7 @@ func (h *RuleHandler) approveProposal(w http.ResponseWriter, r *http.Request, pr
 	} else {
 		if err := h.ruleRepo.Update(r.Context(), target); err != nil {
 			h.logger.Error("failed to update target rule from proposal", "error", err)
-			h.writeError(w, "failed to apply proposal changes", http.StatusInternalServerError)
+			respond.Error(w, "failed to apply proposal changes", http.StatusInternalServerError, h.logger)
 			return
 		}
 	}
@@ -571,5 +573,5 @@ func (h *RuleHandler) approveProposal(w http.ResponseWriter, r *http.Request, pr
 		go h.onRuleActivated("proposal-approved:" + string(proposal.ID))
 	}
 
-	h.writeJSON(w, h.toRuleResponse(target), http.StatusOK)
+	respond.JSON(w, h.toRuleResponse(target), http.StatusOK, h.logger)
 }

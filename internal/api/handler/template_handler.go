@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
@@ -50,7 +52,7 @@ func (h *TemplateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 	templates, err := h.templateRepo.List(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list templates", "error", err)
-		h.writeError(w, "failed to list templates", http.StatusInternalServerError)
+		respond.Error(w, "failed to list templates", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -61,7 +63,7 @@ func (h *TemplateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 	total, err := h.templateRepo.Count(r.Context(), countFilter)
 	if err != nil {
 		h.logger.Error("failed to count templates", "error", err)
-		h.writeError(w, "failed to count templates", http.StatusInternalServerError)
+		respond.Error(w, "failed to count templates", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -73,43 +75,43 @@ func (h *TemplateHandler) listTemplates(w http.ResponseWriter, r *http.Request) 
 		resp.Templates = append(resp.Templates, h.toTemplateResponse(tmpl))
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *TemplateHandler) getTemplate(w http.ResponseWriter, r *http.Request, templateID string) {
 	tmpl, err := h.templateRepo.Get(r.Context(), templateID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "template not found", http.StatusNotFound)
+			respond.Error(w, "template not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get template", "error", err, "template_id", templateID)
-		h.writeError(w, "failed to get template", http.StatusInternalServerError)
+		respond.Error(w, "failed to get template", http.StatusInternalServerError, h.logger)
 		return
 	}
 
-	h.writeJSON(w, h.toTemplateResponse(tmpl), http.StatusOK)
+	respond.JSON(w, h.toTemplateResponse(tmpl), http.StatusOK, h.logger)
 }
 
 func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request) {
 	if h.readOnly {
-		h.writeError(w, "template creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "template creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	var req CreateTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate required fields
 	if req.Name == "" {
-		h.writeError(w, "name is required", http.StatusBadRequest)
+		respond.Error(w, "name is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.Type == "" {
-		h.writeError(w, "type is required", http.StatusBadRequest)
+		respond.Error(w, "type is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	// Allow both rule evaluator types AND the meta "template_bundle"
@@ -119,15 +121,15 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 	// creatable from YAML files and silently broke API-driven CRUD
 	// for the bundle case.
 	if !validate.IsValidRuleType(req.Type) && req.Type != "template_bundle" {
-		h.writeError(w, "invalid rule type", http.StatusBadRequest)
+		respond.Error(w, "invalid rule type", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.Mode == "" {
-		h.writeError(w, "mode is required", http.StatusBadRequest)
+		respond.Error(w, "mode is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if err := validate.ValidateRuleMode(req.Mode); err != nil {
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 		return
 	}
 	// Template config may contain variable placeholders (e.g. ${target}); validated at instantiation time.
@@ -135,7 +137,7 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 	// Marshal config
 	configJSON, err := json.Marshal(req.Config)
 	if err != nil {
-		h.writeError(w, "invalid config", http.StatusBadRequest)
+		respond.Error(w, "invalid config", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -154,7 +156,7 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 		}
 		variablesJSON, err = json.Marshal(vars)
 		if err != nil {
-			h.writeError(w, "invalid variables", http.StatusBadRequest)
+			respond.Error(w, "invalid variables", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -164,7 +166,7 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 	if req.BudgetMetering != nil {
 		budgetMeteringJSON, err = json.Marshal(req.BudgetMetering)
 		if err != nil {
-			h.writeError(w, "invalid budget_metering", http.StatusBadRequest)
+			respond.Error(w, "invalid budget_metering", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -174,7 +176,7 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 	if req.TestVariables != nil {
 		testVariablesJSON, err = json.Marshal(req.TestVariables)
 		if err != nil {
-			h.writeError(w, "invalid test_variables", http.StatusBadRequest)
+			respond.Error(w, "invalid test_variables", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -200,18 +202,18 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 
 	if err := h.templateRepo.Create(r.Context(), tmpl); err != nil {
 		h.logger.Error("failed to create template", "error", err)
-		h.writeError(w, "failed to create template", http.StatusInternalServerError)
+		respond.Error(w, "failed to create template", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	h.logger.Info("template created", "template_id", tmpl.ID, "name", tmpl.Name)
-	h.writeJSON(w, h.toTemplateResponse(tmpl), http.StatusCreated)
+	respond.JSON(w, h.toTemplateResponse(tmpl), http.StatusCreated, h.logger)
 }
 
 func (h *TemplateHandler) updateTemplate(w http.ResponseWriter, r *http.Request, templateID string) {
 	var req UpdateTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -219,22 +221,22 @@ func (h *TemplateHandler) updateTemplate(w http.ResponseWriter, r *http.Request,
 	tmpl, err := h.templateRepo.Get(r.Context(), templateID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "template not found", http.StatusNotFound)
+			respond.Error(w, "template not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get template", "error", err, "template_id", templateID)
-		h.writeError(w, "failed to get template", http.StatusInternalServerError)
+		respond.Error(w, "failed to get template", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	if h.readOnly {
-		h.writeError(w, "template updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "template updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Protect config-sourced templates from API updates
 	if tmpl.Source == types.RuleSourceConfig {
-		h.writeError(w, "cannot update config-sourced templates via API", http.StatusForbidden)
+		respond.Error(w, "cannot update config-sourced templates via API", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -249,7 +251,7 @@ func (h *TemplateHandler) updateTemplate(w http.ResponseWriter, r *http.Request,
 		// Template config may contain placeholders; structure validated at instantiation.
 		configJSON, err := json.Marshal(req.Config)
 		if err != nil {
-			h.writeError(w, "invalid config", http.StatusBadRequest)
+			respond.Error(w, "invalid config", http.StatusBadRequest, h.logger)
 			return
 		}
 		tmpl.Config = configJSON
@@ -261,10 +263,10 @@ func (h *TemplateHandler) updateTemplate(w http.ResponseWriter, r *http.Request,
 
 	if err := h.templateRepo.Update(r.Context(), tmpl); err != nil {
 		h.logger.Error("failed to update template", "error", err, "template_id", templateID)
-		h.writeError(w, "failed to update template", http.StatusInternalServerError)
+		respond.Error(w, "failed to update template", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	h.logger.Info("template updated", "template_id", templateID)
-	h.writeJSON(w, h.toTemplateResponse(tmpl), http.StatusOK)
+	respond.JSON(w, h.toTemplateResponse(tmpl), http.StatusOK, h.logger)
 }

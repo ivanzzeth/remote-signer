@@ -210,49 +210,6 @@ func TestCoverage_Template_ServeInstanceHTTP_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
-func TestCoverage_WriteJSON_EncodeError_APIKeyHandler(t *testing.T) {
-	h := &APIKeyHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	w := httptest.NewRecorder()
-	h.writeJSON(w, make(chan int), http.StatusOK)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestCoverage_WriteJSON_EncodeError_PresetHandler(t *testing.T) {
-	h := &PresetHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	w := httptest.NewRecorder()
-	h.writeJSON(w, make(chan int), http.StatusOK)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestCoverage_WriteJSON_EncodeError_TemplateHandler(t *testing.T) {
-	h := &TemplateHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	w := httptest.NewRecorder()
-	h.writeJSON(w, make(chan int), http.StatusOK)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestCoverage_WriteJSON_EncodeError_AuditHandler(t *testing.T) {
-	h := &AuditHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	w := httptest.NewRecorder()
-	h.writeJSON(w, make(chan int), http.StatusOK)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestCoverage_WriteJSON_EncodeError_BootstrapHandler(t *testing.T) {
-	h := &BootstrapHandler{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	w := httptest.NewRecorder()
-	h.writeJSON(w, make(chan int), http.StatusOK)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestCoverage_PresetHandler_WriteError(t *testing.T) {
-	h := &PresetHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	w := httptest.NewRecorder()
-	h.writeError(w, "test error", http.StatusBadRequest)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "test error")
-}
-
 type brokenWriter struct{}
 
 func (brokenWriter) Header() http.Header       { return http.Header{} }

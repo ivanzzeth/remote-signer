@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -89,7 +91,7 @@ func (h *WalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.createWallet(w, r)
 	default:
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
 }
 
@@ -101,7 +103,7 @@ func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) 
 
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 1 || parts[0] == "" {
-		h.writeError(w, "wallet ID required", http.StatusBadRequest)
+		respond.Error(w, "wallet ID required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -110,24 +112,24 @@ func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) 
 	// Verify the wallet exists and the caller owns it
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	wallet, err := h.repo.Get(r.Context(), walletID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "wallet not found", http.StatusNotFound)
+			respond.Error(w, "wallet not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get wallet", "error", err)
-		h.writeError(w, "internal error", http.StatusInternalServerError)
+		respond.Error(w, "internal error", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	// Only owner or admin can access
 	if wallet.OwnerID != apiKey.ID && !apiKey.IsAdmin() {
-		h.writeError(w, "wallet not found", http.StatusNotFound)
+		respond.Error(w, "wallet not found", http.StatusNotFound, h.logger)
 		return
 	}
 
@@ -141,7 +143,7 @@ func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) 
 		case http.MethodDelete:
 			h.deleteWallet(w, r, walletID)
 		default:
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		}
 		return
 	}
@@ -155,7 +157,7 @@ func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) 
 			case http.MethodPost:
 				h.addMember(w, r, walletID)
 			default:
-				h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			}
 			return
 		}
@@ -166,13 +168,13 @@ func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) 
 			case http.MethodDelete:
 				h.removeMember(w, r, walletID, signerAddress)
 			default:
-				h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			}
 			return
 		}
 	}
 
-	h.writeError(w, "not found", http.StatusNotFound)
+	respond.Error(w, "not found", http.StatusNotFound, h.logger)
 }
 
 // --- CRUD operations ---
@@ -180,18 +182,18 @@ func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) 
 func (h *WalletHandler) createWallet(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	var req createWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	if strings.TrimSpace(req.Name) == "" {
-		h.writeError(w, "name is required", http.StatusBadRequest)
+		respond.Error(w, "name is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -203,17 +205,17 @@ func (h *WalletHandler) createWallet(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.repo.Create(r.Context(), wallet); err != nil {
 		h.logger.Error("failed to create wallet", "error", err)
-		h.writeError(w, "failed to create wallet", http.StatusInternalServerError)
+		respond.Error(w, "failed to create wallet", http.StatusInternalServerError, h.logger)
 		return
 	}
 
-	h.writeJSON(w, h.toResponse(wallet), http.StatusCreated)
+	respond.JSON(w, h.toResponse(wallet), http.StatusCreated, h.logger)
 }
 
 func (h *WalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -245,7 +247,7 @@ func (h *WalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 	result, err := h.repo.List(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list wallets", "error", err)
-		h.writeError(w, "failed to list wallets", http.StatusInternalServerError)
+		respond.Error(w, "failed to list wallets", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -258,24 +260,24 @@ func (h *WalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 		resp.Wallets = append(resp.Wallets, h.toResponse(&result.Wallets[i]))
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *WalletHandler) getWallet(w http.ResponseWriter, wallet *types.Wallet) {
-	h.writeJSON(w, h.toResponse(wallet), http.StatusOK)
+	respond.JSON(w, h.toResponse(wallet), http.StatusOK, h.logger)
 }
 
 func (h *WalletHandler) updateWallet(w http.ResponseWriter, r *http.Request, wallet *types.Wallet) {
 	var req updateWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" {
-			h.writeError(w, "name cannot be empty", http.StatusBadRequest)
+			respond.Error(w, "name cannot be empty", http.StatusBadRequest, h.logger)
 			return
 		}
 		wallet.Name = name
@@ -286,21 +288,21 @@ func (h *WalletHandler) updateWallet(w http.ResponseWriter, r *http.Request, wal
 
 	if err := h.repo.Update(r.Context(), wallet); err != nil {
 		h.logger.Error("failed to update wallet", "error", err)
-		h.writeError(w, "failed to update wallet", http.StatusInternalServerError)
+		respond.Error(w, "failed to update wallet", http.StatusInternalServerError, h.logger)
 		return
 	}
 
-	h.writeJSON(w, h.toResponse(wallet), http.StatusOK)
+	respond.JSON(w, h.toResponse(wallet), http.StatusOK, h.logger)
 }
 
 func (h *WalletHandler) deleteWallet(w http.ResponseWriter, r *http.Request, walletID string) {
 	if err := h.repo.Delete(r.Context(), walletID); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "wallet not found", http.StatusNotFound)
+			respond.Error(w, "wallet not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to delete wallet", "error", err)
-		h.writeError(w, "failed to delete wallet", http.StatusInternalServerError)
+		respond.Error(w, "failed to delete wallet", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -313,7 +315,7 @@ func (h *WalletHandler) listMembers(w http.ResponseWriter, r *http.Request, wall
 	members, err := h.repo.ListMembers(r.Context(), walletID)
 	if err != nil {
 		h.logger.Error("failed to list members", "error", err)
-		h.writeError(w, "failed to list members", http.StatusInternalServerError)
+		respond.Error(w, "failed to list members", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -328,24 +330,24 @@ func (h *WalletHandler) listMembers(w http.ResponseWriter, r *http.Request, wall
 		})
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, walletID string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	var req addMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	if strings.TrimSpace(req.SignerAddress) == "" {
-		h.writeError(w, "signer_address is required", http.StatusBadRequest)
+		respond.Error(w, "signer_address is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -355,11 +357,11 @@ func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, wallet
 		authorized, err := h.callerCanAccessWallet(r.Context(), apiKey.ID, req.SignerAddress)
 		if err != nil {
 			h.logger.Error("failed to verify wallet access", "error", err)
-			h.writeError(w, "internal error", http.StatusInternalServerError)
+			respond.Error(w, "internal error", http.StatusInternalServerError, h.logger)
 			return
 		}
 		if !authorized {
-			h.writeError(w, "unauthorized to add signer: caller does not own or have access to this signer", http.StatusForbidden)
+			respond.Error(w, "unauthorized to add signer: caller does not own or have access to this signer", http.StatusForbidden, h.logger)
 			return
 		}
 	}
@@ -371,19 +373,20 @@ func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, wallet
 
 	if err := h.repo.AddMember(r.Context(), member); err != nil {
 		if strings.Contains(err.Error(), "nested wallets are not allowed") {
-			h.writeError(w, err.Error(), http.StatusBadRequest)
+			respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 			return
 		}
 		h.logger.Error("failed to add member", "error", err)
-		h.writeError(w, "failed to add member", http.StatusInternalServerError)
+		respond.Error(w, "failed to add member", http.StatusInternalServerError, h.logger)
 		return
 	}
 
-	h.writeJSON(w, memberResponse{
+	respond.JSON(w, memberResponse{
 		WalletID:      member.WalletID,
 		SignerAddress: member.SignerAddress,
 		AddedAt:       member.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
-	}, http.StatusCreated)
+	}, http.StatusCreated, h.logger)
+
 }
 
 // callerCanAccessWallet checks whether the caller owns or has access to the given wallet address.
@@ -416,11 +419,11 @@ func (h *WalletHandler) callerCanAccessWallet(ctx context.Context, apiKeyID, wal
 func (h *WalletHandler) removeMember(w http.ResponseWriter, r *http.Request, walletID, signerAddress string) {
 	if err := h.repo.RemoveMember(r.Context(), walletID, signerAddress); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "member not found", http.StatusNotFound)
+			respond.Error(w, "member not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to remove member", "error", err)
-		h.writeError(w, "failed to remove member", http.StatusInternalServerError)
+		respond.Error(w, "failed to remove member", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -438,18 +441,4 @@ func (h *WalletHandler) toResponse(c *types.Wallet) walletResponse {
 		CreatedAt:   c.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   c.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}
-}
-
-func (h *WalletHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
-	_ = json.NewEncoder(w).Encode(data)
-}
-
-func (h *WalletHandler) writeError(w http.ResponseWriter, message string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

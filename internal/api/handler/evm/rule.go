@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
@@ -149,7 +151,7 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context (for audit)
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -166,7 +168,7 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPost:
 			h.createRule(w, r)
 		default:
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		}
 		return
 	}
@@ -174,7 +176,7 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Sub-resource: /api/v1/evm/rules/validate (batch validate — no rule ID, admin only)
 	if path == "validate" && r.Method == http.MethodPost {
 		if !apiKey.IsAdmin() {
-			h.writeError(w, "forbidden: admin role required", http.StatusForbidden)
+			respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
 			return
 		}
 		h.validateRules(w, r)
@@ -187,7 +189,7 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ruleID = strings.Trim(ruleID, "/")
 		if ruleID != "" && !strings.Contains(ruleID, "/") && r.Method == http.MethodPost {
 			if !apiKey.IsAdmin() {
-				h.writeError(w, "forbidden: admin role required", http.StatusForbidden)
+				respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
 				return
 			}
 			h.validateRule(w, r, ruleID)
@@ -245,7 +247,7 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Specific rule operations: /api/v1/evm/rules/{id}
 	ruleID := strings.Trim(path, "/")
 	if !isRulePathID(ruleID) {
-		h.writeError(w, "invalid rule_id format", http.StatusBadRequest)
+		respond.Error(w, "invalid rule_id format", http.StatusBadRequest, h.logger)
 		return
 	}
 	switch r.Method {
@@ -255,11 +257,11 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deleteRule(w, r, ruleID)
 	case http.MethodPatch:
 		if isSyntheticBudgetRuleID(ruleID) {
-			h.writeError(w, "cannot modify synthetic simulation budget rule", http.StatusForbidden)
+			respond.Error(w, "cannot modify synthetic simulation budget rule", http.StatusForbidden, h.logger)
 			return
 		}
 		h.updateRule(w, r, ruleID)
 	default:
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
 }

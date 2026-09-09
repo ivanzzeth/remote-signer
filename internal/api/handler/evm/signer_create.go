@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/secure"
@@ -17,19 +19,19 @@ import (
 // createSigner handles POST /api/v1/evm/signers
 func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	if h.readOnly {
-		h.writeError(w, "signer creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "signer creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	// RBAC check: PermCreateSigners required (admin, dev, agent via rbac.go)
 	if !middleware.HasPermission(apiKey.Role, middleware.PermCreateSigners) {
-		h.writeError(w, "permission denied", http.StatusForbidden)
+		respond.Error(w, "permission denied", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -38,18 +40,18 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		count, countErr := h.accessService.CountOwnedSigners(r.Context(), apiKey.ID)
 		if countErr != nil {
 			h.logger.Error("failed to count owned signers", slog.String("error", countErr.Error()))
-			h.writeError(w, "failed to check resource limits", http.StatusInternalServerError)
+			respond.Error(w, "failed to check resource limits", http.StatusInternalServerError, h.logger)
 			return
 		}
 		if int(count) >= h.maxKeystoresPerKey {
-			h.writeError(w, fmt.Sprintf("resource limit exceeded: maximum %d keystores per API key", h.maxKeystoresPerKey), http.StatusForbidden)
+			respond.Error(w, fmt.Sprintf("resource limit exceeded: maximum %d keystores per API key", h.maxKeystoresPerKey), http.StatusForbidden, h.logger)
 			return
 		}
 	}
 
 	var req CreateSignerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 	defer func() {
@@ -67,7 +69,7 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Keystore != nil {
 		if req.Keystore.PrivateKeyHex != "" && req.Keystore.KeystoreJSON != "" {
-			h.writeError(w, "specify private_key_hex or keystore_json, not both", http.StatusBadRequest)
+			respond.Error(w, "specify private_key_hex or keystore_json, not both", http.StatusBadRequest, h.logger)
 			return
 		}
 		createReq.Keystore = &types.CreateKeystoreParams{
@@ -78,7 +80,7 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := createReq.Validate(); err != nil {
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -88,7 +90,7 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 			slog.String("type", req.Type),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, "failed to create signer", http.StatusInternalServerError)
+		respond.Error(w, "failed to create signer", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -156,5 +158,5 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		resp.Tags = own.Tags()
 	}
 
-	h.writeJSON(w, resp, http.StatusCreated)
+	respond.JSON(w, resp, http.StatusCreated, h.logger)
 }

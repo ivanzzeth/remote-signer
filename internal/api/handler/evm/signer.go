@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
@@ -73,7 +75,7 @@ func (h *SignerHandler) SetMaxKeystoresPerKey(max int) {
 func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -83,7 +85,7 @@ func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.createSigner(w, r)
 	default:
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
 }
 
@@ -91,7 +93,7 @@ func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -99,7 +101,7 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/signers/")
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 1 || parts[0] == "" {
-		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}", http.StatusBadRequest)
+		respond.Error(w, "invalid path: expected /api/v1/evm/signers/{address}", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -119,32 +121,32 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 			h.handlePatchSignerLabels(w, r, address)
 			return
 		}
-		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest)
+		respond.Error(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	switch action {
 	case "unlock":
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		h.handleUnlock(w, r, address)
 	case "lock":
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		h.handleLock(w, r, address)
 	case "approve":
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		h.handleApproveSigner(w, r, address)
 	case "transfer":
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		h.handleTransferOwnership(w, r, address)
@@ -155,7 +157,7 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 		}
 		h.handleAccess(w, r, address, extra)
 	default:
-		h.writeError(w, "unknown action: "+action, http.StatusBadRequest)
+		respond.Error(w, "unknown action: "+action, http.StatusBadRequest, h.logger)
 	}
 }
 
@@ -171,19 +173,19 @@ func (h *SignerHandler) handleAccess(w http.ResponseWriter, r *http.Request, add
 	case http.MethodDelete:
 		// DELETE /api/v1/evm/signers/{address}/access/{keyID}
 		if extra == "" {
-			h.writeError(w, "api_key_id is required in path", http.StatusBadRequest)
+			respond.Error(w, "api_key_id is required in path", http.StatusBadRequest, h.logger)
 			return
 		}
 		h.handleRevokeAccess(w, r, address, extra)
 	default:
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
 }
 
 // HandleWalletSigners handles GET /api/v1/evm/wallets/{wallet_id}/signers
 func (h *SignerHandler) HandleWalletSigners(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
@@ -193,7 +195,7 @@ func (h *SignerHandler) HandleWalletSigners(w http.ResponseWriter, r *http.Reque
 	walletID := strings.TrimSpace(path)
 
 	if walletID == "" {
-		h.writeError(w, "wallet_id is required", http.StatusBadRequest)
+		respond.Error(w, "wallet_id is required", http.StatusBadRequest, h.logger)
 		return
 	}
 

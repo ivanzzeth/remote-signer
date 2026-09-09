@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
@@ -28,7 +30,7 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 	if offsetStr := query.Get("offset"); offsetStr != "" {
 		offset, err := strconv.Atoi(offsetStr)
 		if err != nil || offset < 0 {
-			h.writeError(w, "invalid offset parameter", http.StatusBadRequest)
+			respond.Error(w, "invalid offset parameter", http.StatusBadRequest, h.logger)
 			return
 		}
 		requestedOffset = offset
@@ -37,7 +39,7 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 	if limitStr := query.Get("limit"); limitStr != "" {
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil || limit < 0 {
-			h.writeError(w, "invalid limit parameter", http.StatusBadRequest)
+			respond.Error(w, "invalid limit parameter", http.StatusBadRequest, h.logger)
 			return
 		}
 		if limit > 100 {
@@ -54,7 +56,7 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 	result, err := h.signerManager.ListSigners(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list signers", slog.String("error", err.Error()))
-		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		respond.Error(w, "failed to list signers", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -62,13 +64,13 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 	ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), apiKey.ID)
 	if err != nil {
 		h.logger.Error("failed to get owned addresses", slog.String("error", err.Error()))
-		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		respond.Error(w, "failed to list signers", http.StatusInternalServerError, h.logger)
 		return
 	}
 	grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), apiKey.ID)
 	if err != nil {
 		h.logger.Error("failed to get accessible addresses", slog.String("error", err.Error()))
-		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		respond.Error(w, "failed to list signers", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -157,7 +159,7 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 		HasMore:    hasMore,
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 // signerInfoByAddress looks up a signer by address from the signer manager.

@@ -4,9 +4,6 @@ package evm
 
 import (
 	"context"
-	"encoding/json"
-	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -213,21 +210,4 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 	}
 
 	return resp
-}
-
-// writeJSON writes a JSON response
-func (h *SignerHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", slog.String("error", err.Error()))
-	}
-}
-
-// writeError writes an error response
-func (h *SignerHandler) writeError(w http.ResponseWriter, message string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -69,7 +71,7 @@ type statusResponse struct {
 // behaviour to mutable backend state and complicate the unauth contract.
 func (h *BootstrapHandler) ServeStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeJSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed)
+		respond.JSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed, h.log)
 		return
 	}
 	// "Needs bootstrap" specifically means "no admin api key yet". The
@@ -82,10 +84,10 @@ func (h *BootstrapHandler) ServeStatus(w http.ResponseWriter, r *http.Request) {
 	existing, err := h.repo.Get(r.Context(), "admin")
 	if err != nil && !types.IsNotFound(err) {
 		h.log.Error("bootstrap status: get admin api key failed", "error", err)
-		h.writeJSON(w, map[string]string{"error": "internal error"}, http.StatusInternalServerError)
+		respond.JSON(w, map[string]string{"error": "internal error"}, http.StatusInternalServerError, h.log)
 		return
 	}
-	h.writeJSON(w, statusResponse{NeedsBootstrap: existing == nil}, http.StatusOK)
+	respond.JSON(w, statusResponse{NeedsBootstrap: existing == nil}, http.StatusOK, h.log)
 }
 
 // adminRequest is the POST /api/v1/bootstrap/admin payload.
@@ -111,16 +113,16 @@ type adminRequest struct {
 // user to the regular login page instead.
 func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeJSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed)
+		respond.JSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed, h.log)
 		return
 	}
 	var req adminRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSON(w, map[string]string{"error": "invalid request body"}, http.StatusBadRequest)
+		respond.JSON(w, map[string]string{"error": "invalid request body"}, http.StatusBadRequest, h.log)
 		return
 	}
 	if req.Password == "" {
-		h.writeJSON(w, map[string]string{"error": "password is required"}, http.StatusBadRequest)
+		respond.JSON(w, map[string]string{"error": "password is required"}, http.StatusBadRequest, h.log)
 		return
 	}
 	// Materialise the password as a mutable byte slice so we can zero it
@@ -139,15 +141,15 @@ func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
 	res, err := h.create(r.Context(), password)
 	if err != nil {
 		if errors.Is(err, bootstrap.ErrAdminAlreadyExists) {
-			h.writeJSON(w, map[string]string{
+			respond.JSON(w, map[string]string{
 				"error": "admin already configured; the bootstrap window has closed",
 				"code":  "admin_already_exists",
-			}, http.StatusGone)
+			}, http.StatusGone, h.log)
 
 			return
 		}
 		h.log.Error("bootstrap admin: create failed", "error", err)
-		h.writeJSON(w, map[string]string{"error": "bootstrap failed"}, http.StatusInternalServerError)
+		respond.JSON(w, map[string]string{"error": "bootstrap failed"}, http.StatusInternalServerError, h.log)
 		return
 	}
 
@@ -156,24 +158,14 @@ func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
 		"public_key_hex", res.PubKeyHex,
 		"client_ip", clientIP(r),
 	)
-	h.writeJSON(w, struct {
+	respond.JSON(w, struct {
 		Status string `json:"status"`
 		bootstrap.AdminResult
 	}{
 		Status:      "ok",
 		AdminResult: *res,
-	}, http.StatusOK)
+	}, http.StatusOK, h.log)
 
-}
-
-// writeJSON is a tiny helper to keep the response paths free of repeated
-// boilerplate. We don't lean on http.Error for the error responses because
-// the front-end parses JSON unconditionally and a text/plain "method not
-// allowed" would break the error display path.
-func (h *BootstrapHandler) writeJSON(w http.ResponseWriter, body interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }
 
 // clientIP extracts the apparent caller IP from the request. Used only

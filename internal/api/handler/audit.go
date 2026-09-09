@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -73,12 +75,12 @@ func (h *AuditHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context (for auth verification)
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	if r.Method != http.MethodGet {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
@@ -89,19 +91,19 @@ func (h *AuditHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *AuditHandler) ServeRequestHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	if r.Method != http.MethodGet {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	// Extract request ID from path: /api/v1/audit/requests/{requestID}
 	requestID := strings.TrimPrefix(r.URL.Path, "/api/v1/audit/requests/")
 	if requestID == "" {
-		h.writeError(w, "request_id is required", http.StatusBadRequest)
+		respond.Error(w, "request_id is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -109,7 +111,7 @@ func (h *AuditHandler) ServeRequestHTTP(w http.ResponseWriter, r *http.Request) 
 	records, err := h.auditRepo.GetByRequestID(r.Context(), reqID)
 	if err != nil {
 		h.logger.Error("failed to get audit records by request ID", "error", err, "request_id", requestID)
-		h.writeError(w, "failed to get audit records", http.StatusInternalServerError)
+		respond.Error(w, "failed to get audit records", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -122,7 +124,7 @@ func (h *AuditHandler) ServeRequestHTTP(w http.ResponseWriter, r *http.Request) 
 		resp.Records = append(resp.Records, h.toAuditRecordResponse(record))
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +138,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	// Parse query parameters (strict: invalid values return 400)
 	if eventType := query.Get("event_type"); eventType != "" {
 		if !validate.IsValidAuditEventType(eventType) {
-			h.writeError(w, "invalid event_type filter", http.StatusBadRequest)
+			respond.Error(w, "invalid event_type filter", http.StatusBadRequest, h.logger)
 			return
 		}
 		et := types.AuditEventType(eventType)
@@ -144,7 +146,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	}
 	if severity := query.Get("severity"); severity != "" {
 		if !validate.IsValidAuditSeverity(severity) {
-			h.writeError(w, "invalid severity filter: must be one of info, warning, critical", http.StatusBadRequest)
+			respond.Error(w, "invalid severity filter: must be one of info, warning, critical", http.StatusBadRequest, h.logger)
 			return
 		}
 		sev := types.AuditSeverity(severity)
@@ -155,7 +157,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	}
 	if signerAddress := query.Get("signer_address"); signerAddress != "" {
 		if !validate.IsValidEthereumAddress(signerAddress) {
-			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			respond.Error(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.SignerAddress = &signerAddress
@@ -166,7 +168,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	}
 	if chainType := query.Get("chain_type"); chainType != "" {
 		if !validate.IsValidChainType(chainType) {
-			h.writeError(w, "invalid chain_type filter", http.StatusBadRequest)
+			respond.Error(w, "invalid chain_type filter", http.StatusBadRequest, h.logger)
 			return
 		}
 		ct := types.ChainType(chainType)
@@ -174,7 +176,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	}
 	if chainID := query.Get("chain_id"); chainID != "" {
 		if _, err := strconv.ParseUint(chainID, 10, 64); err != nil {
-			h.writeError(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest)
+			respond.Error(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.ChainID = &chainID
@@ -186,7 +188,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 			if !validate.IsValidAuditEventType(et) {
-				h.writeError(w, fmt.Sprintf("invalid exclude_event_type: %s", et), http.StatusBadRequest)
+				respond.Error(w, fmt.Sprintf("invalid exclude_event_type: %s", et), http.StatusBadRequest, h.logger)
 				return
 			}
 			filter.ExcludeEventTypes = append(filter.ExcludeEventTypes, types.AuditEventType(et))
@@ -195,7 +197,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	if startTimeStr := query.Get("start_time"); startTimeStr != "" {
 		startTime, err := time.Parse(time.RFC3339, startTimeStr)
 		if err != nil {
-			h.writeError(w, "invalid start_time: must be RFC3339", http.StatusBadRequest)
+			respond.Error(w, "invalid start_time: must be RFC3339", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.StartTime = &startTime
@@ -203,7 +205,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	if endTimeStr := query.Get("end_time"); endTimeStr != "" {
 		endTime, err := time.Parse(time.RFC3339, endTimeStr)
 		if err != nil {
-			h.writeError(w, "invalid end_time: must be RFC3339", http.StatusBadRequest)
+			respond.Error(w, "invalid end_time: must be RFC3339", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.EndTime = &endTime
@@ -218,7 +220,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	if cursorStr := query.Get("cursor"); cursorStr != "" {
 		cursor, err := time.Parse(time.RFC3339Nano, cursorStr)
 		if err != nil {
-			h.writeError(w, "invalid cursor: must be RFC3339Nano timestamp", http.StatusBadRequest)
+			respond.Error(w, "invalid cursor: must be RFC3339Nano timestamp", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.Cursor = &cursor
@@ -235,7 +237,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	total, err := h.auditRepo.Count(r.Context(), countFilter)
 	if err != nil {
 		h.logger.Error("failed to count audit records", "error", err)
-		h.writeError(w, "failed to count audit records", http.StatusInternalServerError)
+		respond.Error(w, "failed to count audit records", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -244,7 +246,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	records, err := h.auditRepo.Query(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to query audit records", "error", err)
-		h.writeError(w, "failed to query audit records", http.StatusInternalServerError)
+		respond.Error(w, "failed to query audit records", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -272,7 +274,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 		resp.NextCursorID = &cursorID
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *AuditHandler) toAuditRecordResponse(record *types.AuditRecord) AuditRecordResponse {
@@ -309,16 +311,4 @@ func (h *AuditHandler) toAuditRecordResponse(record *types.AuditRecord) AuditRec
 	}
 
 	return resp
-}
-
-func (h *AuditHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *AuditHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }

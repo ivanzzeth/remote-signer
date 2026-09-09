@@ -13,12 +13,13 @@
 package evm
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -47,12 +48,12 @@ func NewTransactionsHandler(repo storage.TransactionRepository, logger *slog.Log
 // /api/v1/evm/transactions/{id} (item).
 func (h *TransactionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -63,7 +64,7 @@ func (h *TransactionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.Contains(path, "/") {
-		h.writeError(w, "not found", http.StatusNotFound)
+		respond.Error(w, "not found", http.StatusNotFound, h.logger)
 		return
 	}
 	h.get(w, r, apiKey, path)
@@ -95,23 +96,23 @@ func (h *TransactionsHandler) list(w http.ResponseWriter, r *http.Request, apiKe
 	}
 	if roleStr := q.Get("role"); roleStr != "" {
 		if !types.IsValidAPIKeyRole(roleStr) {
-			h.writeError(w, "invalid role", http.StatusBadRequest)
+			respond.Error(w, "invalid role", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.APIKeyRole = types.APIKeyRole(roleStr)
 	}
 	if filter.SignType != "" && !validate.ValidSignTypes[filter.SignType] {
-		h.writeError(w, "invalid sign_type", http.StatusBadRequest)
+		respond.Error(w, "invalid sign_type", http.StatusBadRequest, h.logger)
 		return
 	}
 	if filter.FromAddress != "" && !validate.IsValidEthereumAddress(filter.FromAddress) {
-		h.writeError(w, "invalid from address", http.StatusBadRequest)
+		respond.Error(w, "invalid from address", http.StatusBadRequest, h.logger)
 		return
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			h.writeError(w, "invalid limit", http.StatusBadRequest)
+			respond.Error(w, "invalid limit", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.Limit = n
@@ -119,7 +120,7 @@ func (h *TransactionsHandler) list(w http.ResponseWriter, r *http.Request, apiKe
 	if v := q.Get("offset"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			h.writeError(w, "invalid offset", http.StatusBadRequest)
+			respond.Error(w, "invalid offset", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.Offset = n
@@ -131,7 +132,7 @@ func (h *TransactionsHandler) list(w http.ResponseWriter, r *http.Request, apiKe
 	// /signers?api_key_id behavior (signer_crud.go).
 	if !apiKey.IsAdmin() && !apiKey.IsDev() {
 		if filter.APIKeyID != "" && filter.APIKeyID != apiKey.ID {
-			h.writeError(w, "forbidden: only admins can filter by another api key", http.StatusForbidden)
+			respond.Error(w, "forbidden: only admins can filter by another api key", http.StatusForbidden, h.logger)
 
 			return
 		}
@@ -142,20 +143,20 @@ func (h *TransactionsHandler) list(w http.ResponseWriter, r *http.Request, apiKe
 	total, err := h.repo.Count(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("transactions: count failed", slog.String("error", err.Error()))
-		h.writeError(w, "failed to count", http.StatusInternalServerError)
+		respond.Error(w, "failed to count", http.StatusInternalServerError, h.logger)
 		return
 	}
 	items, err := h.repo.List(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("transactions: list failed", slog.String("error", err.Error()))
-		h.writeError(w, "failed to list", http.StatusInternalServerError)
+		respond.Error(w, "failed to list", http.StatusInternalServerError, h.logger)
 		return
 	}
-	h.writeJSON(w, TransactionsListResponse{
+	respond.JSON(w, TransactionsListResponse{
 		Transactions: items,
 		Total:        total,
 		HasMore:      filter.Offset+len(items) < total,
-	}, http.StatusOK)
+	}, http.StatusOK, h.logger)
 
 }
 
@@ -163,11 +164,11 @@ func (h *TransactionsHandler) get(w http.ResponseWriter, r *http.Request, apiKey
 	tx, err := h.repo.Get(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, types.ErrNotFound) {
-			h.writeError(w, "transaction not found", http.StatusNotFound)
+			respond.Error(w, "transaction not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("transactions: get failed", slog.String("error", err.Error()))
-		h.writeError(w, "failed to get", http.StatusInternalServerError)
+		respond.Error(w, "failed to get", http.StatusInternalServerError, h.logger)
 		return
 	}
 	// Visibility check for non-admin: a non-admin can only fetch a
@@ -178,21 +179,9 @@ func (h *TransactionsHandler) get(w http.ResponseWriter, r *http.Request, apiKey
 	if !apiKey.IsAdmin() && !apiKey.IsDev() {
 		owned, ownErr := h.repo.List(r.Context(), types.TransactionFilter{APIKeyID: apiKey.ID, Limit: 1, Offset: 0, SignRequestID: tx.SignRequestID})
 		if ownErr != nil || len(owned) == 0 || owned[0].ID != tx.ID {
-			h.writeError(w, "transaction not found", http.StatusNotFound)
+			respond.Error(w, "transaction not found", http.StatusNotFound, h.logger)
 			return
 		}
 	}
-	h.writeJSON(w, tx, http.StatusOK)
-}
-
-func (h *TransactionsHandler) writeError(w http.ResponseWriter, msg string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func (h *TransactionsHandler) writeJSON(w http.ResponseWriter, body any, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	respond.JSON(w, tx, http.StatusOK, h.logger)
 }

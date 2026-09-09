@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
@@ -26,39 +28,39 @@ import (
 
 func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	if h.readOnly {
-		h.writeError(w, "rule creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "rule creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	var req CreateRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate required fields
 	if req.Name == "" {
-		h.writeError(w, "name is required", http.StatusBadRequest)
+		respond.Error(w, "name is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.Type == "" {
-		h.writeError(w, "type is required", http.StatusBadRequest)
+		respond.Error(w, "type is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.Mode == "" {
-		h.writeError(w, "mode is required", http.StatusBadRequest)
+		respond.Error(w, "mode is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate mode is a known value
 	if req.Mode != "whitelist" && req.Mode != "blocklist" {
-		h.writeError(w, "mode must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
+		respond.Error(w, "mode must be 'whitelist' or 'blocklist'", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -66,13 +68,13 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 
 	// Agent: block restricted rule types
 	if apiKey.IsAgent() && blockedAgentRuleTypes[ruleType] {
-		h.writeError(w, fmt.Sprintf("agent role cannot create rules of type %q", req.Type), http.StatusForbidden)
+		respond.Error(w, fmt.Sprintf("agent role cannot create rules of type %q", req.Type), http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Dev: block signer_restriction
 	if apiKey.IsDev() && blockedDevRuleTypes[ruleType] {
-		h.writeError(w, fmt.Sprintf("dev role cannot create rules of type %q", req.Type), http.StatusForbidden)
+		respond.Error(w, fmt.Sprintf("dev role cannot create rules of type %q", req.Type), http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -82,11 +84,11 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		count, err := h.ruleRepo.Count(r.Context(), storage.RuleFilter{Owner: &ownerID})
 		if err != nil {
 			h.logger.Error("failed to count rules for owner", "error", err, "owner", ownerID)
-			h.writeError(w, "failed to check rule count", http.StatusInternalServerError)
+			respond.Error(w, "failed to check rule count", http.StatusInternalServerError, h.logger)
 			return
 		}
 		if count >= h.maxRulesPerKey {
-			h.writeError(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden)
+			respond.Error(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden, h.logger)
 			return
 		}
 	}
@@ -97,7 +99,7 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		types.RuleMode(req.Mode), h.requireApproval, h.apiKeyRepo,
 	)
 	if err != nil {
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 		return
 	}
 	appliedTo := ownership.AppliedTo
@@ -105,20 +107,20 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 
 	// Validate rule config format (shared with config load and validate-rules)
 	if err := ruleconfig.ValidateRuleConfig(req.Type, req.Config); err != nil {
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate optional scope fields to prevent storing invalid data
 	if req.ChainType != nil {
 		if !validate.IsValidChainType(*req.ChainType) {
-			h.writeError(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest)
+			respond.Error(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
 	if req.SignerAddress != nil {
 		if !validate.IsValidEthereumAddress(*req.SignerAddress) {
-			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			respond.Error(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -137,7 +139,7 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 	configJSON, err := json.Marshal(configMap)
 	if err != nil {
-		h.writeError(w, "invalid config", http.StatusBadRequest)
+		respond.Error(w, "invalid config", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -185,12 +187,12 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	// Reject solidity rules when forge is unavailable
 	if rule.Type == types.RuleTypeEVMSolidityExpression {
 		if h.solidityValidator == nil {
-			h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
+			respond.Error(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable, h.logger)
 			return
 		}
 		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
 			h.logger.Error("rule validation failed", "error", err, "rule_type", rule.Type)
-			h.writeError(w, "rule validation failed", http.StatusBadRequest)
+			respond.Error(w, "rule validation failed", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -200,11 +202,11 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		var jsCfg evmchain.JSRuleConfig
 		if err := json.Unmarshal(rule.Config, &jsCfg); err != nil {
 			h.logger.Error("evm_js rule has invalid config", "error", err, "rule_name", rule.Name)
-			h.writeError(w, "invalid evm_js rule config", http.StatusBadRequest)
+			respond.Error(w, "invalid evm_js rule config", http.StatusBadRequest, h.logger)
 			return
 		}
 		if jsCfg.Script == "" {
-			h.writeError(w, "evm_js rule must have a script", http.StatusBadRequest)
+			respond.Error(w, "evm_js rule must have a script", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -212,7 +214,7 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	// Create rule
 	if err := h.ruleRepo.Create(r.Context(), rule); err != nil {
 		h.logger.Error("failed to create rule", "error", err)
-		h.writeError(w, "failed to create rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to create rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -232,19 +234,19 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	if rule.Status == types.RuleStatusPendingApproval {
 		responseStatus = http.StatusAccepted
 	}
-	h.writeJSON(w, h.toRuleResponse(rule), responseStatus)
+	respond.JSON(w, h.toRuleResponse(rule), responseStatus, h.logger)
 }
 
 func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID string) {
 	var req UpdateRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -252,45 +254,45 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	if h.readOnly {
-		h.writeError(w, "rule updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden)
+		respond.Error(w, "rule updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
 	if rule.Source == types.RuleSourceConfig {
-		h.writeError(w, "cannot update config-sourced rules via API", http.StatusForbidden)
+		respond.Error(w, "cannot update config-sourced rules via API", http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Immutable check
 	if rule.Immutable {
-		h.writeError(w, "cannot modify immutable rule", http.StatusForbidden)
+		respond.Error(w, "cannot modify immutable rule", http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Ownership check: only owner or admin can modify
 	if !apiKey.IsAdmin() && rule.Owner != apiKey.ID {
-		h.writeError(w, "permission denied: can only modify own rules", http.StatusForbidden)
+		respond.Error(w, "permission denied: can only modify own rules", http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Agent: block changing to restricted rule types
 	if req.Type != "" && apiKey.IsAgent() && blockedAgentRuleTypes[types.RuleType(req.Type)] {
-		h.writeError(w, fmt.Sprintf("agent role cannot change rule type to %q", req.Type), http.StatusForbidden)
+		respond.Error(w, fmt.Sprintf("agent role cannot change rule type to %q", req.Type), http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Agent: cannot change applied_to
 	if len(req.AppliedTo) > 0 && !apiKey.IsAdmin() {
 		// Non-admin cannot change applied_to (forced to ["self"])
-		h.writeError(w, "only admin can change applied_to", http.StatusForbidden)
+		respond.Error(w, "only admin can change applied_to", http.StatusForbidden, h.logger)
 		return
 	}
 
@@ -307,7 +309,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	}
 	if req.Config != nil {
 		if err := ruleconfig.ValidateRuleConfig(string(rule.Type), req.Config); err != nil {
-			h.writeError(w, err.Error(), http.StatusBadRequest)
+			respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
 			return
 		}
 		// Preserve test_cases from request if provided
@@ -317,7 +319,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		}
 		configJSON, err := json.Marshal(configMap)
 		if err != nil {
-			h.writeError(w, "invalid config", http.StatusBadRequest)
+			respond.Error(w, "invalid config", http.StatusBadRequest, h.logger)
 			return
 		}
 		rule.Config = configJSON
@@ -335,7 +337,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		} else {
 			d, err := time.ParseDuration(*req.BudgetPeriod)
 			if err != nil || d <= 0 {
-				h.writeError(w, "invalid budget_period: must be a valid duration like 24h, 7d (7*24h)", http.StatusBadRequest)
+				respond.Error(w, "invalid budget_period: must be a valid duration like 24h, 7d (7*24h)", http.StatusBadRequest, h.logger)
 				return
 			}
 			rule.BudgetPeriod = &d
@@ -345,7 +347,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	}
 	if req.ChainType != nil {
 		if !validate.IsValidChainType(*req.ChainType) {
-			h.writeError(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest)
+			respond.Error(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest, h.logger)
 			return
 		}
 		ct := types.ChainType(*req.ChainType)
@@ -356,7 +358,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	}
 	if req.SignerAddress != nil {
 		if !validate.IsValidEthereumAddress(*req.SignerAddress) {
-			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			respond.Error(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest, h.logger)
 			return
 		}
 		rule.SignerAddress = req.SignerAddress
@@ -374,12 +376,12 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	if req.Variables != nil {
 		patchJSON, err := json.Marshal(req.Variables)
 		if err != nil {
-			h.writeError(w, "invalid variables: failed to marshal JSON", http.StatusBadRequest)
+			respond.Error(w, "invalid variables: failed to marshal JSON", http.StatusBadRequest, h.logger)
 			return
 		}
 		merged, err := rulepkg.MergeVariablesJSON(rule.Variables, patchJSON)
 		if err != nil {
-			h.writeError(w, "invalid variables: failed to merge JSON", http.StatusBadRequest)
+			respond.Error(w, "invalid variables: failed to merge JSON", http.StatusBadRequest, h.logger)
 			return
 		}
 		rule.Variables = merged
@@ -390,7 +392,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		// Empty array clears the matrix
 		matrixJSON, err := json.Marshal(req.Matrix)
 		if err != nil {
-			h.writeError(w, "invalid matrix: failed to marshal JSON", http.StatusBadRequest)
+			respond.Error(w, "invalid matrix: failed to marshal JSON", http.StatusBadRequest, h.logger)
 			return
 		}
 		rule.Matrix = matrixJSON
@@ -406,13 +408,13 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	// Reject solidity rules when forge is unavailable
 	if rule.Type == types.RuleTypeEVMSolidityExpression {
 		if h.solidityValidator == nil {
-			h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
+			respond.Error(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable, h.logger)
 			return
 		}
 		if req.Config != nil {
 			if err := h.validateSolidityRule(r.Context(), rule); err != nil {
 				h.logger.Error("rule validation failed", "error", err, "rule_id", ruleID)
-				h.writeError(w, "rule validation failed", http.StatusBadRequest)
+				respond.Error(w, "rule validation failed", http.StatusBadRequest, h.logger)
 				return
 			}
 		}
@@ -423,11 +425,11 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		var jsCfg evmchain.JSRuleConfig
 		if err := json.Unmarshal(rule.Config, &jsCfg); err != nil {
 			h.logger.Error("evm_js update has invalid config", "error", err, "rule_id", ruleID)
-			h.writeError(w, "invalid evm_js rule config", http.StatusBadRequest)
+			respond.Error(w, "invalid evm_js rule config", http.StatusBadRequest, h.logger)
 			return
 		}
 		if jsCfg.Script == "" {
-			h.writeError(w, "evm_js rule must have a script", http.StatusBadRequest)
+			respond.Error(w, "evm_js rule must have a script", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -454,14 +456,14 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 			})
 			if err != nil {
 				h.logger.Error("failed to update rule with budget sync", "error", err, "rule_id", ruleID)
-				h.writeError(w, "failed to update rule", http.StatusInternalServerError)
+				respond.Error(w, "failed to update rule", http.StatusInternalServerError, h.logger)
 				return
 			}
 		} else {
 			// Non-transactional fallback (in-memory repos)
 			if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
 				h.logger.Error("failed to update rule", "error", err, "rule_id", ruleID)
-				h.writeError(w, "failed to update rule", http.StatusInternalServerError)
+				respond.Error(w, "failed to update rule", http.StatusInternalServerError, h.logger)
 				return
 			}
 			if len(budgetRequests) > 0 {
@@ -471,7 +473,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	} else {
 		if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
 			h.logger.Error("failed to update rule", "error", err, "rule_id", ruleID)
-			h.writeError(w, "failed to update rule", http.StatusInternalServerError)
+			respond.Error(w, "failed to update rule", http.StatusInternalServerError, h.logger)
 			return
 		}
 	}
@@ -489,7 +491,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		go h.onRuleActivated("rule-updated:" + ruleID)
 	}
 
-	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
+	respond.JSON(w, h.toRuleResponse(rule), http.StatusOK, h.logger)
 }
 
 // proposeRule handles POST /api/v1/evm/rules/{id}/propose
@@ -498,25 +500,25 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, targetRuleID string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	// Only agent and admin can propose (dev uses direct PATCH on own rules)
 	if !apiKey.IsAgent() && !apiKey.IsAdmin() {
-		h.writeError(w, "permission denied: only agents and admins can propose rule changes", http.StatusForbidden)
+		respond.Error(w, "permission denied: only agents and admins can propose rule changes", http.StatusForbidden, h.logger)
 		return
 	}
 
 	// Read-only check
 	if h.readOnly {
-		h.writeError(w, "rule mutations are disabled in read-only mode", http.StatusForbidden)
+		respond.Error(w, "rule mutations are disabled in read-only mode", http.StatusForbidden, h.logger)
 		return
 	}
 
 	var req ProposeRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		respond.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -525,18 +527,18 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 		req.Matrix == nil && req.ChainType == nil && req.ChainID == nil &&
 		req.SignerAddress == nil && req.Priority == nil && req.BudgetPeriod == nil &&
 		req.Type == "" {
-		h.writeError(w, "at least one field must be changed in a proposal", http.StatusBadRequest)
+		respond.Error(w, "at least one field must be changed in a proposal", http.StatusBadRequest, h.logger)
 		return
 	}
 
 	// Validate type if specified
 	if req.Type != "" {
 		if !validate.IsValidRuleType(req.Type) {
-			h.writeError(w, "invalid rule type: "+req.Type, http.StatusBadRequest)
+			respond.Error(w, "invalid rule type: "+req.Type, http.StatusBadRequest, h.logger)
 			return
 		}
 		if apiKey.IsAgent() && blockedAgentRuleTypes[types.RuleType(req.Type)] {
-			h.writeError(w, fmt.Sprintf("agent role cannot change rule type to %q", req.Type), http.StatusForbidden)
+			respond.Error(w, fmt.Sprintf("agent role cannot change rule type to %q", req.Type), http.StatusForbidden, h.logger)
 			return
 		}
 	}
@@ -545,29 +547,29 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	targetRule, err := h.ruleRepo.Get(r.Context(), types.RuleID(targetRuleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "target rule not found", http.StatusNotFound)
+			respond.Error(w, "target rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get target rule", "error", err, "rule_id", targetRuleID)
-		h.writeError(w, "failed to get target rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to get target rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	// Validate target rule
 	if targetRule.Source == types.RuleSourceConfig {
-		h.writeError(w, "cannot propose changes to config-sourced rules", http.StatusForbidden)
+		respond.Error(w, "cannot propose changes to config-sourced rules", http.StatusForbidden, h.logger)
 		return
 	}
 	if targetRule.Immutable {
-		h.writeError(w, "cannot modify immutable rule", http.StatusForbidden)
+		respond.Error(w, "cannot modify immutable rule", http.StatusForbidden, h.logger)
 		return
 	}
 	if targetRule.ProposalFor != nil {
-		h.writeError(w, "cannot propose changes to a rule that is itself a proposal", http.StatusBadRequest)
+		respond.Error(w, "cannot propose changes to a rule that is itself a proposal", http.StatusBadRequest, h.logger)
 		return
 	}
 	if targetRule.Status != types.RuleStatusActive && targetRule.Status != types.RuleStatusPendingApproval {
-		h.writeError(w, fmt.Sprintf("target rule is not active (current status: %s)", targetRule.Status), http.StatusBadRequest)
+		respond.Error(w, fmt.Sprintf("target rule is not active (current status: %s)", targetRule.Status), http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -582,7 +584,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 		for _, rl := range existing {
 			if rl.ProposalFor != nil && string(*rl.ProposalFor) == targetRuleID &&
 				rl.Status == types.RuleStatusPendingApproval {
-				h.writeError(w, "a pending proposal from you already exists for this rule", http.StatusConflict)
+				respond.Error(w, "a pending proposal from you already exists for this rule", http.StatusConflict, h.logger)
 				return
 			}
 		}
@@ -594,11 +596,11 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 		count, err := h.ruleRepo.Count(r.Context(), storage.RuleFilter{Owner: &ownerID})
 		if err != nil {
 			h.logger.Error("failed to count rules for owner", "error", err, "owner", ownerID)
-			h.writeError(w, "failed to check rule count", http.StatusInternalServerError)
+			respond.Error(w, "failed to check rule count", http.StatusInternalServerError, h.logger)
 			return
 		}
 		if count >= h.maxRulesPerKey {
-			h.writeError(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden)
+			respond.Error(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden, h.logger)
 			return
 		}
 	}
@@ -612,7 +614,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	// Validate config if provided
 	if req.Config != nil {
 		if err := ruleconfig.ValidateRuleConfig(string(effectiveType), req.Config); err != nil {
-			h.writeError(w, "invalid config: "+err.Error(), http.StatusBadRequest)
+			respond.Error(w, "invalid config: "+err.Error(), http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -620,13 +622,13 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	// Validate optional scope fields
 	if req.ChainType != nil {
 		if !validate.IsValidChainType(*req.ChainType) {
-			h.writeError(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest)
+			respond.Error(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
 	if req.SignerAddress != nil {
 		if !validate.IsValidEthereumAddress(*req.SignerAddress) {
-			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			respond.Error(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -691,7 +693,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	if req.Config != nil {
 		configJSON, err := json.Marshal(req.Config)
 		if err != nil {
-			h.writeError(w, "failed to marshal config", http.StatusInternalServerError)
+			respond.Error(w, "failed to marshal config", http.StatusInternalServerError, h.logger)
 			return
 		}
 		proposal.Config = configJSON
@@ -699,12 +701,12 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	if req.Variables != nil {
 		patchJSON, err := json.Marshal(req.Variables)
 		if err != nil {
-			h.writeError(w, "failed to marshal variables", http.StatusInternalServerError)
+			respond.Error(w, "failed to marshal variables", http.StatusInternalServerError, h.logger)
 			return
 		}
 		merged, err := rulepkg.MergeVariablesJSON(proposal.Variables, patchJSON)
 		if err != nil {
-			h.writeError(w, "failed to merge variables", http.StatusInternalServerError)
+			respond.Error(w, "failed to merge variables", http.StatusInternalServerError, h.logger)
 			return
 		}
 		proposal.Variables = merged
@@ -712,7 +714,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	if req.Matrix != nil {
 		matrixJSON, err := json.Marshal(req.Matrix)
 		if err != nil {
-			h.writeError(w, "failed to marshal matrix", http.StatusInternalServerError)
+			respond.Error(w, "failed to marshal matrix", http.StatusInternalServerError, h.logger)
 			return
 		}
 		proposal.Matrix = matrixJSON
@@ -736,7 +738,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 		} else {
 			d, err := time.ParseDuration(*req.BudgetPeriod)
 			if err != nil {
-				h.writeError(w, "invalid budget_period: "+err.Error(), http.StatusBadRequest)
+				respond.Error(w, "invalid budget_period: "+err.Error(), http.StatusBadRequest, h.logger)
 				return
 			}
 			proposal.BudgetPeriod = &d
@@ -746,7 +748,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	// Persist proposal
 	if err := h.ruleRepo.Create(r.Context(), proposal); err != nil {
 		h.logger.Error("failed to create proposal", "error", err)
-		h.writeError(w, "failed to create proposal", http.StatusInternalServerError)
+		respond.Error(w, "failed to create proposal", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -756,7 +758,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 		h.auditLogger.LogRuleCreated(r.Context(), apiKey.ID, clientIP, proposal.ID, proposal.Name)
 	}
 
-	h.writeJSON(w, h.toRuleResponse(proposal), http.StatusAccepted)
+	respond.JSON(w, h.toRuleResponse(proposal), http.StatusAccepted, h.logger)
 }
 
 // prepareBudgetSync resolves template BudgetMetering against current rule

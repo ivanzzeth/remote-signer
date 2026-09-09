@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ivanzzeth/remote-signer/internal/api/handler"
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
@@ -145,7 +146,7 @@ type UpdateBudgetRequest struct {
 func (h *BudgetListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 	switch r.Method {
@@ -153,12 +154,12 @@ func (h *BudgetListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleList(w, r, apiKey)
 	case http.MethodPost:
 		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			h.writeError(w, "forbidden", http.StatusForbidden)
+			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
 			return
 		}
 		h.handleCreate(w, r, apiKey)
 	default:
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
 }
 
@@ -166,7 +167,7 @@ func (h *BudgetListHandler) handleList(w http.ResponseWriter, r *http.Request, a
 	budgets, err := h.budgetRepo.ListAll(r.Context())
 	if err != nil {
 		h.logger.Error("failed to list budgets", "error", err)
-		h.writeError(w, "failed to list budgets", http.StatusInternalServerError)
+		respond.Error(w, "failed to list budgets", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -184,43 +185,43 @@ func (h *BudgetListHandler) handleList(w http.ResponseWriter, r *http.Request, a
 		entries = append(entries, entry)
 	}
 
-	h.writeJSON(w, ListBudgetsResponse{Budgets: entries, Total: len(entries)}, http.StatusOK)
+	respond.JSON(w, ListBudgetsResponse{Budgets: entries, Total: len(entries)}, http.StatusOK, h.logger)
 }
 
 func (h *BudgetListHandler) handleCreate(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey) {
 	var req CreateBudgetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 	req.RuleID = strings.TrimSpace(req.RuleID)
 	req.Unit = strings.TrimSpace(req.Unit)
 	if req.RuleID == "" {
-		h.writeError(w, "rule_id is required", http.StatusBadRequest)
+		respond.Error(w, "rule_id is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.Unit == "" {
-		h.writeError(w, "unit is required", http.StatusBadRequest)
+		respond.Error(w, "unit is required", http.StatusBadRequest, h.logger)
 		return
 	}
 	if strings.HasPrefix(req.RuleID, "sim:") {
-		h.writeError(w, ErrCannotCreateSimulationBudget.Error(), http.StatusForbidden)
+		respond.Error(w, ErrCannotCreateSimulationBudget.Error(), http.StatusForbidden, h.logger)
 		return
 	}
 	if !isValidBudgetLimit(req.MaxTotal) {
-		h.writeError(w, "max_total must be a non-negative decimal or \"-1\"", http.StatusBadRequest)
+		respond.Error(w, "max_total must be a non-negative decimal or \"-1\"", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.MaxPerTx != "" && !isValidBudgetLimit(req.MaxPerTx) {
-		h.writeError(w, "max_per_tx must be a non-negative decimal or \"-1\"", http.StatusBadRequest)
+		respond.Error(w, "max_per_tx must be a non-negative decimal or \"-1\"", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.MaxTxCount < 0 {
-		h.writeError(w, "max_tx_count must be >= 0", http.StatusBadRequest)
+		respond.Error(w, "max_tx_count must be >= 0", http.StatusBadRequest, h.logger)
 		return
 	}
 	if req.AlertPct < 0 || req.AlertPct > 100 {
-		h.writeError(w, "alert_pct must be between 0 and 100", http.StatusBadRequest)
+		respond.Error(w, "alert_pct must be between 0 and 100", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -229,11 +230,11 @@ func (h *BudgetListHandler) handleCreate(w http.ResponseWriter, r *http.Request,
 	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(req.RuleID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "rule not found", http.StatusNotFound)
+			respond.Error(w, "rule not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to load rule for budget create", "error", err, "rule_id", req.RuleID)
-		h.writeError(w, "failed to load rule", http.StatusInternalServerError)
+		respond.Error(w, "failed to load rule", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -261,11 +262,11 @@ func (h *BudgetListHandler) handleCreate(w http.ResponseWriter, r *http.Request,
 	created, wasCreated, err := h.budgetRepo.CreateOrGet(r.Context(), budget)
 	if err != nil {
 		h.logger.Error("failed to create budget", "error", err, "rule_id", req.RuleID, "unit", req.Unit)
-		h.writeError(w, "failed to create budget", http.StatusInternalServerError)
+		respond.Error(w, "failed to create budget", http.StatusInternalServerError, h.logger)
 		return
 	}
 	if !wasCreated {
-		h.writeError(w, "budget already exists for this rule+unit", http.StatusConflict)
+		respond.Error(w, "budget already exists for this rule+unit", http.StatusConflict, h.logger)
 		return
 	}
 
@@ -275,7 +276,7 @@ func (h *BudgetListHandler) handleCreate(w http.ResponseWriter, r *http.Request,
 	}
 
 	entry, _ := h.annotateFromRule(rule, created)
-	h.writeJSON(w, entry, http.StatusCreated)
+	respond.JSON(w, entry, http.StatusCreated, h.logger)
 }
 
 // annotate enriches a budget row with rule/simulation metadata and
@@ -339,18 +340,6 @@ func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		return entry, true
 	}
 	return BudgetEntry{}, false
-}
-
-func (h *BudgetListHandler) writeJSON(w http.ResponseWriter, v any, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *BudgetListHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, handler.ErrorResponse{Error: message}, status)
 }
 
 // annotateFromRule is a fast-path used by handleCreate where we already
@@ -424,14 +413,14 @@ func (h *BudgetItemHandler) SetAuditLogger(al *audit.AuditLogger) {
 func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
 	const prefix = "/api/v1/evm/budgets/"
 	tail := strings.TrimPrefix(r.URL.Path, prefix)
 	if tail == "" || tail == "/" {
-		h.writeError(w, "budget id is required", http.StatusBadRequest)
+		respond.Error(w, "budget id is required", http.StatusBadRequest, h.logger)
 		return
 	}
 
@@ -439,15 +428,15 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ruleID := strings.TrimPrefix(tail, "by-rule/")
 		ruleID = strings.Trim(ruleID, "/")
 		if ruleID == "" {
-			h.writeError(w, "rule_id is required", http.StatusBadRequest)
+			respond.Error(w, "rule_id is required", http.StatusBadRequest, h.logger)
 			return
 		}
 		if r.Method != http.MethodDelete {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			h.writeError(w, "forbidden", http.StatusForbidden)
+			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
 			return
 		}
 		h.handleDeleteByRuleID(w, r, apiKey, ruleID)
@@ -457,11 +446,11 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(tail, "/reset") {
 		id := strings.TrimSuffix(tail, "/reset")
 		if r.Method != http.MethodPost {
-			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
 		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			h.writeError(w, "forbidden", http.StatusForbidden)
+			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
 			return
 		}
 		h.handleReset(w, r, apiKey, id)
@@ -474,18 +463,18 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleGet(w, r, apiKey, id)
 	case http.MethodPatch:
 		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			h.writeError(w, "forbidden", http.StatusForbidden)
+			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
 			return
 		}
 		h.handleUpdate(w, r, apiKey, id)
 	case http.MethodDelete:
 		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			h.writeError(w, "forbidden", http.StatusForbidden)
+			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
 			return
 		}
 		h.handleDelete(w, r, apiKey, id)
 	default:
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
 }
 
@@ -497,16 +486,16 @@ func (h *BudgetItemHandler) handleGet(w http.ResponseWriter, r *http.Request, ap
 	b = h.maybeRenewBudget(r, b)
 	entry, allowed := h.annotate(r.Context(), apiKey, b)
 	if !allowed {
-		h.writeError(w, "not found", http.StatusNotFound)
+		respond.Error(w, "not found", http.StatusNotFound, h.logger)
 		return
 	}
-	h.writeJSON(w, entry, http.StatusOK)
+	respond.JSON(w, entry, http.StatusOK, h.logger)
 }
 
 func (h *BudgetItemHandler) handleUpdate(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey, id string) {
 	var req UpdateBudgetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
 	b, ok := h.loadBudget(w, r, id)
@@ -516,28 +505,28 @@ func (h *BudgetItemHandler) handleUpdate(w http.ResponseWriter, r *http.Request,
 
 	if req.MaxTotal != nil {
 		if !isValidBudgetLimit(*req.MaxTotal) {
-			h.writeError(w, "max_total must be a non-negative decimal or \"-1\"", http.StatusBadRequest)
+			respond.Error(w, "max_total must be a non-negative decimal or \"-1\"", http.StatusBadRequest, h.logger)
 			return
 		}
 		b.MaxTotal = *req.MaxTotal
 	}
 	if req.MaxPerTx != nil {
 		if !isValidBudgetLimit(*req.MaxPerTx) {
-			h.writeError(w, "max_per_tx must be a non-negative decimal or \"-1\"", http.StatusBadRequest)
+			respond.Error(w, "max_per_tx must be a non-negative decimal or \"-1\"", http.StatusBadRequest, h.logger)
 			return
 		}
 		b.MaxPerTx = *req.MaxPerTx
 	}
 	if req.MaxTxCount != nil {
 		if *req.MaxTxCount < 0 {
-			h.writeError(w, "max_tx_count must be >= 0", http.StatusBadRequest)
+			respond.Error(w, "max_tx_count must be >= 0", http.StatusBadRequest, h.logger)
 			return
 		}
 		b.MaxTxCount = *req.MaxTxCount
 	}
 	if req.AlertPct != nil {
 		if *req.AlertPct < 0 || *req.AlertPct > 100 {
-			h.writeError(w, "alert_pct must be between 0 and 100", http.StatusBadRequest)
+			respond.Error(w, "alert_pct must be between 0 and 100", http.StatusBadRequest, h.logger)
 			return
 		}
 		b.AlertPct = *req.AlertPct
@@ -547,14 +536,14 @@ func (h *BudgetItemHandler) handleUpdate(w http.ResponseWriter, r *http.Request,
 	}
 	if req.Spent != nil {
 		if !isValidBudgetAmount(*req.Spent) {
-			h.writeError(w, "spent must be a non-negative decimal", http.StatusBadRequest)
+			respond.Error(w, "spent must be a non-negative decimal", http.StatusBadRequest, h.logger)
 			return
 		}
 		b.Spent = *req.Spent
 	}
 	if req.TxCount != nil {
 		if *req.TxCount < 0 {
-			h.writeError(w, "tx_count must be >= 0", http.StatusBadRequest)
+			respond.Error(w, "tx_count must be >= 0", http.StatusBadRequest, h.logger)
 			return
 		}
 		b.TxCount = *req.TxCount
@@ -562,11 +551,11 @@ func (h *BudgetItemHandler) handleUpdate(w http.ResponseWriter, r *http.Request,
 
 	if err := h.budgetRepo.Update(r.Context(), b); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "budget not found", http.StatusNotFound)
+			respond.Error(w, "budget not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to update budget", "error", err, "id", id)
-		h.writeError(w, "failed to update budget", http.StatusInternalServerError)
+		respond.Error(w, "failed to update budget", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -580,7 +569,7 @@ func (h *BudgetItemHandler) handleUpdate(w http.ResponseWriter, r *http.Request,
 		updated = b
 	}
 	entry, _ := h.annotate(r.Context(), apiKey, updated)
-	h.writeJSON(w, entry, http.StatusOK)
+	respond.JSON(w, entry, http.StatusOK, h.logger)
 }
 
 func (h *BudgetItemHandler) handleReset(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey, id string) {
@@ -590,11 +579,11 @@ func (h *BudgetItemHandler) handleReset(w http.ResponseWriter, r *http.Request, 
 	}
 	if err := h.budgetRepo.ResetBudget(r.Context(), b.RuleID, b.Unit, time.Time{}); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "budget not found", http.StatusNotFound)
+			respond.Error(w, "budget not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to reset budget", "error", err, "id", id)
-		h.writeError(w, "failed to reset budget", http.StatusInternalServerError)
+		respond.Error(w, "failed to reset budget", http.StatusInternalServerError, h.logger)
 		return
 	}
 	if h.auditLogger != nil {
@@ -605,25 +594,25 @@ func (h *BudgetItemHandler) handleReset(w http.ResponseWriter, r *http.Request, 
 		updated = b
 	}
 	entry, _ := h.annotate(r.Context(), apiKey, updated)
-	h.writeJSON(w, entry, http.StatusOK)
+	respond.JSON(w, entry, http.StatusOK, h.logger)
 }
 
 func (h *BudgetItemHandler) handleDeleteByRuleID(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey, ruleID string) {
 	if !isBudgetCleanupRuleID(ruleID) {
-		h.writeError(w, "invalid rule_id format for budget cleanup", http.StatusBadRequest)
+		respond.Error(w, "invalid rule_id format for budget cleanup", http.StatusBadRequest, h.logger)
 		return
 	}
 	budgets, err := h.budgetRepo.ListByRuleID(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		h.logger.Error("failed to list budgets for rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to list budgets", http.StatusInternalServerError)
+		respond.Error(w, "failed to list budgets", http.StatusInternalServerError, h.logger)
 		return
 	}
 	deletedBudgets := 0
 	if len(budgets) > 0 {
 		if err := h.budgetRepo.DeleteByRuleID(r.Context(), types.RuleID(ruleID)); err != nil {
 			h.logger.Error("failed to delete budgets by rule", "error", err, "rule_id", ruleID)
-			h.writeError(w, "failed to delete budgets", http.StatusInternalServerError)
+			respond.Error(w, "failed to delete budgets", http.StatusInternalServerError, h.logger)
 			return
 		}
 		deletedBudgets = len(budgets)
@@ -636,13 +625,13 @@ func (h *BudgetItemHandler) handleDeleteByRuleID(w http.ResponseWriter, r *http.
 			deletedPlaceholder = true
 		} else if !types.IsNotFound(err) {
 			h.logger.Error("failed to delete synthetic rule placeholder", "error", err, "rule_id", ruleID)
-			h.writeError(w, "failed to delete synthetic rule placeholder", http.StatusInternalServerError)
+			respond.Error(w, "failed to delete synthetic rule placeholder", http.StatusInternalServerError, h.logger)
 			return
 		}
 	}
 
 	if deletedBudgets == 0 && !deletedPlaceholder {
-		h.writeError(w, "no budgets or synthetic rule placeholder found for rule", http.StatusNotFound)
+		respond.Error(w, "no budgets or synthetic rule placeholder found for rule", http.StatusNotFound, h.logger)
 		return
 	}
 	if h.auditLogger != nil {
@@ -659,11 +648,11 @@ func (h *BudgetItemHandler) handleDelete(w http.ResponseWriter, r *http.Request,
 	}
 	if err := h.budgetRepo.Delete(r.Context(), b.ID); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "budget not found", http.StatusNotFound)
+			respond.Error(w, "budget not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to delete budget", "error", err, "id", id)
-		h.writeError(w, "failed to delete budget", http.StatusInternalServerError)
+		respond.Error(w, "failed to delete budget", http.StatusInternalServerError, h.logger)
 		return
 	}
 	h.maybeDeleteOrphanSyntheticRule(r.Context(), b.RuleID)
@@ -698,10 +687,10 @@ func (h *BudgetItemHandler) loadBudget(w http.ResponseWriter, r *http.Request, i
 	}
 	if !types.IsNotFound(err) {
 		h.logger.Error("failed to load budget", "error", err, "id", id)
-		h.writeError(w, "failed to load budget", http.StatusInternalServerError)
+		respond.Error(w, "failed to load budget", http.StatusInternalServerError, h.logger)
 		return nil, false
 	}
-	h.writeError(w, "budget not found", http.StatusNotFound)
+	respond.Error(w, "budget not found", http.StatusNotFound, h.logger)
 	return nil, false
 }
 
@@ -769,18 +758,6 @@ func (h *BudgetItemHandler) siblingUnits(ctx context.Context, ruleID types.RuleI
 		}
 	}
 	return units
-}
-
-func (h *BudgetItemHandler) writeJSON(w http.ResponseWriter, v any, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *BudgetItemHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, handler.ErrorResponse{Error: message}, status)
 }
 
 func (h *BudgetListHandler) maybeRenewBudget(r *http.Request, b *types.RuleBudget) *types.RuleBudget {

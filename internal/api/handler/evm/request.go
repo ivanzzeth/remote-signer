@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -116,7 +118,7 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -124,7 +126,7 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Expected: /api/v1/evm/requests/{id}
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		h.writeError(w, "invalid path", http.StatusBadRequest)
+		respond.Error(w, "invalid path", http.StatusBadRequest, h.logger)
 		return
 	}
 	requestID := parts[len(parts)-1]
@@ -134,28 +136,28 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+	respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 }
 
 func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey, requestID string) {
 	req, err := h.signService.GetRequest(r.Context(), types.SignRequestID(requestID))
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "request not found", http.StatusNotFound)
+			respond.Error(w, "request not found", http.StatusNotFound, h.logger)
 			return
 		}
 		h.logger.Error("failed to get request", "error", err)
-		h.writeError(w, "failed to get request", http.StatusInternalServerError)
+		respond.Error(w, "failed to get request", http.StatusInternalServerError, h.logger)
 		return
 	}
 
 	// Non-admin/dev may only view requests created with their API key
 	if !apiKey.IsAdmin() && !apiKey.IsDev() && req.APIKeyID != apiKey.ID {
-		h.writeError(w, "not authorized to view this request", http.StatusForbidden)
+		respond.Error(w, "not authorized to view this request", http.StatusForbidden, h.logger)
 		return
 	}
 
-	h.writeJSON(w, enrichDetailWithRuleGeneration(r.Context(), h.signService, h.toDetailResponse(r.Context(), req, true)), http.StatusOK)
+	respond.JSON(w, enrichDetailWithRuleGeneration(r.Context(), h.signService, h.toDetailResponse(r.Context(), req, true)), http.StatusOK, h.logger)
 }
 
 func enrichDetailWithRuleGeneration(
@@ -218,14 +220,14 @@ func NewListHandler(signService service.SignServiceAPI, ruleRepo storage.RuleRep
 // ServeHTTP handles GET /api/v1/evm/requests
 func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 		return
 	}
 
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
@@ -241,14 +243,14 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	if signerAddress := query.Get("signer_address"); signerAddress != "" {
 		if !validate.IsValidEthereumAddress(signerAddress) {
-			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			respond.Error(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.SignerAddress = &signerAddress
 	}
 	if chainID := query.Get("chain_id"); chainID != "" {
 		if _, err := strconv.ParseUint(chainID, 10, 64); err != nil {
-			h.writeError(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest)
+			respond.Error(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.ChainID = &chainID
@@ -258,7 +260,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, s := range statuses {
 			status := types.SignRequestStatus(strings.TrimSpace(s))
 			if !validStatuses[status] {
-				h.writeError(w, fmt.Sprintf("invalid status filter: %s", s), http.StatusBadRequest)
+				respond.Error(w, fmt.Sprintf("invalid status filter: %s", s), http.StatusBadRequest, h.logger)
 				return
 			}
 			filter.Status = append(filter.Status, status)
@@ -266,14 +268,14 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if signType := query.Get("sign_type"); signType != "" {
 		if !validate.ValidSignTypes[signType] {
-			h.writeError(w, fmt.Sprintf("invalid sign_type filter: %s", signType), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("invalid sign_type filter: %s", signType), http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.SignType = &signType
 	}
 	if txStatus := query.Get("transaction_status"); txStatus != "" {
 		if !validTransactionStatuses[txStatus] {
-			h.writeError(w, fmt.Sprintf("invalid transaction_status filter: %s", txStatus), http.StatusBadRequest)
+			respond.Error(w, fmt.Sprintf("invalid transaction_status filter: %s", txStatus), http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.TransactionStatus = &txStatus
@@ -284,7 +286,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if roleStr := query.Get("role"); roleStr != "" {
 			if !types.IsValidAPIKeyRole(roleStr) {
-				h.writeError(w, fmt.Sprintf("invalid role filter: %s", roleStr), http.StatusBadRequest)
+				respond.Error(w, fmt.Sprintf("invalid role filter: %s", roleStr), http.StatusBadRequest, h.logger)
 				return
 			}
 			role := types.APIKeyRole(roleStr)
@@ -303,7 +305,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if cursorStr := query.Get("cursor"); cursorStr != "" {
 		cursor, err := time.Parse(time.RFC3339Nano, cursorStr)
 		if err != nil {
-			h.writeError(w, "invalid cursor: must be RFC3339 timestamp", http.StatusBadRequest)
+			respond.Error(w, "invalid cursor: must be RFC3339 timestamp", http.StatusBadRequest, h.logger)
 			return
 		}
 		filter.Cursor = &cursor
@@ -324,7 +326,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	total, err := h.signService.CountRequests(r.Context(), countFilter)
 	if err != nil {
 		h.logger.Error("failed to count requests", "error", err)
-		h.writeError(w, "failed to count requests", http.StatusInternalServerError)
+		respond.Error(w, "failed to count requests", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -333,7 +335,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requests, err := h.signService.ListRequests(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list requests", "error", err)
-		h.writeError(w, "failed to list requests", http.StatusInternalServerError)
+		respond.Error(w, "failed to list requests", http.StatusInternalServerError, h.logger)
 		return
 	}
 
@@ -361,7 +363,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp.NextCursorID = &cursorID
 	}
 
-	h.writeJSON(w, resp, http.StatusOK)
+	respond.JSON(w, resp, http.StatusOK, h.logger)
 }
 
 func (h *RequestHandler) toDetailResponse(ctx context.Context, req *types.SignRequest, includePayload bool) RequestDetailResponse {
@@ -421,28 +423,4 @@ func toDetailResponse(ctx context.Context, ruleRepo storage.RuleRepository, req 
 		resp.CompletedAt = &completedAt
 	}
 	return resp
-}
-
-func (h *RequestHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *RequestHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
-}
-
-func (h *ListHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("failed to encode response", "error", err)
-	}
-}
-
-func (h *ListHandler) writeError(w http.ResponseWriter, message string, status int) {
-	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }
