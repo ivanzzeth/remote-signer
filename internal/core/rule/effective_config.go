@@ -94,15 +94,24 @@ func substituteConfigVars(configJSON []byte, vars map[string]string) []byte {
 			padded = strings.Repeat("0", 64-len(hexv)) + hexv
 		}
 		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
-		first := firstOfList(v)
+		first := FirstOfList(v)
 		result = strings.ReplaceAll(result, "${first:"+k+"}", first)
 		result = strings.ReplaceAll(result, "${hex:first:"+k+"}", strings.TrimPrefix(first, "0x"))
 	}
 	return []byte(result)
 }
 
-// firstOfList returns the first non-empty element of a comma-separated list.
-func firstOfList(s string) string {
+// FirstOfList returns the first non-empty, trimmed element of a
+// comma-separated list, or "" when there is none.
+//
+// ⚠️ Single implementation on purpose. There were two — this one and an
+// identical copy in core/service/substitute.go — used by the two ${var}
+// substitution paths that must agree: validation is strict and reports errors,
+// evaluation is lenient and never does. Any divergence between them means a
+// rule whose test cases are green authorizes something else at runtime, so the
+// pieces they share do not get to exist twice. core/service already imports
+// core/rule, so this is the direction that does not invert the dependency.
+func FirstOfList(s string) string {
 	for _, p := range strings.Split(s, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			return p

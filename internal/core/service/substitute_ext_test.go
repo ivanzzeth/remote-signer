@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"math/big"
 	"testing"
 
@@ -337,23 +338,23 @@ func TestFindUnresolvedVars(t *testing.T) {
 
 func TestFirstOfList(t *testing.T) {
 	t.Run("empty_string", func(t *testing.T) {
-		assert.Equal(t, "", firstOfList(""))
+		assert.Equal(t, "", rule.FirstOfList(""))
 	})
 
 	t.Run("single_item", func(t *testing.T) {
-		assert.Equal(t, "abc", firstOfList("abc"))
+		assert.Equal(t, "abc", rule.FirstOfList("abc"))
 	})
 
 	t.Run("multiple_items", func(t *testing.T) {
-		assert.Equal(t, "abc", firstOfList("abc,def"))
+		assert.Equal(t, "abc", rule.FirstOfList("abc,def"))
 	})
 
 	t.Run("leading_trailing_spaces", func(t *testing.T) {
-		assert.Equal(t, "abc", firstOfList("  abc , def "))
+		assert.Equal(t, "abc", rule.FirstOfList("  abc , def "))
 	})
 
 	t.Run("only_spaces", func(t *testing.T) {
-		assert.Equal(t, "", firstOfList("  ,  "))
+		assert.Equal(t, "", rule.FirstOfList("  ,  "))
 	})
 }
 

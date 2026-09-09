@@ -1,6 +1,13 @@
-# firstOfList 的抄本。纯函数,两份就是纯粹的抄 —— 没有任何设计取舍可言。
+# firstOfList 的实现。⛔ 只许有一份。
 #
-# ⛔ 只许缩,目标 1。到 1 那天把这个门禁改成硬约束(> 1 即红)。
+# 2026-09-09 之前有两份逐字重复的:core/rule 和 core/service 各一。它们服务于
+# **必须彼此一致**的两条 ${var} 代换路径 —— 校验期严格报错、求值期宽松不报错。
+# 两者只要在任何一处漂开,结果就是「test_case 全绿的规则,运行时授权了另一件事」。
+# 共用的零件不该存在第二份。
+#
+# 现在只剩 core/rule.FirstOfList(导出),core/service 直接调用它 ——
+# core/service 本来就 import core/rule,这个方向不会倒转依赖。
+#
+# ⛔ 涨回 2 = 有人又抄了一份。
 
 internal/core/rule/effective_config.go
-internal/core/service/substitute.go

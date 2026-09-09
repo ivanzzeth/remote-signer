@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"math/big"
 	"regexp"
 	"strconv"
@@ -342,7 +343,7 @@ func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, err
 			padded = hex
 		}
 		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
-		firstVal := firstOfList(v)
+		firstVal := rule.FirstOfList(v)
 		result = strings.ReplaceAll(result, "${first:"+k+"}", firstVal)
 		hexFirst := strings.TrimPrefix(firstVal, "0x")
 		result = strings.ReplaceAll(result, "${hex:first:"+k+"}", hexFirst)
@@ -361,17 +362,6 @@ func SubstituteString(s string, vars map[string]string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
-}
-
-// firstOfList returns the first non-empty element of a comma-separated list.
-func firstOfList(s string) string {
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			return part
-		}
-	}
-	return ""
 }
 
 func findUnresolvedVars(s string) []string {
