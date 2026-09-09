@@ -214,10 +214,6 @@ func (h *RuleHandler) resetAllBudgets(w http.ResponseWriter, r *http.Request, ru
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
-	if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-		respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
-		return
-	}
 	if h.budgetRepo == nil {
 		respond.Error(w, "budget repository not configured", http.StatusInternalServerError, h.logger)
 		return

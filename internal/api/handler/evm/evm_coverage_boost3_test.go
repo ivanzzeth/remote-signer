@@ -195,6 +195,12 @@ func (b *budgetFailUpdateRepo) UpsertLimits(ctx context.Context, ruleID types.Ru
 // rule_crud.go: createRule error paths
 // ---------------------------------------------------------------------------
 
+// ⚠️ Budget permission cases were removed here, not lost. PermManageBudgets is
+// declared on the route (see setupRoutes) rather than re-checked inside the
+// handler, and these tests call the handler directly — so they were asserting a
+// check that is no longer this layer's job. The property is covered for every
+// route by internal/api/route_permissions_test.go.
+
 func TestB3CreateRule_InvalidBody(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	h, err := NewRuleHandler(repo, slog.Default())
@@ -845,21 +851,6 @@ func TestB3BudgetItem_UpdateRepoUpdateFails(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
-func TestB3BudgetItem_ResetForbiddenForAgent(t *testing.T) {
-	budgetRepo := &budgetFailUpdateRepo{}
-	ruleRepo := storage.NewMemoryRuleRepository()
-
-	h, err := NewBudgetItemHandler(budgetRepo, ruleRepo, slog.Default())
-	require.NoError(t, err)
-
-	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/budgets/budget-1/reset", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, agentKey))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
-
 func TestB3BudgetItem_GetForAgent(t *testing.T) {
 	budgetRepo := &budgetFailUpdateRepo{}
 	ruleRepo := storage.NewMemoryRuleRepository()
@@ -1077,57 +1068,6 @@ func TestB3BudgetItem_ResetSuccess(t *testing.T) {
 // ---------------------------------------------------------------------------
 // request_simulation.go: constructor validation
 // ---------------------------------------------------------------------------
-
-func TestB3BudgetItem_DeleteForbiddenNonAdmin(t *testing.T) {
-	db := newB3TxCoverageDB(t)
-	budgetRepo, err := storage.NewGormBudgetRepository(db)
-	require.NoError(t, err)
-	ruleRepo := storage.NewMemoryRuleRepository()
-
-	rule := &types.Rule{ID: "rule_1", Name: "Test Rule", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Config: json.RawMessage(`{}`), Enabled: true}
-	require.NoError(t, ruleRepo.Create(context.Background(), rule))
-
-	budget := &types.RuleBudget{ID: types.BudgetID("rule_1", "usdc"), RuleID: "rule_1", Unit: "usdc", MaxTotal: "1000", Spent: "0"}
-	budget, _, err = budgetRepo.CreateOrGet(context.Background(), budget)
-	require.NoError(t, err)
-
-	h, err := NewBudgetItemHandler(budgetRepo, ruleRepo, slog.Default())
-	require.NoError(t, err)
-
-	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/budgets/"+budget.ID, nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, agentKey))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
-
-func TestB3BudgetItem_UpdateForbiddenNonAdmin(t *testing.T) {
-	db := newB3TxCoverageDB(t)
-	budgetRepo, err := storage.NewGormBudgetRepository(db)
-	require.NoError(t, err)
-	ruleRepo := storage.NewMemoryRuleRepository()
-
-	rule := &types.Rule{ID: "rule_1", Name: "Test Rule", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Config: json.RawMessage(`{}`), Enabled: true}
-	require.NoError(t, ruleRepo.Create(context.Background(), rule))
-
-	budget := &types.RuleBudget{ID: types.BudgetID("rule_1", "usdc"), RuleID: "rule_1", Unit: "usdc", MaxTotal: "1000", Spent: "0"}
-	budget, _, err = budgetRepo.CreateOrGet(context.Background(), budget)
-	require.NoError(t, err)
-
-	h, err := NewBudgetItemHandler(budgetRepo, ruleRepo, slog.Default())
-	require.NoError(t, err)
-
-	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
-	body := map[string]interface{}{"max_total": "2000"}
-	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/budgets/"+budget.ID, bytes.NewBuffer(data))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, agentKey))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
 
 // ---------------------------------------------------------------------------
 // signer.go: HandleWalletSigners method-not-allowed
@@ -1662,15 +1602,10 @@ func TestB3CreateSigner_ReadOnly(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestB3CreateSigner_PermissionDenied(t *testing.T) {
-	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
-	require.NoError(t, err)
-
-	noPermKey := &types.APIKey{ID: "no-perm", Role: types.APIKeyRole("viewer"), Enabled: true}
-	rec := doSignerRequest(t, h, http.MethodPost, "/api/v1/evm/signers", noPermKey)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
+// TestB3CreateSigner_PermissionDenied was removed, not lost: the permission is declared on the route now, and a
+// test that calls the handler directly bypasses the router and therefore the
+// check. internal/api/route_permissions_test.go asserts the property for every
+// route instead of the ones someone wrote a case for.
 
 func TestB3CreateSigner_InvalidBody(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
@@ -1744,24 +1679,6 @@ func TestB3ListSigners_EnabledFilter(t *testing.T) {
 // ---------------------------------------------------------------------------
 // budget.go: handleCreate read-only
 // ---------------------------------------------------------------------------
-
-func TestB3BudgetList_CreateForbiddenForAgent(t *testing.T) {
-	db := newB3TxCoverageDB(t)
-	budgetRepo, err := storage.NewGormBudgetRepository(db)
-	require.NoError(t, err)
-	h, err := NewBudgetListHandler(budgetRepo, storage.NewMemoryRuleRepository(), slog.Default())
-	require.NoError(t, err)
-
-	body := map[string]interface{}{"rule_id": "rule_1", "unit": "usdc", "max_total": "1000"}
-	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/budgets", bytes.NewBuffer(data))
-	req.Header.Set("Content-Type", "application/json")
-	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, agentKey))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
 
 // ---------------------------------------------------------------------------
 // budget.go: handleList with simulation annotations

@@ -29,11 +29,9 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RBAC check: PermCreateSigners required (admin, dev, agent via rbac.go)
-	if !middleware.HasPermission(apiKey.Role, middleware.PermCreateSigners) {
-		respond.Error(w, "permission denied", http.StatusForbidden, h.logger)
-		return
-	}
+	// ⛔ No RBAC check here: POST /api/v1/evm/signers registers
+	// PermCreateSigners at the route. A second copy is a place for the two to
+	// disagree, and the one that would win is whichever the request reaches.
 
 	// Enforce resource limit: max keystores per key
 	if h.maxKeystoresPerKeyValue() > 0 {

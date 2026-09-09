@@ -18,7 +18,6 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -254,17 +253,10 @@ func TestPresetHandler_Routing_RejectsWrongMethod(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
-func TestPresetHandler_Apply_ForbiddenWithoutPermission(t *testing.T) {
-	env := newPresetTestEnv(t)
-	// Strategy keys don't have apply_preset.
-	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: "k", Role: types.RoleStrategy})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/foo/apply",
-		strings.NewReader(`{}`)).WithContext(ctx)
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusForbidden, w.Code)
-}
+// TestPresetHandler_Apply_ForbiddenWithoutPermission was removed, not lost: the permission is declared on the route now, and a
+// test that calls the handler directly bypasses the router and therefore the
+// check. internal/api/route_permissions_test.go asserts the property for every
+// route instead of the ones someone wrote a case for.
 
 func TestPresetHandler_Apply_RequiresAuth(t *testing.T) {
 	env := newPresetTestEnv(t)

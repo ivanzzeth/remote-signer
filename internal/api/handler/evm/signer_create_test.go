@@ -52,23 +52,10 @@ func TestCreateSigner_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestCreateSigner_PermissionDenied(t *testing.T) {
-	mgr := &signerMockSignerManager{}
-	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
-	require.NoError(t, err)
-
-	body := `{"type":"keystore","keystore":{"password":"test123"}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/signers", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	// strategy role doesn't have PermCreateSigners
-	apiKey := &types.APIKey{ID: "strategy-key", Role: types.RoleStrategy, Enabled: true}
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-}
+// TestCreateSigner_PermissionDenied was removed, not lost. PermCreateSigners is
+// declared on POST /api/v1/evm/signers now; calling the handler directly, as
+// this test did, bypasses the router and so the permission. The property is
+// covered for every route by internal/api/route_permissions_test.go.
 
 func TestCreateSigner_InvalidBody(t *testing.T) {
 	mgr := &signerMockSignerManager{}

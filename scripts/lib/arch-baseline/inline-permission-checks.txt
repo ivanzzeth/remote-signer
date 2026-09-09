@@ -1,15 +1,23 @@
 # 在 **handler 函数体内**做 HasPermission 检查的文件。
 #
-# 🔴 权限检查在函数体里 = 漏写一个 handler 就是权限绕过,而漏写这件事没有任何
-# 东西会提醒你。放在路由层(internal/api/middleware/rbac.go)时,「没登记 = 拒绝」
-# 是默认行为 —— 那才是 fail-closed。
+# ✅ 2026-09-10:7 → 2。budget(5 处)、signer_create、preset apply、
+#    registry refresh、rule_query 的 budgets/reset 都改成在**路由上**声明权限
+#    (按方法注册,如 `POST /api/v1/evm/budgets`)。此前它们统一挂在**读**权限的
+#    路由下,再在每个写分支里自己升级 —— 光 budget.go 就有 5 处,漏一处就是
+#    权限绕过,而漏掉这件事没有任何东西会提醒你。
 #
-# ⛔ 只许缩,目标 0。新增一行 = 又一个只能靠人眼保证的权限点。
+#    接管这个断言的是 internal/api/route_permissions_test.go:它检查**所有**
+#    路由里没有「会改状态却只要读权限」的。之前那些 handler 级测试只覆盖有人
+#    想起来写的那几个。
+#
+# ⚠️ 剩下这两处**不是同一回事,也不该搬走**:
+#    它们不是权限门禁,是**资源级授权** —— "管理员可以批任何请求,否则你必须是
+#    这个 signer 的 owner"。判定依赖被访问的那个资源,而路由层只知道调用者的
+#    角色,表达不了「或者你拥有它」。把它们挪到路由 = 要么管理员之外全部拒绝,
+#    要么谁都能批别人的请求。
+#
+# ⛔ 所以这两行是**长期条目**,不是待办。新增第三行之前先问:它是不是也依赖
+#    资源?不依赖的话,它属于路由。
 
-internal/api/handler/evm/approval.go
-internal/api/handler/evm/batch_approval.go
-internal/api/handler/evm/budget.go
-internal/api/handler/evm/rule_query.go
-internal/api/handler/evm/signer_create.go
-internal/api/handler/preset.go
-internal/api/handler/registry.go
+internal/api/handler/evm/approval.go        # 管理员批任何请求 / 其他人只能批自己拥有的 signer
+internal/api/handler/evm/batch_approval.go  # 同上,批量版

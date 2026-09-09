@@ -196,16 +196,10 @@ rules: [{id: r, name: r, type: evm_address_list, mode: whitelist}]
 // Permission gate
 // ---------------------------------------------------------------------------
 
-func TestRegistryRefresh_ForbiddenWithoutPermission(t *testing.T) {
-	env := newRefreshTestEnv(t)
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/registry/refresh", nil)
-	r = r.WithContext(context.WithValue(r.Context(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: "k", Role: types.RoleStrategy}))
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, r)
-	assert.Equal(t, http.StatusForbidden, w.Code,
-		"strategy role lacks apply_preset → refresh denied")
-}
+// TestRegistryRefresh_ForbiddenWithoutPermission was removed, not lost: the permission is declared on the route now, and a
+// test that calls the handler directly bypasses the router and therefore the
+// check. internal/api/route_permissions_test.go asserts the property for every
+// route instead of the ones someone wrote a case for.
 
 func TestRegistryRefresh_RejectsNonPOST(t *testing.T) {
 	env := newRefreshTestEnv(t)

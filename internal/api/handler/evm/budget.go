@@ -153,10 +153,6 @@ func (h *BudgetListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.handleList(w, r, apiKey)
 	case http.MethodPost:
-		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
-			return
-		}
 		h.handleCreate(w, r, apiKey)
 	default:
 		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
@@ -435,10 +431,6 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 			return
 		}
-		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
-			return
-		}
 		h.handleDeleteByRuleID(w, r, apiKey, ruleID)
 		return
 	}
@@ -447,10 +439,6 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimSuffix(tail, "/reset")
 		if r.Method != http.MethodPost {
 			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
-		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
 			return
 		}
 		h.handleReset(w, r, apiKey, id)
@@ -462,16 +450,8 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.handleGet(w, r, apiKey, id)
 	case http.MethodPatch:
-		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
-			return
-		}
 		h.handleUpdate(w, r, apiKey, id)
 	case http.MethodDelete:
-		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
-			respond.Error(w, "forbidden", http.StatusForbidden, h.logger)
-			return
-		}
 		h.handleDelete(w, r, apiKey, id)
 	default:
 		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)

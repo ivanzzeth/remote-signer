@@ -306,13 +306,16 @@ func TestBudgetListHandler_Create(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
-	t.Run("non_admin_forbidden", func(t *testing.T) {
-		h, _, _ := makeFixture()
-		body := CreateBudgetRequest{RuleID: "rule_target", Unit: "u", MaxTotal: "1"}
-		rec := doBudgetRequestBody(t, h, http.MethodPost, "/api/v1/evm/budgets", body, budgetDevKey())
-		// Dev role doesn't have PermManageBudgets — must 403.
-		assert.Equal(t, http.StatusForbidden, rec.Code)
-	})
+	// ⚠️ There is no "non_admin_forbidden" case here any more, and that is not a
+	// gap. PermManageBudgets is declared on the route now
+	// (POST /api/v1/evm/budgets in setupRoutes) rather than re-checked inside
+	// each mutating branch of this handler. Calling the handler directly, as
+	// these tests do, bypasses the router and therefore the permission — so an
+	// assertion here would have been testing nothing.
+	//
+	// The property moved to internal/api/route_permissions_test.go, which
+	// asserts that no mutating route is gated on a read permission. That covers
+	// every route rather than the ones someone remembered to write a case for.
 }
 
 // Test the per-item handler covering get/update/reset/delete + perms.
@@ -500,18 +503,13 @@ func TestBudgetItemHandler(t *testing.T) {
 		assert.True(t, isRulePathID("sim:0x1111111111111111111111111111111111111111"))
 	})
 
-	t.Run("dev_can_read_cannot_write", func(t *testing.T) {
+	t.Run("dev_can_read", func(t *testing.T) {
 		h, _, _ := makeFixture()
-		// Read OK.
 		rec := doBudgetRequest(t, h, http.MethodGet, "/api/v1/evm/budgets/budget-id-1", budgetDevKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
-		// Update forbidden.
-		max := "1"
-		rec2 := doBudgetRequestBody(t, h, http.MethodPatch, "/api/v1/evm/budgets/budget-id-1",
-			UpdateBudgetRequest{MaxTotal: &max}, budgetDevKey())
-		assert.Equal(t, http.StatusForbidden, rec2.Code)
-		// Delete forbidden.
-		rec3 := doBudgetRequest(t, h, http.MethodDelete, "/api/v1/evm/budgets/budget-id-1", budgetDevKey())
-		assert.Equal(t, http.StatusForbidden, rec3.Code)
 	})
+
+	// The "cannot write" half of this case moved to the route table — see the
+	// note on non_admin_forbidden above and
+	// internal/api/route_permissions_test.go.
 }

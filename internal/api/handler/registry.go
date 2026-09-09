@@ -75,11 +75,12 @@ func (h *RegistryRefreshHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		writeRegistryError(w, h.logger, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// ⛔ No permission check here: the route registers PermApplyPreset
+	// (refresh and apply both touch the catalogue and both want admin), and a
+	// second copy of the same gate is a place for the two to disagree later.
 	apiKey := middleware.GetAPIKey(r.Context())
-	if apiKey == nil || !middleware.HasPermission(apiKey.Role, middleware.PermApplyPreset) {
-		// Refresh shares the apply_preset permission gate — both touch
-		// the catalogue, both want admin-only.
-		writeRegistryError(w, h.logger, "forbidden: apply_preset permission required", http.StatusForbidden)
+	if apiKey == nil {
+		writeRegistryError(w, h.logger, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 

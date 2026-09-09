@@ -116,6 +116,11 @@ type RouterConfig struct {
 
 // Router handles HTTP routing
 type Router struct {
+	// routePerms records the permission each pattern was registered with, so the
+	// route table can be asserted without standing up a live router. Permission
+	// is a property of the route now — see the budget registrations — and a
+	// property nothing can check is one that drifts.
+	routePerms    map[string]middleware.Permission
 	mux           *http.ServeMux
 	authVerifier  *auth.Verifier
 	signService   *service.SignService
@@ -141,6 +146,7 @@ func NewRouter(
 ) (*Router, error) {
 	r := &Router{
 		mux:           http.NewServeMux(),
+		routePerms:    map[string]middleware.Permission{},
 		authVerifier:  authVerifier,
 		signService:   signService,
 		signerManager: signerManager,
@@ -354,6 +360,11 @@ func (r *Router) setupRoutes() error {
 	// Rule management routes (RBAC: PermListRules covers GET for admin/dev/agent)
 	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
 	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
+	// /rules/{id}/budgets/reset changes budgets, so it is gated on
+	// PermManageBudgets rather than reached on PermListRules and re-checked
+	// inside the handler. Registered after the prefix pattern above; Go's mux
+	// prefers the more specific one.
+	r.handlePerm("POST /api/v1/evm/rules/{id}/budgets/reset", middleware.PermManageBudgets, ruleHandler)
 
 	// Budget routes:
 	//   GET    /api/v1/evm/budgets         list (PermReadBudgets)
@@ -379,10 +390,23 @@ func (r *Router) setupRoutes() error {
 			budgetListHandler.SetAuditLogger(r.config.AuditLogger)
 			budgetItemHandler.SetAuditLogger(r.config.AuditLogger)
 		}
-		// Gate at the perm "read"; the handler itself escalates to
-		// PermManageBudgets for mutating method/path combos.
-		r.mux.Handle("/api/v1/evm/budgets", r.withAuthAndPerm(middleware.PermReadBudgets, budgetListHandler))
-		r.mux.Handle("/api/v1/evm/budgets/", r.withAuthAndPerm(middleware.PermReadBudgets, budgetItemHandler))
+		// ⚠️ Method-scoped, so the permission is declared with the route rather
+		// than escalated inside the handler. It used to register the read
+		// permission for every method and have each mutating branch re-check
+		// PermManageBudgets itself — five checks in one file, and forgetting one
+		// is a permission bypass that nothing reports. Here a route with no
+		// registration simply has no permission, which is the failure direction
+		// worth having.
+		//
+		// The trailing-slash patterns cover the sub-paths: POST reaches
+		// /budgets/{id}/reset, DELETE reaches both /budgets/{id} and
+		// /budgets/by-rule/{ruleID}.
+		r.handlePerm("GET /api/v1/evm/budgets", middleware.PermReadBudgets, budgetListHandler)
+		r.handlePerm("POST /api/v1/evm/budgets", middleware.PermManageBudgets, budgetListHandler)
+		r.handlePerm("GET /api/v1/evm/budgets/", middleware.PermReadBudgets, budgetItemHandler)
+		r.handlePerm("POST /api/v1/evm/budgets/", middleware.PermManageBudgets, budgetItemHandler)
+		r.handlePerm("PATCH /api/v1/evm/budgets/", middleware.PermManageBudgets, budgetItemHandler)
+		r.handlePerm("DELETE /api/v1/evm/budgets/", middleware.PermManageBudgets, budgetItemHandler)
 	}
 
 	// Approval guard resume (admin only). Route is always registered; handler
@@ -391,7 +415,10 @@ func (r *Router) setupRoutes() error {
 
 	// Signer management routes
 	// GET: PermReadSigners (all roles); POST: PermCreateSigners checked in handler
-	r.mux.Handle("/api/v1/evm/signers", r.withAuthAndPerm(middleware.PermReadSigners, signerHandler))
+	// Method-scoped so creation is gated at the route. The handler used to be
+	// reached on the read permission and re-check PermCreateSigners itself.
+	r.handlePerm("GET /api/v1/evm/signers", middleware.PermReadSigners, signerHandler)
+	r.handlePerm("POST /api/v1/evm/signers", middleware.PermCreateSigners, signerHandler)
 	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock (admin only via PermUnlockSigner in handler)
 	r.mux.Handle("/api/v1/evm/signers/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction)))
 
@@ -586,7 +613,11 @@ func (r *Router) setupRoutes() error {
 			presetHandler.SetAuditLogger(r.config.AuditLogger)
 		}
 		r.mux.Handle("/api/v1/presets", r.withAuthAndPerm(middleware.PermReadPresets, presetHandler))
-		r.mux.Handle("/api/v1/presets/", r.withAuthAndPerm(middleware.PermReadPresets, http.HandlerFunc(presetHandler.ServeHTTP)))
+		// /presets/{id}/apply and /presets/{id}/validate are POSTs that change
+		// the catalogue, so they carry PermApplyPreset at the route instead of
+		// being reached on the read permission and re-checked inside apply().
+		r.handlePerm("GET /api/v1/presets/", middleware.PermReadPresets, http.HandlerFunc(presetHandler.ServeHTTP))
+		r.handlePerm("POST /api/v1/presets/", middleware.PermApplyPreset, http.HandlerFunc(presetHandler.ServeHTTP))
 	}
 
 	// Registry refresh endpoint — re-runs Template + Preset Registry
@@ -638,6 +669,26 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 }
 
 // withAuthAndPerm wraps a handler with authentication + RBAC permission middleware.
+// handlePerm registers h at pattern behind auth plus perm, and records the
+// pairing for RoutePermissions.
+//
+// ⛔ Prefer this over calling mux.Handle with withAuthAndPerm directly: a route
+// registered the other way is invisible to the route-table test, which is the
+// only thing that can notice a mutating path gated on a read permission.
+func (r *Router) handlePerm(pattern string, perm middleware.Permission, h http.Handler) {
+	r.routePerms[pattern] = perm
+	r.mux.Handle(pattern, r.withAuthAndPerm(perm, h))
+}
+
+// RoutePermissions returns the permission each registered pattern requires.
+func (r *Router) RoutePermissions() map[string]middleware.Permission {
+	out := make(map[string]middleware.Permission, len(r.routePerms))
+	for k, v := range r.routePerms {
+		out[k] = v
+	}
+	return out
+}
+
 func (r *Router) withAuthAndPerm(perm middleware.Permission, h http.Handler) http.Handler {
 	middlewares := []func(http.Handler) http.Handler{
 		middleware.SecurityHeadersMiddleware(),

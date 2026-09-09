@@ -518,7 +518,9 @@ type ApplyPresetRequest struct {
 
 func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string) {
 	apiKey := middleware.GetAPIKey(r.Context())
-	if apiKey == nil || !middleware.HasPermission(apiKey.Role, middleware.PermApplyPreset) {
+	// The route declares PermApplyPreset (POST /api/v1/presets/); only the
+	// presence of a key is checked here.
+	if apiKey == nil {
 		respond.Error(w, "forbidden: apply_preset permission required", http.StatusForbidden, h.logger)
 		return
 	}
