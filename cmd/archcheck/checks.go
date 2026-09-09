@@ -179,15 +179,23 @@ func checkRespondShape(r *repo) ([]finding, error) {
 			default:
 				continue
 			}
+			// ⚠️ Classify each parameter by ROLE, not by its exact type.
+			// The property being enforced is the argument *order*: (w, body,
+			// code) vs (w, code, body), both of which compile. Comparing exact
+			// type strings instead reports a helper whose body parameter is a
+			// concrete type rather than `any` — same order, different spelling —
+			// and a gate that fires on a difference nobody needs to fix is one
+			// that gets switched off. rpc_proxy.go's writeJSON(w, jsonRPCEnvelope,
+			// int) is exactly that case.
 			var params []string
 			for _, p := range fd.Type.Params.List {
-				t := exprString(p.Type)
+				role := paramRole(exprString(p.Type))
 				n := len(p.Names)
 				if n == 0 {
 					n = 1
 				}
 				for i := 0; i < n; i++ {
-					params = append(params, t)
+					params = append(params, role)
 				}
 			}
 			byName[fd.Name.Name] = append(byName[fd.Name.Name], site{
@@ -394,4 +402,19 @@ func checkRuleWrite(r *repo) ([]finding, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
+}
+
+// paramRole reduces a parameter type to the role it plays in a write helper,
+// so that two helpers differing only in how the body is spelled compare equal.
+func paramRole(t string) string {
+	switch t {
+	case "http.ResponseWriter":
+		return "w"
+	case "int":
+		return "code"
+	case "string":
+		return "msg"
+	default:
+		return "body"
+	}
 }

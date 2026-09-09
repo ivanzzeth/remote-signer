@@ -241,7 +241,7 @@ func TestCoverage_WriteJSON_EncodeError_AuditHandler(t *testing.T) {
 func TestCoverage_WriteJSON_EncodeError_BootstrapHandler(t *testing.T) {
 	h := &BootstrapHandler{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	w := httptest.NewRecorder()
-	h.writeJSON(w, http.StatusOK, make(chan int))
+	h.writeJSON(w, make(chan int), http.StatusOK)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 

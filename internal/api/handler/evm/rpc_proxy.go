@@ -178,11 +178,12 @@ func (h *RPCProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.recordBroadcastAsync(chainID, body.Params)
 	}
 
-	h.writeJSON(w, http.StatusOK, jsonRPCEnvelope{
+	h.writeJSON(w, jsonRPCEnvelope{
 		JSONRPC: "2.0",
 		ID:      body.ID,
 		Result:  result,
-	})
+	}, http.StatusOK)
+
 }
 
 // recordBroadcastAsync hands the signed-tx hex to the recorder
@@ -221,11 +222,12 @@ func (h *RPCProxyHandler) recordBroadcastAsync(chainID string, params []interfac
 func (h *RPCProxyHandler) writeRPCError(
 	w http.ResponseWriter, id json.RawMessage, code int, msg string,
 ) {
-	h.writeJSON(w, http.StatusOK, jsonRPCEnvelope{
+	h.writeJSON(w, jsonRPCEnvelope{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error:   &jsonRPCError{Code: code, Message: msg},
-	})
+	}, http.StatusOK)
+
 }
 
 // writeHTTPError emits a daemon-flat `{"error":"..."}` body matching
@@ -238,7 +240,7 @@ func (h *RPCProxyHandler) writeHTTPError(w http.ResponseWriter, status int, msg 
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-func (h *RPCProxyHandler) writeJSON(w http.ResponseWriter, status int, body jsonRPCEnvelope) {
+func (h *RPCProxyHandler) writeJSON(w http.ResponseWriter, body jsonRPCEnvelope, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)

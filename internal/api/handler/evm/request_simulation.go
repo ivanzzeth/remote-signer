@@ -55,12 +55,12 @@ func NewRequestSimulationHandler(
 // expected pattern, but defence-in-depth means we still validate.
 func (h *RequestSimulationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, http.StatusUnauthorized, "unauthorized")
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -68,12 +68,12 @@ func (h *RequestSimulationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
 	// expected ["", "api", "v1", "evm", "requests", "{id}", "simulation"]
 	if len(parts) < 7 || parts[len(parts)-1] != "simulation" {
-		h.writeError(w, http.StatusBadRequest, "invalid path: expected /api/v1/evm/requests/{id}/simulation")
+		h.writeError(w, "invalid path: expected /api/v1/evm/requests/{id}/simulation", http.StatusBadRequest)
 		return
 	}
 	requestID := parts[len(parts)-2]
 	if requestID == "" {
-		h.writeError(w, http.StatusBadRequest, "request id is required")
+		h.writeError(w, "request id is required", http.StatusBadRequest)
 		return
 	}
 
@@ -85,15 +85,15 @@ func (h *RequestSimulationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	parent, err := h.reqRepo.Get(r.Context(), types.SignRequestID(requestID))
 	if err != nil {
 		if errors.Is(err, types.ErrNotFound) {
-			h.writeError(w, http.StatusNotFound, "request not found")
+			h.writeError(w, "request not found", http.StatusNotFound)
 			return
 		}
 		h.logger.Error("simulation: parent request lookup failed", slog.String("error", err.Error()))
-		h.writeError(w, http.StatusInternalServerError, "lookup failed")
+		h.writeError(w, "lookup failed", http.StatusInternalServerError)
 		return
 	}
 	if !apiKey.IsAdmin() && parent.APIKeyID != apiKey.ID {
-		h.writeError(w, http.StatusNotFound, "request not found")
+		h.writeError(w, "request not found", http.StatusNotFound)
 		return
 	}
 
@@ -103,23 +103,23 @@ func (h *RequestSimulationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			// 404 → the UI renders "evaluating, please wait" + spinner
 			// instead of a hard error while the simulation pipeline
 			// is still in flight on a fresh request.
-			h.writeError(w, http.StatusNotFound, "simulation not yet available")
+			h.writeError(w, "simulation not yet available", http.StatusNotFound)
 			return
 		}
 		h.logger.Error("simulation: row lookup failed", slog.String("error", err.Error()))
-		h.writeError(w, http.StatusInternalServerError, "lookup failed")
+		h.writeError(w, "lookup failed", http.StatusInternalServerError)
 		return
 	}
-	h.writeJSON(w, http.StatusOK, sim)
+	h.writeJSON(w, sim, http.StatusOK)
 }
 
-func (h *RequestSimulationHandler) writeError(w http.ResponseWriter, status int, msg string) {
+func (h *RequestSimulationHandler) writeError(w http.ResponseWriter, msg string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-func (h *RequestSimulationHandler) writeJSON(w http.ResponseWriter, status int, body any) {
+func (h *RequestSimulationHandler) writeJSON(w http.ResponseWriter, body any, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)

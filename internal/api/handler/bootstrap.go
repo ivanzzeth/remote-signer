@@ -69,7 +69,7 @@ type statusResponse struct {
 // behaviour to mutable backend state and complicate the unauth contract.
 func (h *BootstrapHandler) ServeStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		h.writeJSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed)
 		return
 	}
 	// "Needs bootstrap" specifically means "no admin api key yet". The
@@ -82,10 +82,10 @@ func (h *BootstrapHandler) ServeStatus(w http.ResponseWriter, r *http.Request) {
 	existing, err := h.repo.Get(r.Context(), "admin")
 	if err != nil && !types.IsNotFound(err) {
 		h.log.Error("bootstrap status: get admin api key failed", "error", err)
-		h.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		h.writeJSON(w, map[string]string{"error": "internal error"}, http.StatusInternalServerError)
 		return
 	}
-	h.writeJSON(w, http.StatusOK, statusResponse{NeedsBootstrap: existing == nil})
+	h.writeJSON(w, statusResponse{NeedsBootstrap: existing == nil}, http.StatusOK)
 }
 
 // adminRequest is the POST /api/v1/bootstrap/admin payload.
@@ -111,16 +111,16 @@ type adminRequest struct {
 // user to the regular login page instead.
 func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		h.writeJSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed)
 		return
 	}
 	var req adminRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		h.writeJSON(w, map[string]string{"error": "invalid request body"}, http.StatusBadRequest)
 		return
 	}
 	if req.Password == "" {
-		h.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password is required"})
+		h.writeJSON(w, map[string]string{"error": "password is required"}, http.StatusBadRequest)
 		return
 	}
 	// Materialise the password as a mutable byte slice so we can zero it
@@ -139,14 +139,15 @@ func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
 	res, err := h.create(r.Context(), password)
 	if err != nil {
 		if errors.Is(err, bootstrap.ErrAdminAlreadyExists) {
-			h.writeJSON(w, http.StatusGone, map[string]string{
+			h.writeJSON(w, map[string]string{
 				"error": "admin already configured; the bootstrap window has closed",
 				"code":  "admin_already_exists",
-			})
+			}, http.StatusGone)
+
 			return
 		}
 		h.log.Error("bootstrap admin: create failed", "error", err)
-		h.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bootstrap failed"})
+		h.writeJSON(w, map[string]string{"error": "bootstrap failed"}, http.StatusInternalServerError)
 		return
 	}
 
@@ -155,20 +156,21 @@ func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
 		"public_key_hex", res.PubKeyHex,
 		"client_ip", clientIP(r),
 	)
-	h.writeJSON(w, http.StatusOK, struct {
+	h.writeJSON(w, struct {
 		Status string `json:"status"`
 		bootstrap.AdminResult
 	}{
 		Status:      "ok",
 		AdminResult: *res,
-	})
+	}, http.StatusOK)
+
 }
 
 // writeJSON is a tiny helper to keep the response paths free of repeated
 // boilerplate. We don't lean on http.Error for the error responses because
 // the front-end parses JSON unconditionally and a text/plain "method not
 // allowed" would break the error display path.
-func (h *BootstrapHandler) writeJSON(w http.ResponseWriter, status int, body interface{}) {
+func (h *BootstrapHandler) writeJSON(w http.ResponseWriter, body interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)

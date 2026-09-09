@@ -59,12 +59,12 @@ type SimulationHistoryItem struct {
 // ServeHTTP handles GET /api/v1/evm/simulations.
 func (h *SimulationHistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
-		h.writeError(w, http.StatusUnauthorized, "unauthorized")
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *SimulationHistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	rows, hasMore, err := h.simRepo.List(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("list simulations failed", slog.String("error", err.Error()))
-		h.writeError(w, http.StatusInternalServerError, "list failed")
+		h.writeError(w, "list failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *SimulationHistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		resp.NextCursorID = last.SignRequestID
 	}
 
-	h.writeJSON(w, http.StatusOK, resp)
+	h.writeJSON(w, resp, http.StatusOK)
 }
 
 func parseIntDefault(s string, def int) int {
@@ -134,13 +134,13 @@ func parseIntDefault(s string, def int) int {
 	return n
 }
 
-func (h *SimulationHistoryHandler) writeError(w http.ResponseWriter, status int, msg string) {
+func (h *SimulationHistoryHandler) writeError(w http.ResponseWriter, msg string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-func (h *SimulationHistoryHandler) writeJSON(w http.ResponseWriter, status int, body any) {
+func (h *SimulationHistoryHandler) writeJSON(w http.ResponseWriter, body any, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
