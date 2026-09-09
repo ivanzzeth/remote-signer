@@ -32,9 +32,9 @@ type layer struct {
 var layers = []layer{
 	{
 		Name:      "domain",
-		Prefixes:  []string{"internal/core/types", "internal/ruleconfig", "internal/homepath", "internal/version", "internal/secure", "internal/validate", "internal/logger", "internal/metrics", "internal/bootstrap"},
+		Prefixes:  []string{"internal/core/types", "internal/core/ports", "internal/ruleconfig", "internal/homepath", "internal/version", "internal/secure", "internal/validate", "internal/logger", "internal/metrics", "internal/bootstrap"},
 		MayImport: []string{},
-		Why:       "Entities and pure helpers. Depends on nothing of ours: everything else may depend on it, so an import here is a cycle waiting to happen.",
+		Why:       "Entities, the repository interfaces the use-case layer declares, and pure helpers. Depends on nothing of ours: everything else may depend on it, so an import here is a cycle waiting to happen.",
 	},
 	{
 		Name:      "usecase",

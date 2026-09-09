@@ -10,28 +10,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// APIKeyFilter for querying API keys
-type APIKeyFilter struct {
-	EnabledOnly bool
-	Source      string // "config", "api", or "" for all
-	Offset      int
-	Limit       int
-}
-
-// APIKeyRepository defines the interface for API key persistence
-type APIKeyRepository interface {
-	Create(ctx context.Context, key *types.APIKey) error
-	Get(ctx context.Context, id string) (*types.APIKey, error)
-	Update(ctx context.Context, key *types.APIKey) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, filter APIKeyFilter) ([]*types.APIKey, error)
-	Count(ctx context.Context, filter APIKeyFilter) (int, error)
-	UpdateLastUsed(ctx context.Context, id string) error
-	// DeleteBySourceExcluding deletes all keys with the given source whose IDs are NOT in the excludeIDs list.
-	DeleteBySourceExcluding(ctx context.Context, source string, excludeIDs []string) (int64, error)
-	BackfillSource(ctx context.Context, defaultSource string) (int64, error)
-}
-
 // GormAPIKeyRepository implements APIKeyRepository using GORM
 type GormAPIKeyRepository struct {
 	db *gorm.DB

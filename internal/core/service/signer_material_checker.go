@@ -11,14 +11,14 @@ import (
 	"github.com/ivanzzeth/ethsig/keystore"
 
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // SignerMaterialChecker reconciles DB signer inventory against local key material.
 type SignerMaterialChecker struct {
 	signerManager evmchain.SignerManager
-	signerRepo    storage.SignerRepository
+	signerRepo    ports.SignerRepository
 	keystoreDir   string
 	hdWalletDir   string
 	interval      time.Duration
@@ -27,7 +27,7 @@ type SignerMaterialChecker struct {
 
 func NewSignerMaterialChecker(
 	signerManager evmchain.SignerManager,
-	signerRepo storage.SignerRepository,
+	signerRepo ports.SignerRepository,
 	keystoreDir string,
 	hdWalletDir string,
 	interval time.Duration,

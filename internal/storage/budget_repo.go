@@ -11,65 +11,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// BudgetSyncRequest carries resolved limit values for a single budget unit,
-// used when variables change and budget limits must be re-resolved from a template.
-type BudgetSyncRequest struct {
-	Unit       string
-	MaxTotal   string
-	MaxPerTx   string
-	MaxTxCount int
-	AlertPct   int
-}
-
-// BudgetRepository defines the interface for budget persistence
-type BudgetRepository interface {
-	Create(ctx context.Context, budget *types.RuleBudget) error
-	// CreateOrGet atomically creates a budget record or returns the existing one.
-	// SECURITY: Uses INSERT ... ON CONFLICT DO NOTHING (upsert) to prevent TOCTOU
-	// race conditions where concurrent requests both find "not found" and both try to create.
-	// Returns the budget (created or existing) and a bool indicating if it was created (true) or already existed (false).
-	CreateOrGet(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error)
-	GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error)
-	// Get fetches a budget by its primary key. Used by the
-	// administrative /budgets/{id} endpoints where the caller already
-	// has the deterministic ID (SHA256 of rule_id+unit) rather than the
-	// two component fields.
-	Get(ctx context.Context, id string) (*types.RuleBudget, error)
-	// Update persists changes to mutable fields (max_total, max_per_tx,
-	// max_tx_count, alert_pct, alert_sent, spent, tx_count). It does
-	// NOT permit changes to id/rule_id/unit/created_at — those define
-	// the row's identity and the budget hash.
-	Update(ctx context.Context, budget *types.RuleBudget) error
-	// UpsertLimits creates or updates budget limit fields for each request.
-	// Does NOT touch spent, tx_count, or alert_sent (runtime counters).
-	// Uses a single transaction so all units are synced atomically.
-	UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []BudgetSyncRequest) error
-	// CountByRuleID returns the number of distinct budget units for a rule.
-	// SECURITY: Used to enforce MaxDynamicUnits limit to prevent budget amplification attacks.
-	CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error)
-	Delete(ctx context.Context, id string) error
-	DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error
-	// AtomicSpend atomically increments spent amount and tx count.
-	// Returns ErrBudgetExceeded if the spend would exceed limits.
-	// Uses SQL-level conditional UPDATE to prevent race conditions.
-	AtomicSpend(ctx context.Context, ruleID types.RuleID, unit string, amount string) error
-	// ResetBudget resets spent/txCount/alertSent for a new period.
-	// Uses conditional WHERE to ensure idempotent reset (only resets if in old period).
-	ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error
-	ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error)
-	ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error)
-	// ListAll returns every budget row, ordered by created_at desc. Used by
-	// the operator-facing /budgets list which must surface synthetic
-	// simulation budgets (rule_id "sim:0x...") that don't appear in the
-	// rules table — fanning out from rules.list() would miss them.
-	ListAll(ctx context.Context) ([]*types.RuleBudget, error)
-	// MarkAlertSent sets alert_sent=true for the given rule+unit budget.
-	// This prevents duplicate alert notifications within the same period.
-	MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error
-}
-
 // ErrBudgetExceeded indicates the budget limit has been reached
-var ErrBudgetExceeded = fmt.Errorf("budget exceeded")
 
 // GormBudgetRepository implements BudgetRepository using GORM
 type GormBudgetRepository struct {

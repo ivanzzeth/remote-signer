@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -36,7 +37,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func setupAccessService(t *testing.T, db *gorm.DB) (*SignerAccessService, storage.SignerOwnershipRepository, storage.SignerAccessRepository, storage.APIKeyRepository) {
+func setupAccessService(t *testing.T, db *gorm.DB) (*SignerAccessService, ports.SignerOwnershipRepository, ports.SignerAccessRepository, ports.APIKeyRepository) {
 	t.Helper()
 	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
 	require.NoError(t, err)
@@ -69,7 +70,7 @@ func setupTestDBWithWallets(t *testing.T) *gorm.DB {
 	return db
 }
 
-func setupAccessServiceWithWallet(t *testing.T, db *gorm.DB) (*SignerAccessService, storage.SignerOwnershipRepository, storage.SignerAccessRepository, storage.APIKeyRepository, storage.WalletRepository) {
+func setupAccessServiceWithWallet(t *testing.T, db *gorm.DB) (*SignerAccessService, ports.SignerOwnershipRepository, ports.SignerAccessRepository, ports.APIKeyRepository, ports.WalletRepository) {
 	t.Helper()
 	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
 	require.NoError(t, err)
@@ -87,7 +88,7 @@ func setupAccessServiceWithWallet(t *testing.T, db *gorm.DB) (*SignerAccessServi
 	return svc, ownershipRepo, accessRepo, apiKeyRepo, walletRepo
 }
 
-func createTestAPIKey(t *testing.T, repo storage.APIKeyRepository, id, role string) {
+func createTestAPIKey(t *testing.T, repo ports.APIKeyRepository, id, role string) {
 	t.Helper()
 	err := repo.Create(context.Background(), &types.APIKey{
 		ID:        id,

@@ -12,14 +12,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // BudgetChecker checks and deducts budget for rule instances
 type BudgetChecker struct {
-	budgetRepo      storage.BudgetRepository
-	templateRepo    storage.TemplateRepository
+	budgetRepo      ports.BudgetRepository
+	templateRepo    ports.TemplateRepository
 	notifier        BudgetAlertNotifier
 	jsEvaluator     BudgetJSEvaluator // optional: for method "js" budget metering
 	decimalsQuerier DecimalsQuerier   // optional: for auto-querying ERC20 decimals when unit_decimal is true
@@ -33,8 +33,8 @@ type BudgetChecker struct {
 
 // NewBudgetChecker creates a new budget checker
 func NewBudgetChecker(
-	budgetRepo storage.BudgetRepository,
-	templateRepo storage.TemplateRepository,
+	budgetRepo ports.BudgetRepository,
+	templateRepo ports.TemplateRepository,
 	logger *slog.Logger,
 ) *BudgetChecker {
 	return &BudgetChecker{
@@ -181,7 +181,7 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 
 	// Atomic spend (checks total budget and tx count atomically)
 	if err := bc.budgetRepo.AtomicSpend(ctx, rule.ID, unit, amount.String()); err != nil {
-		if err == storage.ErrBudgetExceeded {
+		if err == ports.ErrBudgetExceeded {
 			bc.logger.Warn("total budget exceeded",
 				"rule_id", rule.ID,
 				"unit", unit,
@@ -291,7 +291,7 @@ func (bc *BudgetChecker) checkDynamicBudget(
 
 	// Atomic spend
 	if err := bc.budgetRepo.AtomicSpend(ctx, rule.ID, unit, amount.String()); err != nil {
-		if err == storage.ErrBudgetExceeded {
+		if err == ports.ErrBudgetExceeded {
 			bc.logger.Warn("total budget exceeded",
 				"rule_id", rule.ID,
 				"unit", unit,

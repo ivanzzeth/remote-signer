@@ -11,11 +11,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// SyntheticBudgetRuleID returns the rule_id used by SimulationBudgetRule budgets.
-func SyntheticBudgetRuleID(signerAddress string) types.RuleID {
-	return types.RuleID("sim:" + strings.ToLower(signerAddress))
-}
-
 // SyntheticRuleEnsurer backfills rules(id) rows for sim:<signer> budget tracking.
 type SyntheticRuleEnsurer interface {
 	EnsureSyntheticBudgetRule(ctx context.Context, signerAddress string) error

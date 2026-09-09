@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +22,7 @@ import (
 // In-memory mock repositories
 // ---------------------------------------------------------------------------
 
-// mockTemplateRepo is an in-memory implementation of storage.TemplateRepository.
+// mockTemplateRepo is an in-memory implementation of ports.TemplateRepository.
 type mockTemplateRepo struct {
 	mu        sync.RWMutex
 	templates map[string]*types.RuleTemplate
@@ -87,7 +87,7 @@ func (r *mockTemplateRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-func (r *mockTemplateRepo) List(_ context.Context, _ storage.TemplateFilter) ([]*types.RuleTemplate, error) {
+func (r *mockTemplateRepo) List(_ context.Context, _ ports.TemplateFilter) ([]*types.RuleTemplate, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*types.RuleTemplate
@@ -98,7 +98,7 @@ func (r *mockTemplateRepo) List(_ context.Context, _ storage.TemplateFilter) ([]
 	return out, nil
 }
 
-func (r *mockTemplateRepo) Count(_ context.Context, _ storage.TemplateFilter) (int, error) {
+func (r *mockTemplateRepo) Count(_ context.Context, _ ports.TemplateFilter) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.templates), nil
@@ -144,7 +144,7 @@ func (r *mockTemplateRepo) DeleteMany(_ context.Context, ids []string) error {
 	return nil
 }
 
-// mockRuleRepo is an in-memory implementation of storage.RuleRepository.
+// mockRuleRepo is an in-memory implementation of ports.RuleRepository.
 type mockRuleRepo struct {
 	mu    sync.RWMutex
 	rules map[types.RuleID]*types.Rule
@@ -197,7 +197,7 @@ func (r *mockRuleRepo) Delete(_ context.Context, id types.RuleID) error {
 	return nil
 }
 
-func (r *mockRuleRepo) List(_ context.Context, _ storage.RuleFilter) ([]*types.Rule, error) {
+func (r *mockRuleRepo) List(_ context.Context, _ ports.RuleFilter) ([]*types.Rule, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*types.Rule
@@ -208,7 +208,7 @@ func (r *mockRuleRepo) List(_ context.Context, _ storage.RuleFilter) ([]*types.R
 	return out, nil
 }
 
-func (r *mockRuleRepo) Count(_ context.Context, _ storage.RuleFilter) (int, error) {
+func (r *mockRuleRepo) Count(_ context.Context, _ ports.RuleFilter) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.rules), nil
@@ -235,7 +235,7 @@ func (r *mockRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) er
 	return nil
 }
 
-// mockBudgetRepo is an in-memory implementation of storage.BudgetRepository.
+// mockBudgetRepo is an in-memory implementation of ports.BudgetRepository.
 type mockBudgetRepo struct {
 	mu      sync.RWMutex
 	budgets map[string]*types.RuleBudget // keyed by ID
@@ -368,7 +368,7 @@ func (r *mockBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget
 	return budget, true, nil
 }
 
-func (r *mockBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+func (r *mockBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []ports.BudgetSyncRequest) error {
 	return nil
 }
 
@@ -397,10 +397,10 @@ func mustJSON(v any) []byte {
 }
 
 // seedTemplate inserts a template directly into the mock repo for test setup.
-// errorDeleteRuleRepo wraps storage.RuleRepository but always fails Delete calls.
+// errorDeleteRuleRepo wraps ports.RuleRepository but always fails Delete calls.
 // It is used to test rollbackRules error path.
 type errorDeleteRuleRepo struct {
-	storage.RuleRepository
+	ports.RuleRepository
 }
 
 func (r *errorDeleteRuleRepo) Delete(_ context.Context, _ types.RuleID) error {
@@ -3235,7 +3235,7 @@ func TestBundleRollbackRules(t *testing.T) {
 		}
 
 		// Verify that the first sub-rule was rolled back (deleted)
-		remaining, err := ruleRepo.List(ctx, storage.RuleFilter{})
+		remaining, err := ruleRepo.List(ctx, ports.RuleFilter{})
 		if err != nil {
 			t.Fatalf("failed to list rules: %v", err)
 		}
@@ -3325,7 +3325,7 @@ func TestBundleRollbackRules(t *testing.T) {
 		}
 
 		// Verify that the sub-rule created before budget failure was rolled back
-		remaining, err := ruleRepo.List(ctx, storage.RuleFilter{})
+		remaining, err := ruleRepo.List(ctx, ports.RuleFilter{})
 		if err != nil {
 			t.Fatalf("failed to list rules: %v", err)
 		}
@@ -3337,7 +3337,7 @@ func TestBundleRollbackRules(t *testing.T) {
 
 // failAfterCountRuleRepo wraps RuleRepository and fails Create after N calls.
 type failAfterCountRuleRepo struct {
-	storage.RuleRepository
+	ports.RuleRepository
 	failAfter int
 	callCount int
 }
@@ -3352,7 +3352,7 @@ func (r *failAfterCountRuleRepo) Create(ctx context.Context, rule *types.Rule) e
 
 // failOnceBudgetRepo wraps BudgetRepository and fails its first Create.
 type failOnceBudgetRepo struct {
-	storage.BudgetRepository
+	ports.BudgetRepository
 	firstCreate bool
 }
 

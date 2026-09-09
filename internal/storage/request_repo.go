@@ -10,62 +10,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// RequestFilter for querying requests
-type RequestFilter struct {
-	APIKeyID      *string
-	SignerAddress *string
-	ChainType     *types.ChainType
-	ChainID       *string
-	SignType      *string
-	// APIKeyRole filters to requests whose api_key_id belongs to a key
-	// with this role (admin-only query param).
-	APIKeyRole *types.APIKeyRole
-	// TransactionStatus filters by linked on-chain row status.
-	// "none" means no transaction_id is set; other values match
-	// transactions.status (broadcasted, mined, dropped, failed).
-	TransactionStatus *string
-	Status            []types.SignRequestStatus
-	// Cursor-based pagination (preferred over Offset)
-	// Cursor is the created_at timestamp of the last item from previous page
-	Cursor *time.Time
-	// CursorID is the ID of the last item (for tie-breaking when timestamps are equal)
-	CursorID *types.SignRequestID
-	Limit    int
-}
-
 // ErrStateConflict is returned when a compare-and-update fails because the
 // current status does not match the expected status (concurrent modification).
-var ErrStateConflict = fmt.Errorf("state conflict: status was modified by another request")
-
-// RequestRepository defines the interface for sign request persistence
-type RequestRepository interface {
-	Create(ctx context.Context, req *types.SignRequest) error
-	Get(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
-	Update(ctx context.Context, req *types.SignRequest) error
-	// CompareAndUpdate atomically updates a request only if its current status
-	// matches expectedStatus. Returns ErrStateConflict if the status has changed.
-	CompareAndUpdate(ctx context.Context, req *types.SignRequest, expectedStatus types.SignRequestStatus) error
-	List(ctx context.Context, filter RequestFilter) ([]*types.SignRequest, error)
-	Count(ctx context.Context, filter RequestFilter) (int, error)
-	UpdateStatus(ctx context.Context, id types.SignRequestID, status types.SignRequestStatus) error
-	// UpdateLastNoMatchReason records the whitelist engine's diagnostic
-	// for "no rule matched" so it surfaces in the API + activity drawer.
-	// Best-effort — callers swallow errors because the sign flow has
-	// already moved on to manual approval / simulation.
-	UpdateLastNoMatchReason(ctx context.Context, id types.SignRequestID, reason string) error
-	// LookupBySignedData finds the most recent completed sign request
-	// whose SignedData equals the supplied bytes. Used by the wallet
-	// RPC proxy to link an eth_sendRawTransaction broadcast back to
-	// the request that produced it. Returns ErrNotFound when no
-	// match (third-party caller hit the proxy with a payload we
-	// didn't sign).
-	LookupBySignedData(ctx context.Context, signedData []byte) (*types.SignRequest, error)
-	// SetTransactionID stores the FK after the proxy creates a
-	// transactions row. Best-effort — sign_request retains its
-	// completed status even if the back-ref write fails (the txs
-	// table is still the source of truth).
-	SetTransactionID(ctx context.Context, id types.SignRequestID, transactionID string) error
-}
 
 // GormRequestRepository implements RequestRepository using GORM
 type GormRequestRepository struct {

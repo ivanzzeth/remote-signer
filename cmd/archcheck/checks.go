@@ -321,7 +321,22 @@ func isKnobType(e ast.Expr) bool {
 // repo passed through three helpers in different files is not tracked, which is
 // why the holder list, not the call site, is what the baseline pins.
 func checkRuleWrite(r *repo) ([]finding, error) {
-	const repoType = "storage.RuleRepository"
+	// ⚠️ Both spellings. The interface is declared in internal/core/ports and
+	// re-exported by internal/storage as an alias, so the same type appears as
+	// ports.RuleRepository in the use-case layer and storage.RuleRepository
+	// everywhere else. Matching only one of them makes half the holders
+	// invisible — which is exactly what happened the day the alias landed: the
+	// ratchet reported holders had *disappeared*, when they had only been
+	// renamed.
+	repoTypes := []string{"storage.RuleRepository", "ports.RuleRepository"}
+	isRepoType := func(t string) bool {
+		for _, rt := range repoTypes {
+			if t == rt {
+				return true
+			}
+		}
+		return strings.HasSuffix(t, "GormRuleRepository")
+	}
 
 	var out []finding
 	for _, f := range r.Files {
@@ -334,7 +349,7 @@ func checkRuleWrite(r *repo) ([]finding, error) {
 		ast.Inspect(f.File, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.Field: // struct fields, params, results
-				if exprString(x.Type) == repoType || strings.HasSuffix(exprString(x.Type), "GormRuleRepository") {
+				if isRepoType(exprString(x.Type)) {
 					for _, nm := range x.Names {
 						holders[nm.Name] = true
 					}
@@ -343,7 +358,7 @@ func checkRuleWrite(r *repo) ([]finding, error) {
 					}
 				}
 			case *ast.ValueSpec: // var x storage.RuleRepository
-				if x.Type != nil && exprString(x.Type) == repoType {
+				if x.Type != nil && isRepoType(exprString(x.Type)) {
 					for _, nm := range x.Names {
 						holders[nm.Name] = true
 					}

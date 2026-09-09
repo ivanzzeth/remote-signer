@@ -11,25 +11,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// WalletRepository defines the interface for wallet persistence.
-type WalletRepository interface {
-	Create(ctx context.Context, wallet *types.Wallet) error
-	Get(ctx context.Context, id string) (*types.Wallet, error)
-	Update(ctx context.Context, wallet *types.Wallet) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, filter types.WalletFilter) (*types.WalletListResult, error)
-
-	AddMember(ctx context.Context, member *types.WalletMember) error
-	RemoveMember(ctx context.Context, walletID, signerAddress string) error
-	ListMembers(ctx context.Context, walletID string) ([]types.WalletMember, error)
-	IsMember(ctx context.Context, walletID, signerAddress string) (bool, error)
-
-	// GetWalletsForSigner returns all wallets that contain the given signer.
-	GetWalletsForSigner(ctx context.Context, signerAddress string) ([]types.Wallet, error)
-	// GetWalletsForSigners returns signer-address to wallets mapping in batch.
-	GetWalletsForSigners(ctx context.Context, signerAddresses []string) (map[string][]types.Wallet, error)
-}
-
 // GormWalletRepository implements WalletRepository using GORM.
 type GormWalletRepository struct {
 	db *gorm.DB

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 type delegationCtxKey struct{}
@@ -81,7 +81,7 @@ func (e *WhitelistRuleEngine) logScopeMismatch(rule *types.Rule, req *types.Sign
 // it's skipped and the next whitelist rule is evaluated. This ensures that one
 // failing whitelist rule doesn't prevent other valid whitelist rules from matching.
 type WhitelistRuleEngine struct {
-	repo                storage.RuleRepository
+	repo                ports.RuleRepository
 	evaluators          map[types.RuleType]RuleEvaluator
 	budgetChecker       *BudgetChecker // optional: budget checking for template instances
 	delegationConverter DelegationPayloadConverter
@@ -109,7 +109,7 @@ func WithDelegationPayloadConverter(c DelegationPayloadConverter) RuleEngineOpti
 }
 
 // NewWhitelistRuleEngine creates a new two-tier rule engine
-func NewWhitelistRuleEngine(repo storage.RuleRepository, logger *slog.Logger, opts ...RuleEngineOption) (*WhitelistRuleEngine, error) {
+func NewWhitelistRuleEngine(repo ports.RuleRepository, logger *slog.Logger, opts ...RuleEngineOption) (*WhitelistRuleEngine, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("rule repository is required")
 	}
@@ -186,7 +186,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	// SECURITY: Use Limit=-1 to fetch ALL matching rules without pagination.
 	// A default limit (e.g. 100) could silently drop blocklist rules, allowing
 	// malicious transactions through. This is a security-critical path.
-	filter := storage.RuleFilter{
+	filter := ports.RuleFilter{
 		ChainType:     &req.ChainType,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,
@@ -854,7 +854,7 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 // Returns (nil, nil) if no blocklist rule is violated; otherwise returns the blocking result.
 // Uses Fail-Closed semantics: evaluation errors cause immediate rejection.
 func (e *WhitelistRuleEngine) evaluateBlocklistForRequest(ctx context.Context, req *types.SignRequest, parsed *types.ParsedPayload) (*EvaluationResult, error) {
-	filter := storage.RuleFilter{
+	filter := ports.RuleFilter{
 		ChainType:     &req.ChainType,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,

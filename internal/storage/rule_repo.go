@@ -12,36 +12,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// RuleFilter for querying rules
-type RuleFilter struct {
-	ChainType     *types.ChainType
-	ChainID       *string
-	Owner         *string
-	SignerAddress *string
-	Type          *types.RuleType
-	Source        *types.RuleSource
-	EnabledOnly   bool
-	Offset        int
-	Limit         int
-}
-
-// RuleRepository defines the interface for rule persistence
-type RuleRepository interface {
-	Create(ctx context.Context, rule *types.Rule) error
-	Get(ctx context.Context, id types.RuleID) (*types.Rule, error)
-	Update(ctx context.Context, rule *types.Rule) error
-	Delete(ctx context.Context, id types.RuleID) error
-	List(ctx context.Context, filter RuleFilter) ([]*types.Rule, error)
-	Count(ctx context.Context, filter RuleFilter) (int, error)
-	ListByChainType(ctx context.Context, chainType types.ChainType) ([]*types.Rule, error)
-	IncrementMatchCount(ctx context.Context, id types.RuleID) error
-	// ValidateDelegateRefs checks that all delegate_to and delegate_to_by_target
-	// inst_<hash> references in a rule's config exist as rules in the database.
-	// This enforces referential integrity for references embedded in the JSONB
-	// config column. No-op for rules without delegate references.
-	ValidateDelegateRefs(ctx context.Context, rule *types.Rule) error
-}
-
 // Transactional is implemented by repositories that support atomic operations.
 // This is optional — callers should type-assert before use.
 type Transactional interface {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 )
 
 // TemplateRegistry coordinates one TemplateSource against the
@@ -18,7 +18,7 @@ import (
 // expect (sub-thousand). Remote sources implementing TemplateSource
 // are free to cache internally.
 type TemplateRegistry struct {
-	repo   storage.TemplateRepository
+	repo   ports.TemplateRepository
 	source TemplateSource
 	log    *slog.Logger
 }
@@ -27,7 +27,7 @@ type TemplateRegistry struct {
 // logger is required; pass slog.Default() if the caller has no
 // preference. nil repo or source panics at Sync time, not here, so the
 // constructor stays trivial.
-func NewTemplateRegistry(repo storage.TemplateRepository, source TemplateSource, log *slog.Logger) *TemplateRegistry {
+func NewTemplateRegistry(repo ports.TemplateRepository, source TemplateSource, log *slog.Logger) *TemplateRegistry {
 	if log == nil {
 		log = slog.Default()
 	}

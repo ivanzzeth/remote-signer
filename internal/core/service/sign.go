@@ -13,10 +13,10 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // ErrManualApprovalDisabled is returned when no whitelist rule matches and manual approval is disabled.
@@ -40,8 +40,8 @@ func isLockedSignerErr(err error) bool {
 type SignServiceAPI interface {
 	Sign(ctx context.Context, req *SignRequest) (*SignResponse, error)
 	GetRequest(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
-	ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
-	CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error)
+	ListRequests(ctx context.Context, filter ports.RequestFilter) ([]*types.SignRequest, error)
+	CountRequests(ctx context.Context, filter ports.RequestFilter) (int, error)
 	ProcessApproval(ctx context.Context, requestID types.SignRequestID, req *ApprovalRequest) (*ApprovalResponse, error)
 	ProcessBatchApproval(ctx context.Context, requestIDs []types.SignRequestID, req *ApprovalRequest) (*BatchApprovalResponse, error)
 	PreviewRuleForRequest(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
@@ -55,7 +55,7 @@ var _ SignServiceAPI = (*SignService)(nil)
 // SignService orchestrates the signing request lifecycle
 type SignService struct {
 	chainRegistry         *chain.Registry
-	requestRepo           storage.RequestRepository
+	requestRepo           ports.RequestRepository
 	ruleEngine            rule.RuleEngine
 	stateMachine          *statemachine.StateMachine
 	approvalService       *ApprovalService
@@ -69,7 +69,7 @@ type SignService struct {
 // NewSignService creates a new sign service
 func NewSignService(
 	chainRegistry *chain.Registry,
-	requestRepo storage.RequestRepository,
+	requestRepo ports.RequestRepository,
 	ruleEngine rule.RuleEngine,
 	stateMachine *statemachine.StateMachine,
 	approvalService *ApprovalService,
@@ -527,12 +527,12 @@ func (s *SignService) GetRequest(ctx context.Context, id types.SignRequestID) (*
 }
 
 // ListRequests lists sign requests with filter
-func (s *SignService) ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error) {
+func (s *SignService) ListRequests(ctx context.Context, filter ports.RequestFilter) ([]*types.SignRequest, error) {
 	return s.requestRepo.List(ctx, filter)
 }
 
 // CountRequests counts sign requests matching the filter
-func (s *SignService) CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error) {
+func (s *SignService) CountRequests(ctx context.Context, filter ports.RequestFilter) (int, error) {
 	return s.requestRepo.Count(ctx, filter)
 }
 
@@ -694,7 +694,7 @@ func (s *SignService) ReevaluatePending(ctx context.Context, callerName string) 
 	}
 
 	// Fetch all authorizing requests with no limit.
-	filter := storage.RequestFilter{
+	filter := ports.RequestFilter{
 		Status: []types.SignRequestStatus{types.StatusAuthorizing},
 	}
 	aRequests, listErr := s.requestRepo.List(ctx, filter)

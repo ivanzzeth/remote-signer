@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // ErrNonceReplay indicates a nonce has been reused (replay attack detected)
@@ -45,14 +45,14 @@ func DefaultConfig() Config {
 
 // Verifier verifies API request signatures
 type Verifier struct {
-	apiKeyRepo storage.APIKeyRepository
-	nonceStore storage.NonceStore
+	apiKeyRepo ports.APIKeyRepository
+	nonceStore ports.NonceStore
 	config     Config
 }
 
 // NewVerifier creates a new auth verifier without nonce store.
 // If NonceRequired is true, use NewVerifierWithNonceStore instead.
-func NewVerifier(apiKeyRepo storage.APIKeyRepository, config Config) (*Verifier, error) {
+func NewVerifier(apiKeyRepo ports.APIKeyRepository, config Config) (*Verifier, error) {
 	if apiKeyRepo == nil {
 		return nil, fmt.Errorf("API key repository is required")
 	}
@@ -69,7 +69,7 @@ func NewVerifier(apiKeyRepo storage.APIKeyRepository, config Config) (*Verifier,
 }
 
 // NewVerifierWithNonceStore creates a new auth verifier with nonce store for replay protection
-func NewVerifierWithNonceStore(apiKeyRepo storage.APIKeyRepository, nonceStore storage.NonceStore, config Config) (*Verifier, error) {
+func NewVerifierWithNonceStore(apiKeyRepo ports.APIKeyRepository, nonceStore ports.NonceStore, config Config) (*Verifier, error) {
 	if apiKeyRepo == nil {
 		return nil, fmt.Errorf("API key repository is required")
 	}

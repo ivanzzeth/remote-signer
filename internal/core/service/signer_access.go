@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
@@ -20,20 +20,20 @@ type HDWalletParentResolver interface {
 
 // SignerAccessService manages signer ownership and access control.
 type SignerAccessService struct {
-	ownershipRepo storage.SignerOwnershipRepository
-	accessRepo    storage.SignerAccessRepository
-	apiKeyRepo    storage.APIKeyRepository
-	ruleRepo      storage.RuleRepository
-	walletRepo    storage.WalletRepository
+	ownershipRepo ports.SignerOwnershipRepository
+	accessRepo    ports.SignerAccessRepository
+	apiKeyRepo    ports.APIKeyRepository
+	ruleRepo      ports.RuleRepository
+	walletRepo    ports.WalletRepository
 	hdWalletMgrFn func() (HDWalletParentResolver, error)
 	logger        *slog.Logger
 }
 
 // NewSignerAccessService creates a new SignerAccessService.
 func NewSignerAccessService(
-	ownershipRepo storage.SignerOwnershipRepository,
-	accessRepo storage.SignerAccessRepository,
-	apiKeyRepo storage.APIKeyRepository,
+	ownershipRepo ports.SignerOwnershipRepository,
+	accessRepo ports.SignerAccessRepository,
+	apiKeyRepo ports.APIKeyRepository,
 	hdWalletMgrFn func() (HDWalletParentResolver, error),
 	logger *slog.Logger,
 ) (*SignerAccessService, error) {
@@ -59,12 +59,12 @@ func NewSignerAccessService(
 }
 
 // SetRuleRepo sets the rule repository for cascade operations (API key delete).
-func (s *SignerAccessService) SetRuleRepo(repo storage.RuleRepository) {
+func (s *SignerAccessService) SetRuleRepo(repo ports.RuleRepository) {
 	s.ruleRepo = repo
 }
 
 // SetWalletRepo sets the wallet repository for wallet-based access resolution.
-func (s *SignerAccessService) SetWalletRepo(repo storage.WalletRepository) {
+func (s *SignerAccessService) SetWalletRepo(repo ports.WalletRepository) {
 	s.walletRepo = repo
 }
 
@@ -400,12 +400,12 @@ func (s *SignerAccessService) TransferOwnership(ctx context.Context, callerKeyID
 	}
 
 	// Atomically: update owner + clear access list
-	txRepo, ok := s.ownershipRepo.(storage.SignerOwnershipTransactional)
+	txRepo, ok := s.ownershipRepo.(ports.SignerOwnershipTransactional)
 	if !ok {
 		return fmt.Errorf("ownership repository does not support transactions")
 	}
 
-	if err := txRepo.RunInTransaction(ctx, func(txOwnership storage.SignerOwnershipRepository, txAccess storage.SignerAccessRepository) error {
+	if err := txRepo.RunInTransaction(ctx, func(txOwnership ports.SignerOwnershipRepository, txAccess ports.SignerAccessRepository) error {
 		if updateErr := txOwnership.UpdateOwner(ctx, signerAddress, newOwnerID); updateErr != nil {
 			return fmt.Errorf("failed to update owner: %w", updateErr)
 		}
@@ -462,7 +462,7 @@ func (s *SignerAccessService) CleanupForDeletedKey(ctx context.Context, apiKeyID
 	}
 
 	// 1. Delete rules owned by this key
-	ownedRules, err := s.ruleRepo.List(ctx, storage.RuleFilter{Owner: &apiKeyID, Limit: 100000})
+	ownedRules, err := s.ruleRepo.List(ctx, ports.RuleFilter{Owner: &apiKeyID, Limit: 100000})
 	if err != nil {
 		return fmt.Errorf("failed to list owned rules: %w", err)
 	}
@@ -473,7 +473,7 @@ func (s *SignerAccessService) CleanupForDeletedKey(ctx context.Context, apiKeyID
 	}
 
 	// 2. Remove key from applied_to in all rules (delete rule if applied_to becomes empty)
-	allRules, err := s.ruleRepo.List(ctx, storage.RuleFilter{Limit: 100000})
+	allRules, err := s.ruleRepo.List(ctx, ports.RuleFilter{Limit: 100000})
 	if err != nil {
 		return fmt.Errorf("failed to list all rules: %w", err)
 	}

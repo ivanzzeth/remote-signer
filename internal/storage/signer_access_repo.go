@@ -11,18 +11,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// SignerAccessRepository manages signer access grants.
-type SignerAccessRepository interface {
-	Grant(ctx context.Context, access *types.SignerAccess) error
-	Revoke(ctx context.Context, signerAddress, apiKeyID string) error
-	List(ctx context.Context, signerAddress string) ([]*types.SignerAccess, error)
-	HasAccess(ctx context.Context, signerAddress, apiKeyID string) (bool, error)
-	HasAccessViaWallet(ctx context.Context, apiKeyID, walletID string) (bool, error)
-	DeleteBySigner(ctx context.Context, signerAddress string) error
-	DeleteByAPIKey(ctx context.Context, apiKeyID string) error
-	ListAccessibleAddresses(ctx context.Context, apiKeyID string) ([]string, error)
-}
-
 // GormSignerAccessRepository implements SignerAccessRepository using GORM.
 type GormSignerAccessRepository struct {
 	db *gorm.DB

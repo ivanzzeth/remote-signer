@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // Notifier interface for sending notifications
@@ -18,7 +18,7 @@ type Notifier interface {
 
 // ApprovalService handles manual approval workflow
 type ApprovalService struct {
-	ruleRepo      storage.RuleRepository
+	ruleRepo      ports.RuleRepository
 	ruleGenerator rule.RuleGenerator
 	notifier      Notifier
 	logger        *slog.Logger
@@ -26,7 +26,7 @@ type ApprovalService struct {
 
 // NewApprovalService creates a new approval service
 func NewApprovalService(
-	ruleRepo storage.RuleRepository,
+	ruleRepo ports.RuleRepository,
 	ruleGenerator rule.RuleGenerator,
 	notifier Notifier,
 	logger *slog.Logger,

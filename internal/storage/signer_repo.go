@@ -12,22 +12,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// SignerRepository manages DB-backed signer inventory records.
-type SignerRepository interface {
-	Upsert(ctx context.Context, signer *types.Signer) error
-	Get(ctx context.Context, address string) (*types.Signer, error)
-	List(ctx context.Context, filter SignerListFilter) ([]types.Signer, int, error)
-	Delete(ctx context.Context, address string) error
-	UpdateMaterialStatus(ctx context.Context, address string, status types.SignerMaterialStatus, checkedAt time.Time, missingAt *time.Time, materialErr string) error
-}
-
-// SignerListFilter defines list filters for DB signers.
-type SignerListFilter struct {
-	Type   *types.SignerType
-	Offset int
-	Limit  int
-}
-
 // GormSignerRepository implements SignerRepository with GORM.
 type GormSignerRepository struct {
 	db *gorm.DB

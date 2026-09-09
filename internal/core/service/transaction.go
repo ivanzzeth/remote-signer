@@ -36,8 +36,8 @@ import (
 	"github.com/google/uuid"
 
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // DroppedTxGracePeriod is how long we wait after the broadcast
@@ -49,8 +49,8 @@ const DroppedTxGracePeriod = 10 * time.Minute
 
 // TransactionService owns broadcast → mined lifecycle bookkeeping.
 type TransactionService struct {
-	repo        storage.TransactionRepository
-	requestRepo storage.RequestRepository
+	repo        ports.TransactionRepository
+	requestRepo ports.RequestRepository
 	rpc         *evmchain.RPCProvider
 	logger      *slog.Logger
 	gracePeriod time.Duration
@@ -60,8 +60,8 @@ type TransactionService struct {
 // rpc may be nil if the caller is exclusively recording (no polling) —
 // the proxy registration site passes nil-tolerant for that case.
 func NewTransactionService(
-	repo storage.TransactionRepository,
-	requestRepo storage.RequestRepository,
+	repo ports.TransactionRepository,
+	requestRepo ports.RequestRepository,
 	rpc *evmchain.RPCProvider,
 	logger *slog.Logger,
 ) (*TransactionService, error) {

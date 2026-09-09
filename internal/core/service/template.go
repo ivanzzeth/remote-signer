@@ -15,23 +15,23 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // TemplateService manages rule templates and instance creation
 type TemplateService struct {
-	templateRepo storage.TemplateRepository
-	ruleRepo     storage.RuleRepository
-	budgetRepo   storage.BudgetRepository
+	templateRepo ports.TemplateRepository
+	ruleRepo     ports.RuleRepository
+	budgetRepo   ports.BudgetRepository
 	logger       *slog.Logger
 }
 
 // NewTemplateService creates a new template service
 func NewTemplateService(
-	templateRepo storage.TemplateRepository,
-	ruleRepo storage.RuleRepository,
-	budgetRepo storage.BudgetRepository,
+	templateRepo ports.TemplateRepository,
+	ruleRepo ports.RuleRepository,
+	budgetRepo ports.BudgetRepository,
 	logger *slog.Logger,
 ) (*TemplateService, error) {
 	if templateRepo == nil {
@@ -154,8 +154,8 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 // Resolves template via DB; for preset apply use ResolveTemplate outside tx then CreateInstanceFromResolvedWithTx inside tx to avoid deadlock with single DB connection.
 func (s *TemplateService) CreateInstanceWithTx(
 	ctx context.Context,
-	ruleRepo storage.RuleRepository,
-	budgetRepo storage.BudgetRepository,
+	ruleRepo ports.RuleRepository,
+	budgetRepo ports.BudgetRepository,
 	req *CreateInstanceRequest,
 ) (*CreateInstanceResult, error) {
 	if req == nil {
@@ -186,8 +186,8 @@ func (s *TemplateService) CreateInstanceWithTx(
 // so that templates later in the batch can reference rules created earlier.
 func (s *TemplateService) BatchCreateInstances(
 	ctx context.Context,
-	ruleRepo storage.RuleRepository,
-	budgetRepo storage.BudgetRepository,
+	ruleRepo ports.RuleRepository,
+	budgetRepo ports.BudgetRepository,
 	items []BatchCreateItem,
 ) ([]*CreateInstanceResult, error) {
 	if len(items) == 0 {
@@ -303,8 +303,8 @@ func (s *TemplateService) collectRuleIDs(m map[string]types.RuleID, tmpl *types.
 // Use after ResolveTemplate outside the transaction so preset apply does not need a second DB connection.
 func (s *TemplateService) CreateInstanceFromResolvedWithTx(
 	ctx context.Context,
-	ruleRepo storage.RuleRepository,
-	budgetRepo storage.BudgetRepository,
+	ruleRepo ports.RuleRepository,
+	budgetRepo ports.BudgetRepository,
 	tmpl *types.RuleTemplate,
 	req *CreateInstanceRequest,
 ) (*CreateInstanceResult, error) {
@@ -319,8 +319,8 @@ func (s *TemplateService) CreateInstanceFromResolvedWithTx(
 
 func (s *TemplateService) createInstanceFromResolved(
 	ctx context.Context,
-	ruleRepo storage.RuleRepository,
-	budgetRepo storage.BudgetRepository,
+	ruleRepo ports.RuleRepository,
+	budgetRepo ports.BudgetRepository,
 	tmpl *types.RuleTemplate,
 	req *CreateInstanceRequest,
 	precomputedVars map[string]string,
@@ -502,8 +502,8 @@ func coalesceBundlePriority(p *int) int { return types.CoalesceRulePriority(p) }
 // correct inst_<hash> rule IDs before any rule is persisted.
 func (s *TemplateService) createInstanceFromBundle(
 	ctx context.Context,
-	ruleRepo storage.RuleRepository,
-	budgetRepo storage.BudgetRepository,
+	ruleRepo ports.RuleRepository,
+	budgetRepo ports.BudgetRepository,
 	tmpl *types.RuleTemplate,
 	req *CreateInstanceRequest,
 	resolvedVars map[string]string,
@@ -735,7 +735,7 @@ func (s *TemplateService) createInstanceFromBundle(
 // rollbackRules deletes all previously created rules and their budgets (used on
 // bundle expansion failure). Budgets are removed first so rows cannot linger
 // when FK CASCADE is unavailable.
-func (s *TemplateService) rollbackRules(ctx context.Context, ruleRepo storage.RuleRepository, ruleIDs []types.RuleID) {
+func (s *TemplateService) rollbackRules(ctx context.Context, ruleRepo ports.RuleRepository, ruleIDs []types.RuleID) {
 	for _, id := range ruleIDs {
 		if s.budgetRepo != nil {
 			if err := s.budgetRepo.DeleteByRuleID(ctx, id); err != nil {
@@ -909,7 +909,7 @@ func (s *TemplateService) generateInstanceRuleID(templateID string, vars map[str
 }
 
 // createBudgetWithRepo creates a budget using the given repo (for use with tx-scoped repo).
-func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo storage.BudgetRepository, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
+func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo ports.BudgetRepository, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
 	unit := "count"
 	if len(tmpl.BudgetMetering) > 0 {
 		var metering types.BudgetMetering

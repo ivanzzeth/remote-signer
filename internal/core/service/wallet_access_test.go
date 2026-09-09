@@ -14,11 +14,12 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-func setupWalletAccessRepos(t *testing.T) (*SignerAccessService, storage.WalletRepository) {
+func setupWalletAccessRepos(t *testing.T) (*SignerAccessService, ports.WalletRepository) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=private"), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),

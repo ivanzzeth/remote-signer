@@ -10,38 +10,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// TemplateFilter for querying templates
-type TemplateFilter struct {
-	Type        *types.RuleType
-	Source      *types.RuleSource
-	EnabledOnly bool
-	Offset      int
-	Limit       int
-}
-
-// TemplateRepository defines the interface for template persistence
-type TemplateRepository interface {
-	Create(ctx context.Context, tmpl *types.RuleTemplate) error
-	Get(ctx context.Context, id string) (*types.RuleTemplate, error)
-	GetByName(ctx context.Context, name string) (*types.RuleTemplate, error)
-	Update(ctx context.Context, tmpl *types.RuleTemplate) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, filter TemplateFilter) ([]*types.RuleTemplate, error)
-	Count(ctx context.Context, filter TemplateFilter) (int, error)
-	// Upsert writes tmpl, skipping the DB write when an existing row
-	// has the same ContentHash. Returns changed=true when the row was
-	// inserted or updated, false when the on-disk content matched the
-	// cached one. Used by the Registry's Sync loop to avoid a full
-	// JSON re-marshal on every boot.
-	Upsert(ctx context.Context, tmpl *types.RuleTemplate) (changed bool, err error)
-	// ListIDsBySource returns the IDs of every row whose Source matches
-	// the given value. Registry.Sync calls this to compute the set of
-	// rows that disappeared from a file source and need pruning.
-	ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error)
-	// DeleteMany removes rows by ID in one statement.
-	DeleteMany(ctx context.Context, ids []string) error
-}
-
 // GormTemplateRepository implements TemplateRepository using GORM
 type GormTemplateRepository struct {
 	db *gorm.DB

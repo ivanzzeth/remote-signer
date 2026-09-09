@@ -10,30 +10,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// PresetFilter for querying presets.
-type PresetFilter struct {
-	ChainType   *types.ChainType
-	Source      *types.RuleSource
-	EnabledOnly bool
-	Offset      int
-	Limit       int
-}
-
-// PresetRepository defines persistence for rule presets. Mirrors
-// TemplateRepository's shape so the Registry can drive both with the
-// same Sync algorithm.
-type PresetRepository interface {
-	Create(ctx context.Context, p *types.RulePreset) error
-	Get(ctx context.Context, id string) (*types.RulePreset, error)
-	Update(ctx context.Context, p *types.RulePreset) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, filter PresetFilter) ([]*types.RulePreset, error)
-	Count(ctx context.Context, filter PresetFilter) (int, error)
-	Upsert(ctx context.Context, p *types.RulePreset) (changed bool, err error)
-	ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error)
-	DeleteMany(ctx context.Context, ids []string) error
-}
-
 // GormPresetRepository implements PresetRepository with GORM.
 type GormPresetRepository struct {
 	db *gorm.DB

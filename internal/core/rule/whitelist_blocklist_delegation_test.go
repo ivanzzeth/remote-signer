@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // =============================================================================
@@ -27,7 +27,7 @@ type blocklistTestRepo struct {
 	listErr   error
 }
 
-func (r *blocklistTestRepo) List(ctx context.Context, filter storage.RuleFilter) ([]*types.Rule, error) {
+func (r *blocklistTestRepo) List(ctx context.Context, filter ports.RuleFilter) ([]*types.Rule, error) {
 	if r.listErr != nil {
 		return nil, r.listErr
 	}

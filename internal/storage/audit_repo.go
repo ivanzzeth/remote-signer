@@ -10,37 +10,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// AuditFilter for querying audit records
-type AuditFilter struct {
-	RequestID         *types.SignRequestID
-	APIKeyID          *string
-	EventType         *types.AuditEventType
-	ExcludeEventTypes []types.AuditEventType
-	Severity          *types.AuditSeverity
-	ChainType         *types.ChainType
-	ChainID           *string
-	SignerAddress     *string
-	StartTime         *time.Time
-	EndTime           *time.Time
-	// Cursor-based pagination (preferred over Offset)
-	// Cursor is the timestamp of the last item from previous page
-	Cursor *time.Time
-	// CursorID is the ID of the last item (for tie-breaking when timestamps are equal)
-	CursorID *types.AuditID
-	Limit    int
-}
-
-// AuditRepository defines the interface for audit log persistence
-type AuditRepository interface {
-	Log(ctx context.Context, record *types.AuditRecord) error
-	Query(ctx context.Context, filter AuditFilter) ([]*types.AuditRecord, error)
-	Count(ctx context.Context, filter AuditFilter) (int, error)
-	GetByRequestID(ctx context.Context, requestID types.SignRequestID) ([]*types.AuditRecord, error)
-	// DeleteOlderThan removes audit records with timestamp before the given time.
-	// Returns the number of records deleted.
-	DeleteOlderThan(ctx context.Context, before time.Time) (int64, error)
-}
-
 // GormAuditRepository implements AuditRepository using GORM
 type GormAuditRepository struct {
 	db *gorm.DB

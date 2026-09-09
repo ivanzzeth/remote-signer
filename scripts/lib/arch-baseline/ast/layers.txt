@@ -1,33 +1,28 @@
 # Clean Architecture 依赖方向的违规边(importing-pkg -> imported-pkg)。
 # 由 cmd/archcheck 用 AST 读 import 得出;层的定义在 cmd/archcheck/layers.go。
 #
-# ⚠️ 这张表比 grep 版(gorm-outside-storage / core-imports-evm)大得多,不是因为
-# 债变多了,是因为 grep 只能问「文件里有没有这个字符串」,AST 能问「这个包依赖了
-# 哪个包」。grep 版看到 3 个文件,AST 看到 13 条边 —— 其中
-# internal/api -> internal/config 那一整类(delivery 依赖组装根)grep 从来没报过。
+# ✅ 2026-09-10:13 → 8。五条 core/* -> internal/storage 全部消除。
+#    修法:仓储接口、它们的查询结构、以及调用方要匹配的哨兵错误,搬进
+#    internal/core/ports —— **由使用它们的那一层声明**;internal/storage 实现,
+#    并用 `type X = ports.X` 别名回来,所以几百处 storage.RuleRepository 调用
+#    一行都没改,而每个类型仍然只有一个定义。
 #
-# ⛔ 只许缩。⛔ 也不许通过放宽 layers.go 的 MayForward 让某条消失 ——
-# 那是把尺子改短来让人变高。
+# ⚠️ 别名必须是 `type X = ports.X`(同一类型两个名字),不能写成 `type X ports.X`
+#    —— 后者是新类型,两者会悄悄不再互换。
+#
+# 剩下的 8 条:
+#   · api -> config(3):handler 直接读 config.Config,而不是拿装配好的值
+#   · core/service -> audit/notify/chain/chain-evm(4):领域层认识了具体实现,
+#     其中 chain/evm 那条最贵 —— 加第二条链要改领域层
+#   · core/statemachine -> audit(1)
+#
+# ⛔ 只许缩。⛔ 也不许通过放宽 layers.go 的 MayImport 让某条消失。
 
-# delivery -> composition:handler 直接读 config.Config,而不是拿装配好的值。
-# 后果:HTTP 层认识了 YAML 的形状,改配置结构要动 handler。
 internal/api -> internal/config
 internal/api/handler -> internal/config
 internal/api/middleware -> internal/config
-
-# usecase -> adapter:领域层直接依赖具体实现。
-# storage 这几条是「仓储接口定义在 storage 包」造成的 —— 接口该由用例层声明
-# (core/ports),由 storage 实现。修它 = 审计里的阶段 2。
-internal/core/auth -> internal/storage
-internal/core/registry -> internal/storage
-internal/core/rule -> internal/storage
-internal/core/service -> internal/storage
-internal/core/statemachine -> internal/storage
-
-# 🔴 这三条最贵:SignService 认识了「一条具体的链」和两个具体的外围服务。
-# 加第二条链(Solana)要改领域层,而 types.ChainAdapter 那个干净的 6 方法接口就在旁边。
+internal/core/service -> internal/audit
 internal/core/service -> internal/chain
 internal/core/service -> internal/chain/evm
-internal/core/service -> internal/audit
 internal/core/service -> internal/notify
 internal/core/statemachine -> internal/audit

@@ -7,14 +7,6 @@ import (
 	"time"
 )
 
-// NonceStore provides storage for request nonces to prevent replay attacks.
-// Nonces are stored with TTL and automatically cleaned up.
-type NonceStore interface {
-	// CheckAndStore checks if a nonce exists and stores it if not.
-	// Returns true if the nonce was stored (new), false if it already exists (replay).
-	CheckAndStore(ctx context.Context, apiKeyID, nonce string, ttl time.Duration) (bool, error)
-}
-
 // InMemoryNonceStore implements NonceStore with in-memory storage.
 // Suitable for single-instance deployments. For multi-instance deployments,
 // use Redis-based implementation.

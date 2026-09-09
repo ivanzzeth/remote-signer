@@ -14,11 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-// mockBudgetRepoForRenewal implements storage.BudgetRepository for testing periodic renewal.
+// mockBudgetRepoForRenewal implements ports.BudgetRepository for testing periodic renewal.
 // Returns a budget with UpdatedAt in the past so checkPeriodicRenewal triggers ResetBudget.
 type mockBudgetRepoForRenewal struct {
 	mu sync.Mutex
@@ -123,12 +123,12 @@ func (m *mockBudgetRepoForRenewal) AtomicSpend(ctx context.Context, ruleID types
 	}
 	newSpent := new(big.Int).Add(cur, amt)
 	if newSpent.Cmp(max) > 0 {
-		return storage.ErrBudgetExceeded
+		return ports.ErrBudgetExceeded
 	}
 	b.Spent = newSpent.String()
 	b.TxCount++
 	if b.MaxTxCount > 0 && b.TxCount > b.MaxTxCount {
-		return storage.ErrBudgetExceeded
+		return ports.ErrBudgetExceeded
 	}
 	b.UpdatedAt = time.Now()
 	return nil
@@ -151,7 +151,7 @@ func (m *mockBudgetRepoForRenewal) CreateOrGet(_ context.Context, budget *types.
 	return budget, true, nil
 }
 
-func (m *mockBudgetRepoForRenewal) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+func (m *mockBudgetRepoForRenewal) UpsertLimits(_ context.Context, _ types.RuleID, _ []ports.BudgetSyncRequest) error {
 	return nil
 }
 
@@ -177,10 +177,10 @@ func (m *mockTemplateRepoForBudget) Update(ctx context.Context, tmpl *types.Rule
 	return nil
 }
 func (m *mockTemplateRepoForBudget) Delete(ctx context.Context, id string) error { return nil }
-func (m *mockTemplateRepoForBudget) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
+func (m *mockTemplateRepoForBudget) List(ctx context.Context, filter ports.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }
-func (m *mockTemplateRepoForBudget) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
+func (m *mockTemplateRepoForBudget) Count(ctx context.Context, filter ports.TemplateFilter) (int, error) {
 	return 0, nil
 }
 func (m *mockTemplateRepoForBudget) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
@@ -380,7 +380,7 @@ func (m *dynamicBudgetRepo) AtomicSpend(ctx context.Context, ruleID types.RuleID
 	}
 	newSpent := new(big.Int).Add(cur, amt)
 	if newSpent.Cmp(maxT) > 0 {
-		return storage.ErrBudgetExceeded
+		return ports.ErrBudgetExceeded
 	}
 	b.Spent = newSpent.String()
 	b.TxCount++
@@ -409,7 +409,7 @@ func (m *dynamicBudgetRepo) CreateOrGet(ctx context.Context, budget *types.RuleB
 	return &cp, true, nil
 }
 
-func (m *dynamicBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+func (m *dynamicBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []ports.BudgetSyncRequest) error {
 	return nil
 }
 

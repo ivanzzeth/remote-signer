@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ func (r *raceBudgetRepo) AtomicSpend(_ context.Context, ruleID types.RuleID, uni
 	}
 	newSpent := new(big.Int).Add(cur, amt)
 	if newSpent.Cmp(max) > 0 {
-		return storage.ErrBudgetExceeded
+		return ports.ErrBudgetExceeded
 	}
 	b.Spent = newSpent.String()
 	b.TxCount++
@@ -149,7 +149,7 @@ func (r *raceBudgetRepo) Update(_ context.Context, _ *types.RuleBudget) error {
 func (r *raceBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }
-func (r *raceBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+func (r *raceBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []ports.BudgetSyncRequest) error {
 	return nil
 }
 
@@ -347,7 +347,7 @@ func (r *alertCaptureBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, 
 func (r *alertCaptureBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }
-func (r *alertCaptureBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+func (r *alertCaptureBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []ports.BudgetSyncRequest) error {
 	return nil
 }
 

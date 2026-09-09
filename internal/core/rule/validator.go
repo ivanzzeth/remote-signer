@@ -7,14 +7,14 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // AddDelegationTargets recursively adds delegation target rules to the minimal repo
 // with Enabled=false so they are reachable via Get() (for delegation resolution)
 // but NOT included in top-level List(EnabledOnly=true) evaluation.
-func AddDelegationTargets(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
+func AddDelegationTargets(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *ports.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
 	if visited[r.ID] {
 		return nil
 	}
@@ -68,7 +68,7 @@ func BuildIsolatedEngine(
 	evaluators []RuleEvaluator,
 	opts ...RuleEngineOption,
 ) (*WhitelistRuleEngine, error) {
-	minimalRepo := storage.NewMemoryRuleRepository()
+	minimalRepo := ports.NewMemoryRuleRepository()
 	for _, r := range allRulesMap {
 		if r.Mode == types.RuleModeBlocklist {
 			// Skip evm_dynamic_blocklist — its evaluator depends on runtime DynamicBlocklist

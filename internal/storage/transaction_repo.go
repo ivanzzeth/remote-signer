@@ -15,23 +15,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// TransactionRepository defines the persistence surface the wallet
-// RPC proxy + receipt-polling service depend on.
-type TransactionRepository interface {
-	Create(ctx context.Context, tx *types.Transaction) error
-	Get(ctx context.Context, id string) (*types.Transaction, error)
-	GetByHash(ctx context.Context, chainID, txHash string) (*types.Transaction, error)
-	GetBySignRequestID(ctx context.Context, signRequestID string) (*types.Transaction, error)
-	// ListPending returns broadcasted-but-not-yet-mined txs ordered by
-	// LastCheckedAt ASC so the poller naturally throttles fresh
-	// checks (txs that were recently polled stay at the tail of the
-	// queue until they age past the others).
-	ListPending(ctx context.Context, limit int) ([]*types.Transaction, error)
-	List(ctx context.Context, filter types.TransactionFilter) ([]*types.Transaction, error)
-	Count(ctx context.Context, filter types.TransactionFilter) (int, error)
-	Update(ctx context.Context, tx *types.Transaction) error
-}
-
 // GormTransactionRepository implements TransactionRepository against Gorm.
 type GormTransactionRepository struct {
 	db *gorm.DB

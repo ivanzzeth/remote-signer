@@ -12,29 +12,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// SignerOwnershipRepository manages signer ownership records.
-type SignerOwnershipRepository interface {
-	Upsert(ctx context.Context, ownership *types.SignerOwnership) error
-	Get(ctx context.Context, signerAddress string) (*types.SignerOwnership, error)
-	// GetBoth atomically fetches ownership records for two addresses.
-	// Returns (senderOwnership, recipientOwnership, error).
-	// If an address is not found, that ownership will be nil (not an error).
-	GetBoth(ctx context.Context, senderAddress, recipientAddress string) (*types.SignerOwnership, *types.SignerOwnership, error)
-	GetByOwner(ctx context.Context, ownerID string) ([]*types.SignerOwnership, error)
-	// GetByStatus returns all ownership rows in the given status (e.g. pending_approval).
-	GetByStatus(ctx context.Context, status types.SignerOwnershipStatus) ([]*types.SignerOwnership, error)
-	Delete(ctx context.Context, signerAddress string) error
-	UpdateOwner(ctx context.Context, signerAddress, newOwnerID string) error
-	CountByOwner(ctx context.Context, ownerID string) (int64, error)
-	CountByOwnerAndType(ctx context.Context, ownerID string, signerType types.SignerType) (int64, error)
-}
-
-// SignerOwnershipTransactional is implemented by ownership repos that support atomic operations
-// spanning both ownership and access repos within a single DB transaction.
-type SignerOwnershipTransactional interface {
-	RunInTransaction(ctx context.Context, fn func(txOwnership SignerOwnershipRepository, txAccess SignerAccessRepository) error) error
-}
-
 // GormSignerOwnershipRepository implements SignerOwnershipRepository using GORM.
 type GormSignerOwnershipRepository struct {
 	db *gorm.DB

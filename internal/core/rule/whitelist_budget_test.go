@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // budgetExceededRuleRepo is a rule repo that returns two whitelist instance rules (both match).
@@ -32,7 +32,7 @@ func (r *budgetExceededRuleRepo) Get(ctx context.Context, id types.RuleID) (*typ
 	}
 	return nil, types.ErrNotFound
 }
-func (r *budgetExceededRuleRepo) Count(ctx context.Context, filter storage.RuleFilter) (int, error) {
+func (r *budgetExceededRuleRepo) Count(ctx context.Context, filter ports.RuleFilter) (int, error) {
 	return len(r.rules), nil
 }
 func (r *budgetExceededRuleRepo) ListByChainType(ctx context.Context, chainType types.ChainType) ([]*types.Rule, error) {
@@ -46,7 +46,7 @@ func (r *budgetExceededRuleRepo) ValidateDelegateRefs(ctx context.Context, rule 
 	return nil
 }
 
-func (r *budgetExceededRuleRepo) List(ctx context.Context, filter storage.RuleFilter) ([]*types.Rule, error) {
+func (r *budgetExceededRuleRepo) List(ctx context.Context, filter ports.RuleFilter) ([]*types.Rule, error) {
 	return r.rules, nil
 }
 
@@ -116,7 +116,7 @@ func (m *budgetExceededBudgetRepo) AtomicSpend(ctx context.Context, ruleID types
 	}
 	// Already at limit
 	if b.Spent == b.MaxTotal {
-		return storage.ErrBudgetExceeded
+		return ports.ErrBudgetExceeded
 	}
 	return nil
 }
@@ -131,7 +131,7 @@ func (m *budgetExceededBudgetRepo) CreateOrGet(_ context.Context, budget *types.
 	return budget, true, nil
 }
 
-func (m *budgetExceededBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+func (m *budgetExceededBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []ports.BudgetSyncRequest) error {
 	return nil
 }
 
@@ -158,10 +158,10 @@ func (r *budgetExceededTemplateRepo) Update(ctx context.Context, tmpl *types.Rul
 	return nil
 }
 func (r *budgetExceededTemplateRepo) Delete(ctx context.Context, id string) error { return nil }
-func (r *budgetExceededTemplateRepo) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
+func (r *budgetExceededTemplateRepo) List(ctx context.Context, filter ports.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }
-func (r *budgetExceededTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
+func (r *budgetExceededTemplateRepo) Count(ctx context.Context, filter ports.TemplateFilter) (int, error) {
 	return 0, nil
 }
 func (r *budgetExceededTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {

@@ -10,15 +10,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // =============================================================================
 // Mock Implementations for Testing
 // =============================================================================
 
-// mockRuleRepository implements storage.RuleRepository for testing
+// mockRuleRepository implements ports.RuleRepository for testing
 type mockRuleRepository struct {
 	rules []*types.Rule
 }
@@ -36,7 +36,7 @@ func (m *mockRuleRepository) Get(ctx context.Context, id types.RuleID) (*types.R
 	return nil, fmt.Errorf("rule not found")
 }
 
-func (m *mockRuleRepository) List(ctx context.Context, filter storage.RuleFilter) ([]*types.Rule, error) {
+func (m *mockRuleRepository) List(ctx context.Context, filter ports.RuleFilter) ([]*types.Rule, error) {
 	return m.rules, nil
 }
 
@@ -48,7 +48,7 @@ func (m *mockRuleRepository) Delete(ctx context.Context, id types.RuleID) error 
 	return nil
 }
 
-func (m *mockRuleRepository) Count(ctx context.Context, filter storage.RuleFilter) (int, error) {
+func (m *mockRuleRepository) Count(ctx context.Context, filter ports.RuleFilter) (int, error) {
 	return len(m.rules), nil
 }
 

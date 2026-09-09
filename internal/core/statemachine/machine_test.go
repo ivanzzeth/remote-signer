@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // --- mocks ---
@@ -56,17 +56,17 @@ func (m *mockRequestRepo) CompareAndUpdate(ctx context.Context, req *types.SignR
 		return types.ErrNotFound
 	}
 	if existing.Status != expectedStatus {
-		return storage.ErrStateConflict
+		return ports.ErrStateConflict
 	}
 	m.requests[req.ID] = req
 	return nil
 }
 
-func (m *mockRequestRepo) List(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error) {
+func (m *mockRequestRepo) List(ctx context.Context, filter ports.RequestFilter) ([]*types.SignRequest, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockRequestRepo) Count(ctx context.Context, filter storage.RequestFilter) (int, error) {
+func (m *mockRequestRepo) Count(ctx context.Context, filter ports.RequestFilter) (int, error) {
 	return 0, errors.New("not implemented")
 }
 
@@ -98,11 +98,11 @@ func (m *mockAuditRepo) Log(ctx context.Context, record *types.AuditRecord) erro
 	return m.logErr
 }
 
-func (m *mockAuditRepo) Query(ctx context.Context, filter storage.AuditFilter) ([]*types.AuditRecord, error) {
+func (m *mockAuditRepo) Query(ctx context.Context, filter ports.AuditFilter) ([]*types.AuditRecord, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockAuditRepo) Count(ctx context.Context, filter storage.AuditFilter) (int, error) {
+func (m *mockAuditRepo) Count(ctx context.Context, filter ports.AuditFilter) (int, error) {
 	return 0, errors.New("not implemented")
 }
 
@@ -503,7 +503,7 @@ func TestTransition_CASConflict(t *testing.T) {
 	id := types.SignRequestID("req-1")
 	reqRepo.requests[id] = makeRequest(id, types.StatusPending)
 	// Simulate concurrent modification by having CAS expect different status
-	reqRepo.casErr = storage.ErrStateConflict
+	reqRepo.casErr = ports.ErrStateConflict
 	sm := newTestSM(t, reqRepo, newMockAuditRepo())
 
 	_, err := sm.ValidateAndStartAuthorizing(context.Background(), id)

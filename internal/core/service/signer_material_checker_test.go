@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ func (m *mockSignerManagerForMaterial) GetHDHierarchy() map[string]evmchain.HDHi
 	return m.hierarchy
 }
 
-// mockSignerRepo implements storage.SignerRepository for material check tests.
+// mockSignerRepo implements ports.SignerRepository for material check tests.
 type mockSignerRepo struct {
 	mu      sync.Mutex
 	signers map[string]*types.Signer
@@ -101,7 +101,7 @@ func (m *mockSignerRepo) Get(_ context.Context, address string) (*types.Signer, 
 	return nil, types.ErrNotFound
 }
 
-func (m *mockSignerRepo) List(_ context.Context, _ storage.SignerListFilter) ([]types.Signer, int, error) {
+func (m *mockSignerRepo) List(_ context.Context, _ ports.SignerListFilter) ([]types.Signer, int, error) {
 	return nil, 0, nil
 }
 

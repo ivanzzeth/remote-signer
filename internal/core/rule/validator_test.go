@@ -7,15 +7,15 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 func TestAddDelegationTargets_DirectChain(t *testing.T) {
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	repo := storage.NewMemoryRuleRepository()
+	repo := ports.NewMemoryRuleRepository()
 	allRulesMap := make(map[types.RuleID]*types.Rule)
 
 	// Create delegate_to target rule
@@ -64,7 +64,7 @@ func TestAddDelegationTargets_NoDelegationConfig(t *testing.T) {
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	repo := storage.NewMemoryRuleRepository()
+	repo := ports.NewMemoryRuleRepository()
 	allRulesMap := make(map[types.RuleID]*types.Rule)
 
 	rule := &types.Rule{
@@ -84,7 +84,7 @@ func TestAddDelegationTargets_NoDelegationConfig(t *testing.T) {
 	}
 
 	// Repo should remain empty since there was no delegate_to
-	rules, err := repo.List(ctx, storage.RuleFilter{EnabledOnly: false, Limit: 100})
+	rules, err := repo.List(ctx, ports.RuleFilter{EnabledOnly: false, Limit: 100})
 	if err != nil {
 		t.Fatalf("list failed: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestAddDelegationTargets_RecursiveChain(t *testing.T) {
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	repo := storage.NewMemoryRuleRepository()
+	repo := ports.NewMemoryRuleRepository()
 	allRulesMap := make(map[types.RuleID]*types.Rule)
 
 	// Level 3
@@ -154,7 +154,7 @@ func TestAddDelegationTargets_NonexistentTarget(t *testing.T) {
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	repo := storage.NewMemoryRuleRepository()
+	repo := ports.NewMemoryRuleRepository()
 	allRulesMap := make(map[types.RuleID]*types.Rule)
 
 	rule := &types.Rule{

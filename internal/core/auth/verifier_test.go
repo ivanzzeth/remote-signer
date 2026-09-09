@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // --- mocks ---
@@ -29,10 +29,10 @@ func (m *mockAPIKeyRepo) Get(ctx context.Context, id string) (*types.APIKey, err
 }
 func (m *mockAPIKeyRepo) Update(_ context.Context, _ *types.APIKey) error { return nil }
 func (m *mockAPIKeyRepo) Delete(_ context.Context, _ string) error        { return nil }
-func (m *mockAPIKeyRepo) List(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
+func (m *mockAPIKeyRepo) List(_ context.Context, _ ports.APIKeyFilter) ([]*types.APIKey, error) {
 	return nil, nil
 }
-func (m *mockAPIKeyRepo) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) { return 0, nil }
+func (m *mockAPIKeyRepo) Count(_ context.Context, _ ports.APIKeyFilter) (int, error) { return 0, nil }
 func (m *mockAPIKeyRepo) UpdateLastUsed(ctx context.Context, id string) error {
 	if m.updateLastUsed != nil {
 		return m.updateLastUsed(ctx, id)

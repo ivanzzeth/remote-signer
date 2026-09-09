@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 )
 
 // PresetRegistry is the preset counterpart to TemplateRegistry. The
@@ -14,12 +14,12 @@ import (
 // two catalogues and a future cross-source orchestrator can drive
 // both via one loop.
 type PresetRegistry struct {
-	repo   storage.PresetRepository
+	repo   ports.PresetRepository
 	source PresetSource
 	log    *slog.Logger
 }
 
-func NewPresetRegistry(repo storage.PresetRepository, source PresetSource, log *slog.Logger) *PresetRegistry {
+func NewPresetRegistry(repo ports.PresetRepository, source PresetSource, log *slog.Logger) *PresetRegistry {
 	if log == nil {
 		log = slog.Default()
 	}

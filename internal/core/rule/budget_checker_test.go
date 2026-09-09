@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ func TestBudgetChecker_TotalBudgetExceeded(t *testing.T) {
 			Spent:     "5",
 			UpdatedAt: time.Now(),
 		},
-		atomicErr: storage.ErrBudgetExceeded,
+		atomicErr: ports.ErrBudgetExceeded,
 	}
 	bc := NewBudgetChecker(br, tr, slog.Default())
 	rule := &types.Rule{ID: "r1", TemplateID: ptrStr("t1")}
@@ -873,7 +873,7 @@ func (r *stubBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID,
 	r.markAlertSentUnit = unit
 	return r.markAlertSentErr
 }
-func (r *stubBudgetRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
+func (r *stubBudgetRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []ports.BudgetSyncRequest) error {
 	return nil
 }
 
@@ -916,10 +916,10 @@ func (r *stubTemplateRepo) GetByName(ctx context.Context, name string) (*types.R
 }
 func (r *stubTemplateRepo) Update(ctx context.Context, tmpl *types.RuleTemplate) error { return nil }
 func (r *stubTemplateRepo) Delete(ctx context.Context, id string) error                { return nil }
-func (r *stubTemplateRepo) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
+func (r *stubTemplateRepo) List(ctx context.Context, filter ports.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }
-func (r *stubTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
+func (r *stubTemplateRepo) Count(ctx context.Context, filter ports.TemplateFilter) (int, error) {
 	return 0, nil
 }
 func (r *stubTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {

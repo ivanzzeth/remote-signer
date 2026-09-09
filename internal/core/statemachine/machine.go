@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 /*
@@ -28,13 +28,13 @@ signing → failed       (on sign error)
 
 // StateMachine manages the lifecycle of sign requests
 type StateMachine struct {
-	requestRepo storage.RequestRepository
-	auditRepo   storage.AuditRepository
+	requestRepo ports.RequestRepository
+	auditRepo   ports.AuditRepository
 	logger      *slog.Logger
 }
 
 // NewStateMachine creates a new state machine
-func NewStateMachine(requestRepo storage.RequestRepository, auditRepo storage.AuditRepository, logger *slog.Logger) (*StateMachine, error) {
+func NewStateMachine(requestRepo ports.RequestRepository, auditRepo ports.AuditRepository, logger *slog.Logger) (*StateMachine, error) {
 	if requestRepo == nil {
 		return nil, fmt.Errorf("request repository is required")
 	}

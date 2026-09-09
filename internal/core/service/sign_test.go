@@ -15,11 +15,11 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -168,14 +168,14 @@ func (r *mockRequestRepo) CompareAndUpdate(_ context.Context, req *types.SignReq
 		return types.ErrNotFound
 	}
 	if existing.Status != expectedStatus {
-		return storage.ErrStateConflict
+		return ports.ErrStateConflict
 	}
 	cp := *req
 	r.requests[req.ID] = &cp
 	return nil
 }
 
-func (r *mockRequestRepo) List(_ context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error) {
+func (r *mockRequestRepo) List(_ context.Context, filter ports.RequestFilter) ([]*types.SignRequest, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*types.SignRequest
@@ -198,7 +198,7 @@ func (r *mockRequestRepo) List(_ context.Context, filter storage.RequestFilter) 
 	return out, nil
 }
 
-func (r *mockRequestRepo) Count(_ context.Context, _ storage.RequestFilter) (int, error) {
+func (r *mockRequestRepo) Count(_ context.Context, _ ports.RequestFilter) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.requests), nil
@@ -240,7 +240,7 @@ func (r *mockRequestRepo) SetTransactionID(_ context.Context, id types.SignReque
 	return nil
 }
 
-var _ storage.RequestRepository = (*mockRequestRepo)(nil)
+var _ ports.RequestRepository = (*mockRequestRepo)(nil)
 
 // ---------------------------------------------------------------------------
 // Mock audit repository
@@ -262,11 +262,11 @@ func (r *mockAuditRepo) Log(_ context.Context, record *types.AuditRecord) error 
 	return nil
 }
 
-func (r *mockAuditRepo) Query(_ context.Context, _ storage.AuditFilter) ([]*types.AuditRecord, error) {
+func (r *mockAuditRepo) Query(_ context.Context, _ ports.AuditFilter) ([]*types.AuditRecord, error) {
 	return nil, nil
 }
 
-func (r *mockAuditRepo) Count(_ context.Context, _ storage.AuditFilter) (int, error) {
+func (r *mockAuditRepo) Count(_ context.Context, _ ports.AuditFilter) (int, error) {
 	return 0, nil
 }
 
@@ -278,7 +278,7 @@ func (r *mockAuditRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, 
 	return 0, nil
 }
 
-var _ storage.AuditRepository = (*mockAuditRepo)(nil)
+var _ ports.AuditRepository = (*mockAuditRepo)(nil)
 
 // ---------------------------------------------------------------------------
 // Test helpers for sign service
@@ -1183,7 +1183,7 @@ func TestListRequests(t *testing.T) {
 		}
 	}
 
-	result, err := svc.ListRequests(ctx, storage.RequestFilter{})
+	result, err := svc.ListRequests(ctx, ports.RequestFilter{})
 	if err != nil {
 		t.Fatalf("ListRequests failed: %v", err)
 	}
@@ -1215,7 +1215,7 @@ func TestCountRequests(t *testing.T) {
 		}
 	}
 
-	count, err := svc.CountRequests(ctx, storage.RequestFilter{})
+	count, err := svc.CountRequests(ctx, ports.RequestFilter{})
 	if err != nil {
 		t.Fatalf("CountRequests failed: %v", err)
 	}
