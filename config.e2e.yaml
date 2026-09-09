@@ -307,6 +307,12 @@ rules:
   # Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
   - name: "Instance of Minimal"
     id: "e2e-minimal-instance"
+    # priority 20000: same reason as the demo rules above. This fixture instance
+    # allows transfers to the treasury address and is created at startup, so on a
+    # priority tie it wins on CreatedAt against any rule a test creates at runtime
+    # — which is exactly what the tests that instantiate their own template need
+    # to be evaluated for.
+    priority: 20000
     type: "instance"
     enabled: true
     config:
@@ -965,6 +971,12 @@ rules:
   # Scoped to first signer only so second signer is not allowed by this rule (signer_restriction negative e2e).
   # test_cases required for validate-rules and startup validation (at least 1 positive + 1 negative).
   - id: "delegate-target"
+    # priority 15000: this fixture allows ANY personal_sign from the test signer,
+    # so at the default 100 it answered before the agent preset's own sign rule
+    # (agent rules ship at 10000) and the sign_count budget was never created.
+    # 15000 keeps it ahead of the broad demo rules at 20000, which its own
+    # delegation test needs, while leaving the 10000 band to real instance rules.
+    priority: 15000
     name: "Delegate Target"
     type: "evm_js"
     mode: "whitelist"

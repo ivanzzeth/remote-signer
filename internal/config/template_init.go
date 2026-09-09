@@ -559,6 +559,19 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 		// Inherit enabled state from instance
 		templateRules[idx].Enabled = rule.Enabled
+		// Inherit priority from the instance, but never over a priority the
+		// template's own sub-rule declared — the template author ordering its
+		// rules relative to each other is a finer statement than the operator
+		// placing the whole instance in a band.
+		//
+		// Without this the instance-level `priority:` was silently dropped here:
+		// expansion rebuilds each rule from the template's rules_json, so any
+		// field not copied in this loop does not exist downstream. An operator
+		// who wrote `priority: 20000` on an instance to make it a fallback got a
+		// rule at the default 100 that answered first, and nothing said so.
+		if rule.Priority != nil && templateRules[idx].Priority == nil {
+			templateRules[idx].Priority = rule.Priority
+		}
 		// Pass instance variables so evaluators (e.g. evm_js) get config.chain_id, config.allowed_safe_addresses, etc.
 		if len(variables) > 0 {
 			templateRules[idx].Variables = make(map[string]interface{}, len(variables))
