@@ -122,6 +122,7 @@ func (h *RuleHandler) runJSTestCases(rule *types.Rule, effConfig []byte, testCas
 		jsCases[i] = evmchain.JSTestCase{
 			Name:         tc.Name,
 			Input:        tc.Input,
+			Variables:    tc.Variables,
 			ExpectPass:   tc.ExpectPass,
 			ExpectReason: tc.ExpectReason,
 		}

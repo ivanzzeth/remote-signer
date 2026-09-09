@@ -162,6 +162,18 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 	return db, nil
 }
 
+// AutoMigrate creates or updates every table this daemon owns.
+//
+// Exported so test harnesses migrate exactly what production migrates. The e2e
+// harness kept its own hand-copied list and it had drifted by four tables —
+// Transaction, RequestSimulation, Signer and settings.Setting. A missing table
+// does not fail at startup; it fails at the first query, as
+// "no such table: system_settings" deep inside a feature, which is how the
+// approval-guard endpoint came to answer 501 in e2e and nowhere else.
+//
+// ⛔ Add new models here, never in a second list.
+func AutoMigrate(db *gorm.DB) error { return autoMigrate(db) }
+
 func autoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&types.SignRequest{},

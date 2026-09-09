@@ -52,6 +52,25 @@ func applySecuritySnapshot(cfg *config.Config, s *settings.SecuritySnapshot) {
 // config.Config into the loose-typed view the settings seed helper accepts.
 // Kept in its own file so future PRs that prune SecurityConfig down to the
 // fields actually still living in YAML have one place to update.
+// SecurityYAMLViewFromConfig maps config.Config's security block onto the
+// settings package's config-free view.
+//
+// Exported because the e2e harness must seed settings exactly the way the
+// daemon does. It used to seed nothing, and the divergence was invisible until
+// it wasn't: handleGuardResume gates on the runtime settings snapshot while the
+// guard itself is constructed from cfg.Security, so with no SettingsManager the
+// e2e server built a working guard whose endpoint answered 501 — one of the
+// two sources said enabled, the other did not exist.
+//
+// ⚠️ Keep this the only config→SecurityYAMLView mapping. internal/settings
+// deliberately does not import internal/config (see seed.go), which is why the
+// view type exists at all; a second copy of the field list here would drift
+// silently, since a field simply missing from the mapping reads as its zero
+// value and nothing reports it.
+func SecurityYAMLViewFromConfig(cfg *config.Config) settings.SecurityYAMLView {
+	return securityYAMLView(cfg)
+}
+
 func securityYAMLView(cfg *config.Config) settings.SecurityYAMLView {
 	sec := cfg.Security
 	return settings.SecurityYAMLView{

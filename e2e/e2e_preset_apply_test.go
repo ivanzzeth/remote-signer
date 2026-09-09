@@ -32,8 +32,8 @@ func TestE2E_PresetApply_KeyPresets(t *testing.T) {
 	}{
 		{
 			// predict_auth (1) + predict_enable_trading_js bundle (2) + predict_trading_js bundle (3) = 6
-			name:          "predict_eoa_bnb_js",
-			presetID:      "evm/predict_eoa_bnb_js",
+			name:          "predict_eoa_bnb",
+			presetID:      "evm/predict_eoa_bnb",
 			wantRuleCount: 6,
 		},
 		{
@@ -182,17 +182,27 @@ func TestE2E_PresetApply_VerifyConfigs(t *testing.T) {
 			name, _ := ruleMap["name"].(string)
 			mode, _ := ruleMap["mode"].(string)
 			t.Logf("Agent sub-rule: name=%s, mode=%s", name, mode)
+			// ⚠️ Order matters: a switch takes the first matching case, and these
+			// names are composite ("Agent — <parent> / <sub>"), so the loose tokens
+			// collide with the specific ones. With the generic cases first, three
+			// of the six were misfiled and the test failed while every expected
+			// rule was in fact present:
+			//   "Agent — Agent Signature / Agent Safety"        → matched Signature
+			//   "Agent — ERC721 transfer/approve with allowlists" → matched approve
+			//   "Agent — ERC1155 transfer/approve with allowlists" → matched approve
+			// Most specific first; "approve" last, since it appears inside the
+			// ERC721/ERC1155 names too.
 			switch {
-			case strings.Contains(name, "Signature") || strings.Contains(name, "agent-sign"):
-				hasSign = true
-			case strings.Contains(name, "Safety") || strings.Contains(name, "agent-safety"):
-				hasSafety = true
-			case strings.Contains(name, "approve") || strings.Contains(name, "Approve"):
-				hasERC20Approve = true
-			case strings.Contains(name, "ERC721") || strings.Contains(name, "721"):
-				hasERC721 = true
 			case strings.Contains(name, "ERC1155") || strings.Contains(name, "1155"):
 				hasERC1155 = true
+			case strings.Contains(name, "ERC721") || strings.Contains(name, "721"):
+				hasERC721 = true
+			case strings.Contains(name, "Safety") || strings.Contains(name, "agent-safety"):
+				hasSafety = true
+			case strings.Contains(name, "Signature") || strings.Contains(name, "agent-sign"):
+				hasSign = true
+			case strings.Contains(name, "approve") || strings.Contains(name, "Approve"):
+				hasERC20Approve = true
 			}
 		}
 		assert.True(t, hasSign, "agent preset should include agent-sign whitelist rule")
@@ -218,7 +228,7 @@ func TestE2E_PresetApply_VerifyConfigs(t *testing.T) {
 	t.Run("predict chain_id", func(t *testing.T) {
 		snapshotRules(t)
 
-		resp, err := adminClient.Presets.ApplyWithVariables(ctx, "evm/predict_eoa_bnb_js", nil)
+		resp, err := adminClient.Presets.ApplyWithVariables(ctx, "evm/predict_eoa_bnb", nil)
 		require.NoError(t, err)
 		require.Len(t, resp.Results, 6)
 

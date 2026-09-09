@@ -26,6 +26,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/blocklist"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	cliserver "github.com/ivanzzeth/remote-signer/internal/cli/server"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/registry"
@@ -33,6 +34,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/settings"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -169,20 +171,10 @@ func (ts *TestServer) Start() error {
 	ts.db = db
 
 	// Auto-migrate tables
-	if err := db.AutoMigrate(
-		&types.SignRequest{},
-		&types.Rule{},
-		&types.APIKey{},
-		&types.AuditRecord{},
-		&types.RuleTemplate{},
-		&types.RulePreset{},
-		&types.RuleBudget{},
-		&types.TokenMetadata{},
-		&types.SignerOwnership{},
-		&types.SignerAccess{},
-		&types.Wallet{},
-		&types.WalletMember{},
-	); err != nil {
+	// ⛔ Do not hand-list models here. This used to be a copy of storage's list
+	// and had drifted by four tables; a missing one surfaces as
+	// "no such table: ..." inside whichever feature touches it first.
+	if err := storage.AutoMigrate(db); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -620,6 +612,29 @@ func (ts *TestServer) Start() error {
 		}
 	}
 
+	// Runtime settings manager. The daemon always has one; without it every
+	// handler that gates on the settings snapshot behaves as if the feature were
+	// off, no matter what config.e2e.yaml says. handleGuardResume is the case
+	// that surfaced this: it answered 501 "approval guard is disabled in runtime
+	// settings" while the guard object had been constructed from cfg.Security
+	// twenty lines above. Seeded through the same mapping the daemon uses so the
+	// two cannot drift.
+	var settingsMgr *settings.Manager
+	if cfg != nil {
+		settingsStore, sErr := settings.NewGormStore(db)
+		if sErr != nil {
+			return fmt.Errorf("failed to create settings store: %w", sErr)
+		}
+		if sErr := settings.SeedSecurity(context.Background(), settingsStore,
+			settings.SecurityFromConfigValues(cliserver.SecurityYAMLViewFromConfig(cfg))); sErr != nil {
+			return fmt.Errorf("failed to seed security settings: %w", sErr)
+		}
+		settingsMgr = settings.NewManager(settingsStore, log)
+		if sErr := settingsMgr.Reload(context.Background()); sErr != nil {
+			return fmt.Errorf("failed to load settings: %w", sErr)
+		}
+	}
+
 	// Initialize router (include BudgetRepo so GET /api/v1/evm/rules/{id}/budgets works for budget e2e tests)
 	routerConfig := api.RouterConfig{
 		Version: "e2e-test",
@@ -628,6 +643,7 @@ func (ts *TestServer) Start() error {
 			TemplateService: templateService,
 		},
 		ApprovalGuard:       approvalGuard,
+		SettingsManager:     settingsMgr,
 		APIKeyRepo:          apiKeyRepo,
 		SignerRepo:          signerRepo,
 		SignerOwnershipRepo: signerOwnershipRepo,

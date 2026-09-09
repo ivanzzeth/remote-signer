@@ -71,10 +71,13 @@ type ListRulesResponse struct {
 
 // JSRuleTestCase is a test case for evm_js rules submitted via API.
 type JSRuleTestCase struct {
-	Name         string                 `json:"name"`
-	Input        map[string]interface{} `json:"input"`
-	ExpectPass   bool                   `json:"expect_pass"`
-	ExpectReason string                 `json:"expect_reason,omitempty"`
+	Name  string                 `json:"name"`
+	Input map[string]interface{} `json:"input"`
+	// See the note on config.TestCaseConfig.Variables: every mirror of the
+	// test-case shape must carry this, or per-case overrides vanish silently.
+	Variables    map[string]string `json:"variables,omitempty"`
+	ExpectPass   bool              `json:"expect_pass"`
+	ExpectReason string            `json:"expect_reason,omitempty"`
 }
 
 // CreateRuleRequest represents a request to create a new rule

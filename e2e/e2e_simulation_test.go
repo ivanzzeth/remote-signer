@@ -38,12 +38,23 @@ func skipOnInfraError(t *testing.T, err error) {
 		return
 	}
 	msg := err.Error()
+	// Transport-level failures only. ⛔ Keep each pattern unambiguous: this list
+	// turns a failure into a skip, so anything that could also describe a real
+	// defect belongs out of it. `": eof"` is the shape the upstream RPC gateway
+	// returns when it drops the connection mid-request
+	// (`rpc request failed: Post "https://…/evm/1": EOF`) — it was missing, so
+	// three simulation tests reported a hard failure for an unreachable third
+	// party.
 	infraPatterns := []string{
 		"context deadline exceeded",
 		"connection refused",
 		"connection reset",
 		"i/o timeout",
 		"no such host",
+		"no route to host",
+		"tls handshake",
+		": eof",
+		"unexpected eof",
 		"eth_simulate",
 		"insufficient funds",
 	}

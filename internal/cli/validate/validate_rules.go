@@ -55,6 +55,7 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 			testCases = append(testCases, TestCaseConfig{
 				Name:               tc.Name,
 				Input:              tc.Input,
+				Variables:          tc.Variables,
 				ExpectPass:         tc.ExpectPass,
 				ExpectReason:       tc.ExpectReason,
 				ExpectBudgetAmount: tc.ExpectBudgetAmount,

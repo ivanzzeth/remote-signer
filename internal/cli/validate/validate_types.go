@@ -39,11 +39,19 @@ type RuleConfig struct {
 
 // TestCaseConfig is a single test case for evm_js (from YAML test_cases).
 type TestCaseConfig struct {
-	Name               string                 `yaml:"name" json:"name"`
-	Input              map[string]interface{} `yaml:"input" json:"input"`
-	ExpectPass         bool                   `yaml:"expect_pass" json:"expect_pass"`
-	ExpectReason       string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
-	ExpectBudgetAmount string                 `yaml:"expect_budget_amount,omitempty" json:"expect_budget_amount,omitempty"`
+	Name  string                 `yaml:"name" json:"name"`
+	Input map[string]interface{} `yaml:"input" json:"input"`
+	// Variables overrides template/instance variables for this one case.
+	// ⚠️ Must exist on every mirror of this struct: evm.JSTestCase is the one the
+	// runner reads, and a mirror missing this field drops per-case overrides
+	// silently — the case then runs against the template's test_variables and
+	// either passes for the wrong reason or fails with a confusing message.
+	// Found 2026-09-09: two erc20 "agent mode" cases set token_address: "" to
+	// exercise the any-token path and were evaluated with USDC still bound.
+	Variables          map[string]string `yaml:"variables,omitempty" json:"variables,omitempty"`
+	ExpectPass         bool              `yaml:"expect_pass" json:"expect_pass"`
+	ExpectReason       string            `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+	ExpectBudgetAmount string            `yaml:"expect_budget_amount,omitempty" json:"expect_budget_amount,omitempty"`
 }
 
 // RuleFile represents a YAML file containing rules (plain rule file)

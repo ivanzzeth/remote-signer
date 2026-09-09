@@ -33,6 +33,31 @@ func skipIfPresetAPIDisabled(t *testing.T) {
 // decodeRuleConfig decodes a config field from a Rule fetched via the API.
 // The API stores config as a base64-encoded JSON string, so we need to
 // first extract the base64 string, decode it, then JSON-unmarshal.
+// decodeRuleVariables mirrors decodeRuleConfig for the Variables column.
+// Both are []byte on types.Rule, so encoding/json puts them on the wire as a
+// base64 string — unmarshalling straight into a map fails with "cannot
+// unmarshal string into map".
+func decodeRuleVariables(t *testing.T, rule evm.Rule) map[string]string {
+	t.Helper()
+	vars := map[string]string{}
+	if len(rule.Variables) == 0 {
+		return vars
+	}
+	var b64 string
+	if err := json.Unmarshal(rule.Variables, &b64); err != nil {
+		return vars
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Logf("warning: variables is not base64: %v", err)
+		return vars
+	}
+	if err := json.Unmarshal(raw, &vars); err != nil {
+		t.Logf("warning: variables is not a JSON object: %v", err)
+	}
+	return vars
+}
+
 func decodeRuleConfig(t *testing.T, rule evm.Rule) map[string]interface{} {
 	t.Helper()
 	var cfg map[string]interface{}
@@ -225,8 +250,22 @@ func TestPreset_Apply_CrossTemplateDelegate(t *testing.T) {
 	require.NotNil(t, delegatorEntry, "delegator rule with delegate_to should exist")
 	require.NotEmpty(t, delegatorRuleID)
 
-	// Verify delegate_to is resolved to inst_<hash> format
-	delegateTo, _ := delegatorEntry.config["delegate_to"].(string)
+	// ⚠️ Read the resolved ID from Variables, not Config.
+	//
+	// Instance rules persist their Config in TEMPLATE form — `${delegate_to}`
+	// stays a placeholder — and the engine substitutes Variables live at
+	// evaluation, so that editing Variables takes effect with no rendered
+	// snapshot able to drift (see createInstance in core/service/template.go;
+	// cmd/migrate-config-templateform exists to convert rules written under the
+	// older rendered-Config scheme). Cross-template delegate_to is resolved into
+	// Variables by resolveDelegateToInVars.
+	//
+	// This assertion used to read Config and so tested the pre-refactor storage
+	// scheme: it saw the literal "${delegate_to}" and reported a resolution
+	// failure, while resolution had in fact happened where it now belongs.
+	delegatorVars := decodeRuleVariables(t, delegatorEntry.rule)
+	require.NotEmpty(t, delegatorVars, "delegator rule should carry Variables")
+	delegateTo := delegatorVars["delegate_to"]
 	require.NotEmpty(t, delegateTo, "delegate_to should not be empty")
 	assert.True(t, strings.HasPrefix(delegateTo, "inst_"),
 		"delegate_to should be resolved to inst_<hash> format, got %q", delegateTo)

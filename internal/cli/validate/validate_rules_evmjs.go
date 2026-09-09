@@ -119,6 +119,45 @@ func runEVMJSTestCases(
 			ExpectedPass:   tc.ExpectPass,
 			ExpectedReason: tc.ExpectReason,
 		}
+
+		// A test case may override template variables for itself — that is how
+		// "what happens when token_address is unset" gets exercised without a
+		// second template. This path evaluates through the rule engine (not the
+		// direct JS runner), and the engine reads Variables off the rule, so the
+		// override has to be baked into a per-case copy of the rule and the
+		// isolated engine rebuilt around it.
+		//
+		// Until 2026-09-09 this was skipped entirely: the CLI's TestCaseConfig had
+		// no Variables field, so the block never existed and every case ran against
+		// the template's test_variables. Two erc20 "agent mode" cases setting
+		// token_address: "" were silently evaluated with USDC still bound, and
+		// reported failures that pointed at the rule rather than at the harness.
+		caseEngine := testEngine
+		if len(tc.Variables) > 0 {
+			caseRule := *rule
+			mergedVars := map[string]interface{}{}
+			if len(rule.Variables) > 0 {
+				_ = json.Unmarshal(rule.Variables, &mergedVars)
+			}
+			for k, v := range tc.Variables {
+				mergedVars[k] = v
+			}
+			if mergedJSON, mErr := json.Marshal(mergedVars); mErr == nil {
+				caseRule.Variables = mergedJSON
+			}
+			if !useFullEngine {
+				if built, bErr := buildEngineForRuleTest(ctx, fullRepo, &caseRule, hasSolidity, validator, log); bErr == nil {
+					caseEngine = built
+				} else {
+					tcResult.Passed = false
+					tcResult.Error = fmt.Sprintf("build test engine for case variables: %v", bErr)
+					result.TestCaseResults = append(result.TestCaseResults, tcResult)
+					result.FailedTestCases++
+					result.Valid = false
+					continue
+				}
+			}
+		}
 		inputCopy := make(map[string]interface{})
 		for k, v := range tc.Input {
 			inputCopy[k] = v
@@ -160,7 +199,7 @@ func runEVMJSTestCases(
 			result.Valid = false
 			continue
 		}
-		evalResult, err := testEngine.EvaluateWithResult(ctx, req, parsed)
+		evalResult, err := caseEngine.EvaluateWithResult(ctx, req, parsed)
 		if err != nil {
 			tcResult.Passed = false
 			tcResult.Error = fmt.Sprintf("engine: %v", err)

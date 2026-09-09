@@ -188,6 +188,27 @@ rules:
             methodId: "0x06fdde03"
         expect_pass: false
         expect_reason: "only transfer, transferFrom allowed"
+      # ⚠️ amount must be non-zero. This case asserts "cap 0 blocks the transfer",
+      # but it was written with amount 0, and requireLte(0, 0) passes — so it
+      # proved nothing. It also used to sit under erc20-approve-limit, whose
+      # validate() rejects any non-approve selector, so its expected reason
+      # ("transfer exceeds cap") could never appear either.
+      - name: "agent mode: transfer blocked when max_transfer_amount is 0"
+        variables:
+          max_transfer_amount: "0"
+          token_address: ""
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+            methodId: "0xa9059cbb"
+        expect_pass: false
+        expect_reason: "transfer exceeds cap"
   - id: "erc20-approve-limit"
     priority: 10000
     name: "ERC20 approve limit"
@@ -283,26 +304,10 @@ rules:
             from: "0x0000000000000000000000000000000000000002"
             to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
             value: "0x0"
-            data: "0x095ea7b3000000000000000000000000deaddeaddeaddeaddeaddeaddeaddeaddead0000000000000000000000000000000000000000000000000000000000000000"
+            data: "0x095ea7b3000000000000000000000000deaddeaddeaddeaddeaddeaddeaddeaddeaddead0000000000000000000000000000000000000000000000000000000000000000"
             methodId: "0x095ea7b3"
         expect_pass: false
         expect_reason: "approve spender not allowed"
-      - name: "agent mode: transfer blocked when max_transfer_amount is 0"
-        variables:
-          max_transfer_amount: "0"
-          token_address: ""
-        input:
-          sign_type: "transaction"
-          chain_id: 1
-          signer: "0x0000000000000000000000000000000000000002"
-          transaction:
-            from: "0x0000000000000000000000000000000000000002"
-            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-            value: "0x0"
-            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
-            methodId: "0xa9059cbb"
-        expect_pass: false
-        expect_reason: "transfer exceeds cap"
       - name: "agent mode: approve any token via trusted_contracts"
         variables:
           token_address: ""
