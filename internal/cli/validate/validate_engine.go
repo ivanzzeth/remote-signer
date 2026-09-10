@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
@@ -44,7 +43,7 @@ func buildEngineForRuleTest(ctx context.Context, fullRepo *storage.MemoryRuleRep
 		}
 	}
 	// Recursively add delegation target rules so delegate_to resolution works.
-	if err := addDelegationTargets(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
+	if err := rule.AddDelegationTargets(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
 		return nil, err
 	}
 	eng, err := rule.NewWhitelistRuleEngine(minimalRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
@@ -74,41 +73,6 @@ func buildEngineForRuleTest(ctx context.Context, fullRepo *storage.MemoryRuleRep
 	}
 	eng.RegisterEvaluator(jsEval)
 	return eng, nil
-}
-
-// addDelegationTargets recursively adds delegation target rules to the minimal repo
-// with Enabled=false so they are reachable via Get() (for delegation resolution)
-// but NOT included in top-level List(EnabledOnly=true) evaluation.
-func addDelegationTargets(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
-	if visited[r.ID] {
-		return nil
-	}
-	visited[r.ID] = true
-	var cfg struct {
-		DelegateTo string `json:"delegate_to"`
-	}
-	if err := json.Unmarshal(r.Config, &cfg); err != nil || cfg.DelegateTo == "" {
-		return nil
-	}
-	for _, part := range strings.Split(cfg.DelegateTo, ",") {
-		targetID := types.RuleID(strings.TrimSpace(part))
-		if targetID == "" {
-			continue
-		}
-		target, ok := allRulesMap[targetID]
-		if !ok {
-			return fmt.Errorf("rule %q delegate_to references non-existent target %q", r.ID, targetID)
-		}
-		clone := *target
-		clone.Enabled = false
-		if err := minimalRepo.Create(ctx, &clone); err != nil {
-			log.Debug("delegation target already in minimal repo", "target", targetID)
-		}
-		if err := addDelegationTargets(ctx, target, allRulesMap, minimalRepo, visited, log); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // validateDeclarativeRule validates declarative rule config format using shared ruleconfig (same as API and config load).

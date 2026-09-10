@@ -221,7 +221,7 @@ func buildIsolatedEngineForRule(ctx context.Context, allRulesMap map[types.RuleI
 			return nil, fmt.Errorf("add rule under test %s: %w", ruleUnderTest.ID, err)
 		}
 	}
-	if err := addDelegationTargetsForValidation(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
+	if err := rule.AddDelegationTargets(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
 		return nil, err
 	}
 	eng, err := rule.NewWhitelistRuleEngine(minimalRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
@@ -244,41 +244,4 @@ func buildIsolatedEngineForRule(ctx context.Context, allRulesMap map[types.RuleI
 		eng.RegisterEvaluator(solidityEval)
 	}
 	return eng, nil
-}
-
-// addDelegationTargetsForValidation recursively adds delegation target rules to the minimal repo
-// with Enabled=false so they are reachable via Get() but not included in List(EnabledOnly=true).
-func addDelegationTargetsForValidation(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
-	if visited[r.ID] {
-		return nil
-	}
-	visited[r.ID] = true
-	var cfg struct {
-		DelegateTo string `json:"delegate_to"`
-	}
-	if err := json.Unmarshal(r.Config, &cfg); err != nil {
-		return fmt.Errorf("unmarshal config for rule %q: %w", r.ID, err)
-	}
-	if cfg.DelegateTo == "" {
-		return nil
-	}
-	for _, part := range strings.Split(cfg.DelegateTo, ",") {
-		targetID := types.RuleID(strings.TrimSpace(part))
-		if targetID == "" {
-			continue
-		}
-		target, ok := allRulesMap[targetID]
-		if !ok {
-			return fmt.Errorf("rule %q delegate_to references non-existent target %q", r.ID, targetID)
-		}
-		clone := *target
-		clone.Enabled = false
-		if err := minimalRepo.Create(ctx, &clone); err != nil {
-			log.Debug("delegation target already in minimal repo", "target", targetID)
-		}
-		if err := addDelegationTargetsForValidation(ctx, target, allRulesMap, minimalRepo, visited, log); err != nil {
-			return err
-		}
-	}
-	return nil
 }

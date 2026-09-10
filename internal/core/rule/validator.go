@@ -14,6 +14,24 @@ import (
 // AddDelegationTargets recursively adds delegation target rules to the minimal repo
 // with Enabled=false so they are reachable via Get() (for delegation resolution)
 // but NOT included in top-level List(EnabledOnly=true) evaluation.
+// AddDelegationTargets walks a rule's delegate_to chain and adds every target to
+// the isolated repo, so delegation resolves while the rule is validated alone.
+//
+// ⚠️ This is the one implementation. Two byte-for-byte copies lived in
+// internal/cli until 2026-09-10 — one differing only in name, the other in how
+// it read a broken config:
+//
+//	if err := json.Unmarshal(r.Config, &cfg); err != nil || cfg.DelegateTo == "" {
+//
+// which treats an unparseable config as "this rule delegates to nothing". The
+// isolated engine then validated the rule without its delegation chain and
+// reported a pass, for a rule that at evaluation time would have delegated
+// somewhere. Failing on a config that cannot be read is the only safe reading:
+// a rule whose delegation cannot be determined has not been validated.
+//
+// ⛔ Do not add a fourth copy. The two that existed became removable only once
+// storage.MemoryRuleRepository turned into an alias of the ports type; before
+// that the signatures looked incompatible and each caller wrote its own.
 func AddDelegationTargets(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *ports.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
 	if visited[r.ID] {
 		return nil
