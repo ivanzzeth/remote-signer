@@ -29,10 +29,16 @@
 #   泄露另一个 handler 藏起来的东西」的代码。两份已经在外观上漂了:一份用
 #   time.RFC3339,另一份把同一个 layout 手写了一遍。
 #
+# 2026-09-10:5 → 4。两个 List(FileTemplateSource / FilePresetSource)合成
+#   泛型 listYAMLTree —— 逐字两份的 stat + 容忍目录不存在 + 拒绝非目录 + 走树 +
+#   过滤扩展名。容忍不存在的那个分支才是关键:它是「新装的机器还没写 presets」
+#   能正常启动的原因,哪份副本掉了它,一边的目录会把空目录读成启动失败,另一边
+#   照常。两份已经在文档上漂了:模板那份的注释写着「解析失败不中断遍历,跳过该
+#   文件」,而代码其实是 return err 中断整棵树 —— 注释描述的是早就不存在的行为。
+
 # ⛔ 收敛方向是「同一个形状只留一份实现,两边都用它」。
 #
 internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPCUnchecked <-> internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPC
-internal/core/registry/file_source.go:(*FileTemplateSource).List <-> internal/core/registry/file_source.go:(*FilePresetSource).List
 internal/notify/pushover_client.go:(*PushoverClient).SendToUsers <-> internal/notify/slack_client.go:(*SlackClient).SendToChannels
 internal/notify/slack_client.go:(*SlackClient).SendToChannels <-> internal/notify/telegram_client.go:(*TelegramClient).SendToChats
 internal/storage/preset_repo.go:(*GormPresetRepository).Upsert <-> internal/storage/template_repo.go:(*GormTemplateRepository).Upsert

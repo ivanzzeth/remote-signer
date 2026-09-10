@@ -139,51 +139,10 @@ func (s *FileTemplateSource) Kind() types.RuleSource {
 }
 
 // List walks the root and returns one *types.RuleTemplate per .yaml/.yml
-// file. Parse failures don't abort the walk — the offending file is
-// skipped and the error is surfaced via the Registry's SyncReport so a
-// single bad template can't block the rest of the catalogue.
+// file. See listYAMLTree for the walk semantics — in particular that a
+// parse failure aborts the walk rather than shipping a partial catalogue.
 func (s *FileTemplateSource) List(ctx context.Context) ([]*types.RuleTemplate, error) {
-	if s.fsys == nil {
-		return nil, nil
-	}
-	info, err := fs.Stat(s.fsys, s.root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("stat %s: %w", s.root, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("%s: not a directory", s.root)
-	}
-
-	var out []*types.RuleTemplate
-	walkErr := fs.WalkDir(s.fsys, s.root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if _, ok := fileExtensions[strings.ToLower(filepath.Ext(path))]; !ok {
-			return nil
-		}
-		tmpl, parseErr := s.parseTemplate(path)
-		if parseErr != nil {
-			// Skip but keep walking — Registry will collect from the source side
-			// in a future iteration. For now we drop unparseable files silently;
-			// the caller (Registry) can log via SyncReport.Errors when we wire
-			// per-file errors back. R4 keeps this simple by returning a single
-			// fatal error only on walk-level problems.
-			return fmt.Errorf("%s: %w", path, parseErr)
-		}
-		out = append(out, tmpl)
-		return nil
-	})
-	if walkErr != nil {
-		return out, walkErr
-	}
-	return out, nil
+	return listYAMLTree(s.fsys, s.root, s.parseTemplate)
 }
 
 // parseTemplate reads one file, computes its identity + content hash,
@@ -358,43 +317,10 @@ func (s *FilePresetSource) Kind() types.RuleSource {
 	return types.RuleSourceFile
 }
 
+// List walks the root and returns one *types.RulePreset per .yaml/.yml file.
+// Same walk as FileTemplateSource.List — see listYAMLTree.
 func (s *FilePresetSource) List(ctx context.Context) ([]*types.RulePreset, error) {
-	if s.fsys == nil {
-		return nil, nil
-	}
-	info, err := fs.Stat(s.fsys, s.root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("stat %s: %w", s.root, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("%s: not a directory", s.root)
-	}
-
-	var out []*types.RulePreset
-	walkErr := fs.WalkDir(s.fsys, s.root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if _, ok := fileExtensions[strings.ToLower(filepath.Ext(path))]; !ok {
-			return nil
-		}
-		preset, parseErr := s.parsePreset(path)
-		if parseErr != nil {
-			return fmt.Errorf("%s: %w", path, parseErr)
-		}
-		out = append(out, preset)
-		return nil
-	})
-	if walkErr != nil {
-		return out, walkErr
-	}
-	return out, nil
+	return listYAMLTree(s.fsys, s.root, s.parsePreset)
 }
 
 func (s *FilePresetSource) parsePreset(path string) (*types.RulePreset, error) {
@@ -503,6 +429,60 @@ func (s *FilePresetSource) parsePreset(path string) (*types.RulePreset, error) {
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+// listYAMLTree walks root inside fsys and parses every .yaml/.yml file under
+// it. FileTemplateSource.List and FilePresetSource.List were this function
+// written out twice — 37 lines each, differing only in the element type and
+// which parse method got called.
+//
+// ⚠️ The os.IsNotExist branch is the reason this belongs in one place. It is
+// what lets a fresh install boot with an empty catalogue instead of a startup
+// error; a copy that lost it would turn "the operator has not written any
+// presets yet" into a failed boot on one catalogue while the other kept
+// working. Same for the not-a-directory check: an operator who points
+// presets_dir at a file should get the same message either way.
+//
+// A parse failure aborts the walk and comes back together with whatever was
+// collected before it, so Registry.Sync reports the bad file instead of
+// quietly syncing a partial catalogue and pruning the rest.
+func listYAMLTree[T any](fsys fs.FS, root string, parse func(path string) (T, error)) ([]T, error) {
+	if fsys == nil {
+		return nil, nil
+	}
+	info, err := fs.Stat(fsys, root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s: not a directory", root)
+	}
+
+	var out []T
+	walkErr := fs.WalkDir(fsys, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if _, ok := fileExtensions[strings.ToLower(filepath.Ext(path))]; !ok {
+			return nil
+		}
+		item, parseErr := parse(path)
+		if parseErr != nil {
+			return fmt.Errorf("%s: %w", path, parseErr)
+		}
+		out = append(out, item)
+		return nil
+	})
+	if walkErr != nil {
+		return out, walkErr
+	}
+	return out, nil
+}
 
 // relPathIdentity derives the canonical ID and chain-from-directory for
 // a file given the source root. ID is the file stem joined by '/' if
