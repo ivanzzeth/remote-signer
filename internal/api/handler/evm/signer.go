@@ -90,6 +90,17 @@ func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleSignerAction handles /api/v1/evm/signers/{address}/{action}
+// signerActionMethods is the verb each state-changing action accepts, and it is
+// the same verb its own method-scoped route in router.go declares. ⚠️ `access`
+// is deliberately absent: it serves three methods on one path and dispatches on
+// them itself, so a single expected verb would be wrong for it.
+var signerActionMethods = map[string]string{
+	"unlock":   http.MethodPost,
+	"lock":     http.MethodPost,
+	"approve":  http.MethodPost,
+	"transfer": http.MethodPost,
+}
+
 func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
@@ -125,10 +136,39 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// ⛔ No per-action method checks: each of these four has its own
-	// method-scoped route (POST /api/v1/evm/signers/{address}/<action>), so the
-	// mux answers 405 before this switch runs. `access` below is the exception —
-	// it serves three methods on one path and dispatches on them itself.
+	// ⛔ The comment that used to stand here said the mux answers 405 before this
+	// switch runs, because each of these four has its own
+	// `POST /api/v1/evm/signers/{address}/<action>` route. **That was false, and
+	// it is the reasoning error that made the bug.**
+	//
+	// Go's ServeMux answers 405 only when a pattern matches the path and *no*
+	// pattern matches the method. `/api/v1/evm/signers/` is registered without a
+	// method (router.go), so it matches every method — there is always a match,
+	// and 405 never happens. A GET to .../{address}/unlock therefore did not get
+	// 405; it fell through to this handler, which read the action out of the path
+	// and unlocked the signer. Verified against the real pattern set:
+	//
+	//   POST   .../0xabc/unlock   → "POST /api/v1/evm/signers/{address}/unlock"
+	//   GET    .../0xabc/unlock   → "/api/v1/evm/signers/"      ← here
+	//   DELETE .../0xabc/approve  → "/api/v1/evm/signers/"      ← here
+	//
+	// So GET and DELETE performed ownership transfers, unlocks, locks and
+	// approvals on a daemon holding private keys, and none of the four
+	// handlers checks r.Method either.
+	//
+	// ⚠️ The permission is a separate question and deliberately not touched here:
+	// these four are gated on PermReadSigners, which is recorded in
+	// scripts/lib/arch-baseline/ast/route-mutating-perm.txt as a known deferred
+	// decision. This fix is only about the verb.
+	//
+	// ⭐ The structural fix is S5's decomposition — once the method-less prefix
+	// is gone, an unroutable verb cannot reach a handler at all. Until then this
+	// guard states the same rule in the one place that still needs it.
+	if want, isAction := signerActionMethods[action]; isAction && r.Method != want {
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
+		return
+	}
+
 	switch action {
 	case "unlock":
 		h.handleUnlock(w, r, address)

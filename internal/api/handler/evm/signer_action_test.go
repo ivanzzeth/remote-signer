@@ -268,3 +268,78 @@ func TestHandleDelete_NotOwner(t *testing.T) {
 		"/api/v1/evm/signers/"+testAddr, nil, testOtherAPIKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
+
+// TestHandleSignerAction_StateChangeRequiresPost is a regression test for a
+// defect found on 2026-09-10 while decomposing routes.
+//
+// ⛔ What was wrong: HandleSignerAction carried a comment asserting that each
+// of the four state-changing actions has its own
+// `POST /api/v1/evm/signers/{address}/<action>` route, "so the mux answers 405
+// before this switch runs". Go's ServeMux answers 405 only when a pattern
+// matches the path and *no* pattern matches the method. `/api/v1/evm/signers/`
+// is registered without a method, so it matches every method — there is always
+// a match and 405 never happens. A GET to .../unlock fell through to this
+// handler, which read the action out of the path and unlocked the signer. None
+// of the four action handlers checks r.Method either.
+//
+// ⚠️ Asserting the status code alone would be a weak test: a handler that
+// mutates and *then* writes 405 would pass it. So each case asserts the manager
+// function was never called — the mutation must not happen at all.
+//
+// ⭐ The structural fix is the decomposition (proposal S5): with no method-less
+// prefix left, an unroutable verb cannot reach a handler. This test should
+// survive that and keep passing.
+func TestHandleSignerAction_StateChangeRequiresPost(t *testing.T) {
+	for _, action := range []string{"unlock", "lock", "approve", "transfer"} {
+		for _, method := range []string{
+			http.MethodGet, http.MethodDelete, http.MethodPut, http.MethodPatch,
+		} {
+			t.Run(method+" "+action, func(t *testing.T) {
+				called := false
+				mgr := &signerActionMock{
+					unlockFn: func(_ context.Context, addr, _ string) (*types.SignerInfo, error) {
+						called = true
+						return &types.SignerInfo{Address: addr}, nil
+					},
+					lockFn: func(_ context.Context, addr string) (*types.SignerInfo, error) {
+						called = true
+						return &types.SignerInfo{Address: addr}, nil
+					},
+				}
+				h := newActionHandler(t, mgr, map[string]string{testAddr: testKeyID})
+
+				rec := doActionRequest(t, h.HandleSignerAction, method,
+					"/api/v1/evm/signers/"+testAddr+"/"+action,
+					map[string]string{"password": "secret123", "new_owner_id": "someone-else"},
+					testOwnerAPIKey())
+
+				assert.Equal(t, http.StatusMethodNotAllowed, rec.Code,
+					"%s on a state-changing action must be refused; only POST performs it", method)
+				assert.False(t, called,
+					"⛔ %s %s reached the signer manager — the state change happened. "+
+						"Refusing after mutating is not refusing.", method, action)
+			})
+		}
+	}
+}
+
+// TestHandleSignerAction_PostStillWorks is the other half: the guard must not
+// have broken the verb that is supposed to work. Without this, deleting the
+// four actions outright would also make the test above pass.
+func TestHandleSignerAction_PostStillWorks(t *testing.T) {
+	called := false
+	mgr := &signerActionMock{
+		unlockFn: func(_ context.Context, addr, _ string) (*types.SignerInfo, error) {
+			called = true
+			return &types.SignerInfo{Address: addr, Type: "keystore", Enabled: true}, nil
+		},
+	}
+	h := newActionHandler(t, mgr, map[string]string{testAddr: testKeyID})
+
+	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+		"/api/v1/evm/signers/"+testAddr+"/unlock",
+		map[string]string{"password": "secret123"}, testOwnerAPIKey())
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, called, "POST must still perform the unlock")
+}
