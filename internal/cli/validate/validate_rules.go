@@ -18,6 +18,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // validateConfig loads config, expands templates and instance/file rules (same as server), then validates.
@@ -220,8 +221,12 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 			continue
 		}
 
-		switch ruleCfg.Type {
-		case string(types.RuleTypeEVMSolidityExpression):
+		// ⚠️ Normalized: the catalogue still carries the legacy spelling
+		// evm_address_whitelist, which this switch used to list by hand in the
+		// declarative arm.
+		ruleType := types.RuleType(pkgvalidate.NormalizeRuleType(ruleCfg.Type))
+		switch ruleType {
+		case types.RuleTypeEVMSolidityExpression:
 			// Solidity expression rules → collect for batch validation
 			rule, err := configToRule(i, ruleCfg)
 			if err != nil {
@@ -233,7 +238,7 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 			}
 			rulesToValidate = append(rulesToValidate, rule)
 
-		case string(types.RuleTypeMessagePattern):
+		case types.RuleTypeMessagePattern:
 			// Message pattern rules → validate with MessagePatternRuleValidator
 			rule, err := configToRule(i, ruleCfg)
 			if err != nil {
@@ -262,7 +267,7 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				failed++
 			}
 
-		case string(types.RuleTypeEVMJS):
+		case types.RuleTypeEVMJS:
 			rule, err := configToRuleWithID(i, ruleCfg)
 			if err != nil {
 				result.Valid = false
@@ -276,14 +281,25 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 			passed += p
 			failed += f
 
-		case string(types.RuleTypeEVMAddressList), "evm_address_whitelist",
-			string(types.RuleTypeEVMContractMethod),
-			string(types.RuleTypeEVMValueLimit),
-			string(types.RuleTypeSignerRestriction),
-			string(types.RuleTypeSignTypeRestriction),
-			string(types.RuleTypeChainRestriction),
-			string(types.RuleTypeEVMDynamicBlocklist):
-			// Declarative rules → JSON deserialization + basic validation
+		default:
+			// Every other declared type is declarative: there is no source to
+			// compile or script to run, so the check is deserialization plus
+			// the shape rules.
+			//
+			// ⚠️ This arm used to enumerate seven types, with anything else
+			// falling through to "unknown rule type". That is a list of engines
+			// kept by hand — the seventh in this repo — and it had the same gap
+			// as the others: evm_internal_transfer is declared and has a
+			// registered evaluator, and `remote-signer validate` called it
+			// unknown. A type that does not exist is already rejected above by
+			// LookupRuleType, so reaching here means the type is real.
+			if _, known := types.LookupRuleType(ruleType); !known {
+				result.Valid = false
+				result.Error = fmt.Sprintf("unknown rule type: %s", ruleCfg.Type)
+				results = append(results, result)
+				failed++
+				continue
+			}
 			rule, err := configToRule(i, ruleCfg)
 			if err != nil {
 				result.Valid = false
@@ -304,12 +320,6 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				passed++
 			}
 
-		default:
-			// Unknown rule type → error (not skip!)
-			result.Valid = false
-			result.Error = fmt.Sprintf("unknown rule type: %s", ruleCfg.Type)
-			results = append(results, result)
-			failed++
 		}
 	}
 

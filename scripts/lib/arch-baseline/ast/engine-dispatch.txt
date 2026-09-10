@@ -27,8 +27,13 @@ internal/ruleconfig/validate.go
 #                              两处重复的 evm_js 校验(ValidateRuleConfig 更严)
 #   rule.go                  → RBAC 两张表改为从 ExecutesArbitraryCode /
 #                              GovernsSignerAccess 派生,从 fail-open 变 fail-closed
+#   validate_rules.go        → 声明式那一支不再枚举 7 种类型,10 → 5
 #
-# 只剩 validate_rules.go 一个真调用方,它是三个签名不同的 validator 之间的
-# switch —— 那需要 RuleValidator 接口(照抄 RuleEvaluator + BatchRuleEvaluator
-# 那对已经存在的组合),不是加个描述符字段能解决的。
+# 只剩 validate_rules.go 一个真调用方。它还点名 3 个引擎,因为这三个确实各有
+# 各的验证形状:Solidity 要批量(多条规则编成一个 forge 脚本一起跑),
+# message_pattern 逐条,evm_js 那一支还可能跑整个引擎(见 arch/10 注释里
+# 那两条路径)。收干净需要 RuleValidator + BatchRuleValidator 接口 ——
+# 照抄 RuleEvaluator/BatchRuleEvaluator 那对已经存在的组合。三个 validator
+# 已经返回同一个 *ValidationResult,拦路的是 evm_js 那支要的一串依赖
+# (ruleEngine / fullRepo / hasSolidity / 两个 validator),不是返回类型。
 internal/cli/validate/validate_rules.go
