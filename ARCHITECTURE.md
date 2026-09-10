@@ -1,184 +1,186 @@
-# Remote Signer Architecture
+# 架构
 
-## Overview
+**用途**:系统**应该**长什么样。代码与它不一致 = 缺陷,停下上报。
 
-Remote Signer is a policy-controlled signing service. It enforces **what** gets signed through a configurable rule engine, not just **who** can sign. The architecture separates key custody from signing authority — signer private keys are held by the service, but every signing operation is gated by a chain of policy checks.
+**判据**:*这一条是从 [`docs/prd.md`](docs/prd.md) 的哪条保证或哪条决策来的?*
+答不上来,它就不属于这里 —— 要么是产品需求(挪回 PRD),要么是实现细节(挪去模块文档)。
 
----
-
-## Core Concepts
-
-### Signer
-
-A **Signer** is a cryptographic identity that can produce signatures. It represents a private key under the service's custody. Multiple signer types exist:
-
-- **Keystore signer** — An encrypted private key file (e.g. Ethereum JSON keystore) stored on disk. Decrypted at runtime with a password for signing.
-- **HD Wallet** — A BIP-39 mnemonic from which many addresses are derived deterministically (BIP-44 path). Each derived address is a distinct signer.
-- **Plaintext key** — A directly configured private key. Only intended for local or test environments.
-
-Signers belong to a **chain type** (e.g. EVM). Each signer has an **owner** — the API key that created it — which controls who can use it and who can approve pending requests.
-
-### Wallet
-
-A **Wallet** is an organizational concept that groups signers and provides higher-level operations. Wallets abstract away individual signer addresses:
-
-- Wallets unify multiple signer types (keystore, HD wallet derived addresses) under a single interface.
-- A wallet knows its signers and can sign on their behalf.
-- Wallets support locking/unlocking, resource limits, and ownership transfer.
-
-The Wallet domain is the boundary for multi-tenant isolation: different tenants (API keys) own different wallets, and a wallet's signers cannot be used by another tenant's API key.
-
-### API Key
-
-An **API Key** is the authentication credential for programmatic access. Every request to the signing API must be signed with an API key's Ed25519 private key.
-
-API keys carry **authorization scope**:
-- **Admin keys** — Full access: create/modify rules, manage signers, approve requests, manage API keys.
-- **Agent keys** — Can sign and read rules/budgets, but cannot modify policies.
-- **Non-admin keys** — Submit sign requests and view status only.
-
-Scoping fields further limit a key's reach: `allowed_signers`, `allowed_hd_wallets`, `allowed_chain_types`, per-key rate limits.
-
-### Rule
-
-A **Rule** is a policy statement that constrains signing behavior. Rules are the core of the policy engine and operate in a two-tier model:
-
-- **Blocklist rules** — Evaluated first. If a request matches a blocklist rule, it is **rejected immediately** (fail-closed). Any evaluation error also causes rejection.
-- **Whitelist rules** — Evaluated second. If a request matches a whitelist rule, it is **auto-approved** (fail-open). Evaluation errors skip the rule.
-
-If no whitelist rule matches and no blocklist rule triggers, the request enters **manual approval** — a human (the signer owner) must explicitly approve or reject it.
-
-Rules can be parameterized (via Templates) or written inline. Rule types include address lists, value limits, contract method restrictions, Solidity expressions, JavaScript sandbox rules, and message pattern matching.
-
-Rules support **delegation**: a whitelist rule can delegate inner call validation to other rules, forming recursive validation chains. Delegation has depth limits and cycle detection.
-
-#### Delegation architecture
-
-Delegation enables a whitelist rule to unpack a wrapper payload (e.g. a Gnosis Safe `execTransaction`) and forward the inner calldata to another rule for further validation. The engine recursively evaluates the inner payload against the target rule(s).
-
-**Two ways to set the target rule ID:**
-
-| Source | Mechanism | Precedence |
-|--------|-----------|-----------|
-| Script return value | `validate()` returns `{ valid: true, delegate_to: "inst_abc..." }` | Higher — overrides config |
-| Config / template variable | `config.delegate_to` (set via Variables) | Lower — fallback |
-
-**Two delegation modes:**
-
-| Mode | Behavior |
-|------|----------|
-| `single` (default) | Forward one payload. Try each target rule; any one passing = allowed. |
-| `per_item` | Extract an array from payload (keyed by `items_key`). Each item must be allowed by at least one target. Used by MultiSend to validate each inner transfer individually. |
-
-**Security constraints:**
-
-- **Depth limit**: `DelegationMaxDepth = 6` — prevents infinite recursion.
-- **Cycle detection**: Tracks visited rule IDs along the delegation path. If a rule appears twice in a path, evaluation fails.
-- **Blocklist re-evaluation**: Delegated inner payloads are always run through blocklist rules before being evaluated against the target whitelist rule. This prevents delegation from being used to bypass global blocklists.
-- **Item limit**: `DelegationMaxItems = 256` — caps `per_item` array size.
-
-**Cross-template delegation:** Templates reference target sub-rules by YAML-level IDs (e.g. `polymarket-v2-transactions`). During instance creation, `BatchCreateInstances` resolves these to DB-level `inst_<hash>` IDs via a two-phase process: Phase 1 pre-computes all sub-rule IDs into a global map; Phase 2 resolves `delegate_to` references in both Config JSON and Variables JSON before persisting.
-
-See [Rules, Templates & Presets](docs/rules-templates-and-presets.md#10-delegate-mechanism) for the full delegation mechanism including YAML-level configuration and debug queries.
-
-### Template
-
-A **Template** is a parameterized rule definition stored as a YAML file. Templates declare typed variables with descriptions and default values, and define rules using `${variable}` placeholders.
-
-Templates are not evaluated directly — they are expanded into concrete rules when an **instance** supplies variable values. This enables reusable, auditable rule patterns: a single template (e.g. "ERC20 transfer validation") can produce rules for different tokens, chains, and parameters without duplicating logic.
-
-Templates can include test cases that validate behavior during development.
-
-### Preset
-
-A **Preset** is a convenience layer: a pre-filled instance (or set of instances) stored as a YAML file. Presets bundle template references with default variable values so that common rule configurations (e.g. "Polymarket on Polygon", "USDC across all chains") can be deployed with minimal variable overrides.
-
-Presets support single-rule and multi-rule formats, including **matrix presets** that create one rule per chain with chain-specific addresses. They are used by the CLI for interactive setup and by the API for programmatic deployment.
-
-### Budget
-
-A **Budget** enforces spending limits on signing operations. Budgets are tied to rules (via template instances) and define:
-
-- **What is measured** — Transaction value, token amount, tx count, or custom units.
-- **How much is allowed** — `max_total` (per period), `max_per_tx` caps.
-- **When it resets** — Configurable period (e.g. 24h, 7d) with automatic renewal.
-- **Alert threshold** — Notification when usage reaches a configurable percentage of the budget.
-
-Budgets can be **static** (declared limits) or **dynamic** (auto-tracked from transaction simulation outcomes). Dynamic budgets inspect actual balance changes from `eth_simulateV1` rather than relying on the caller's declared intent. Gas costs are included in native token budgets.
-
-Budget enforcement happens after a whitelist rule matches but before final approval. If the budget is exceeded, that rule is skipped (other rules may still match).
-
-### Audit
-
-**Audit** is the complete, immutable record of every operation in the service. Every API request, state transition, rule match, approval, rejection, and error is logged with metadata including:
-
-- Event type, severity, and timestamp
-- Actor identity (API key ID, client IP)
-- Request and rule identifiers
-- Detailed context (status codes, durations, error messages)
-
-The audit trail enables full attack timeline reconstruction, compliance verification, and operational debugging. An anomaly monitor scans audit records in the background for suspicious patterns (auth failure bursts, rejection spikes, high-frequency requests).
+**关联**:[`docs/prd.md`](docs/prd.md)(为谁解决什么问题) ·
+[`SECURITY.md`](SECURITY.md)(威胁模型) · [`docs/README.md`](docs/README.md)(索引)。
 
 ---
 
-## Relationships
+## 0. 约定
+
+⛔ **这里不写「怎么做」。** 不出现函数、文件路径、库名、表结构。判据:*换一种语言
+重写这个系统,这一条还成立吗?* 成立才留下。
+
+⚠️ **待决策不许默认掉。** PRD §8 里没定的事,在这里显式标成**分叉点**(§7),写清
+每个选择会让架构长出什么 —— 而不是悄悄选一个然后长出来。
+
+---
+
+## 1. 边界:工作区
+
+> 从 PRD **D1**(工作区是边界)· **G1**(私钥不离开)· **D6**(越权即不存在)推出。
+
+**一切东西都属于某一个工作区**:钥匙、签名者、授权、额度、成员、审计。没有跨工作区
+的引用。
+
+| 形状 | 为什么 |
+|---|---|
+| 每一条数据都带工作区标识 | 不是「查出来再判权限」,而是**查不出来** —— 这是 D6「越权即不存在」的唯一可靠实现 |
+| 开源部署只有一个工作区,且不可见 | D1:边界从第一天就在,打开多工作区是开关而不是迁移 |
+| 默认工作区是迁移锚点 | 既有单机部署接上多工作区时,原数据直接归它,零迁移 |
+
+⛔ **过滤必须发生在取数那一层**。任何「先取回来再判断能不能看」的写法都会在某条
+路径上漏掉判断,而漏掉的表现是**看得见别人的东西**,不是报错。
+
+---
+
+## 2. 身份:成员与钥匙
+
+> 从 PRD **D2**(人和钥匙分开)· **D5**(多管理员)· **N7**(凭据与身份不匹配要说得出)推出。
+
+**成员**是身份(人或 agent),**钥匙**是凭据。一个成员可持有多把钥匙。
+
+| 形状 | 为什么 |
+|---|---|
+| 授权、签名者、审计都挂在**成员**上,不挂在钥匙上 | D2:换钥匙不该动这个人的任何东西 |
+| 换钥匙 = 换这个成员名下的凭据,身份不动 | 目前**没有出口**,只能改库 —— 见 §7/F4 |
+| 成员可停用而不删除 | 删除会断掉追责链 |
+| 认证失败分两种结论 | N7:「**你不是他**」与「你是他但不许做这件事」,补救动作完全不同 |
+
+---
+
+## 3. 一次签名请求经过什么
+
+> 从 PRD **G2**(默认拒绝)· **G4**(答得出是哪条授权)· **G6**(说不清就拒绝)推出。
 
 ```
-Template ──parameterizes──► Instance ──produces──► Rule
-                                                      │
-Preset ──bundles──► Template + variables ──────► Instance
-                                                      │
-API Key ──authenticates──► Request
-                             │
-Request ──evaluated by──► Rule Engine (blocklist → whitelist → manual)
-                             │
-                  ┌──────────┴──────────┐
-                  ▼                     ▼
-              Budget check          Manual approval
-                  │                     │
-                  ▼                     ▼
-              Signer ──produces──► Signature ──logged to──► Audit
+请求 → 认证 → 授权 → 黑名单 → 白名单 → 额度 → 签名 → 审计
+                        │        │       │
+                    命中即拒   命中即放  超限即拒
+                        │        │
+                  ⛔ 出错也拒  ⚠️ 出错跳过
+                                 │
+                          都不命中 → 等人批准
 ```
 
-## Data Flow
+**每一道门的失败方向是设计,不是实现细节:**
+
+| 门 | 出错时 | 为什么 |
+|---|---|---|
+| 黑名单 | **拒绝** | 一条本该拦东西的规则算不出结论时放行,等于它不存在 |
+| 白名单 | **跳过这条,继续下一条** | 一条坏的白名单不该拖垮其它有效白名单 |
+| 额度 | **拒绝** | G6。额度算不出来等于没有额度 |
+| 都不命中 | **等人批准** | G2:没被明确允许的事不会被签,但也不是直接失败 |
+
+⛔ **一道门拒绝时必须说得出是哪一条、缺什么**(PRD **N6**)。fail-closed 是对的,
+但说不出理由的 fail-closed 等于停摆 —— 而停摆和被攻击在主人眼里长得一样。
+
+⚠️ **判定引擎是注册进来的,不是分发出去的。** 调用方不问「这条规则用哪个引擎」,
+它问引擎「你处理哪一种」。加一个引擎不应该需要改任何调用点。
+
+---
+
+## 4. 额度
+
+> 从 PRD **§5.1**(跨币种/跨授权/组织级封顶)· **N1**(算不出上限不许当无限)推出。
+
+**额度可以挂在四个位置**:工作区 · 成员 · 钥匙 · 单条授权。
+
+| 形状 | 为什么 |
+|---|---|
+| 一笔支出要过掉它撞上的**每一个**上限 | §5.1:主人要的是封顶,不是相加 |
+| 有效额度 = 所有适用上限里**最小**的 | 新增一条授权只能多一道闸,不可能松开已有的 |
+| 每个上限有周期 | 「一天」「一个月」「一直」由主人选 |
+| **算不出上限 = 不许花钱** | N1。⛔ 空值、未解析、无法比较,一律不是「无限」 |
+
+⛔ **跨币种封顶不做**(PRD D3)。没有共同计价单位,额度只能按币种分别设。
+
+---
+
+## 5. 授权的表达
+
+> 从 PRD **§5.2**(可组合性)· **§5.4**(跨链)推出。
+
+- 一条授权说清:在哪条链、对哪个合约、调哪个方法、参数满足什么条件。
+- 复杂条件由运维自己写判断逻辑;另有一批现成的内置条件。
+- 跨链目前是「一条授权 + 一张按链分行的参数表」。
+
+⚠️ 两处形状未定:内置条件是给人拼的还是只给机器生成用(§7/F2)、跨链是「一条策略
+× 多条链」还是「每条链一条」(§7/F3)。
+
+---
+
+## 6. 权限
+
+> 从 PRD **D4**(角色 = 能力档的命名组合)· **G7**(不能扩大自己的授权)推出。
+
+### 两根轴
+
+⛔ 「拥有」(转让、删工作区、计费)和「日常能做什么」**不是一根轴**。挤进一根会逼出
+「为了删个东西而给全权」。
+
+### 日常轴:五个能力档
+
+⛔ **权限不是一堆开关,是五个按危险程度排列的档。**
+
+| 档 | 能做什么 | 危险在哪 |
+|---|---|---|
+| **看** | 读授权、请求、审计、额度 | 信息泄露 |
+| **用** | 发签名请求 | 只能在**已有授权**范围内花钱 |
+| **改策略** | 建/改授权 | **决定什么能被签** |
+| **写代码** | 授权里可含自定义判断逻辑 | 任意谓词 |
+| **管身份** | 加成员、换钥匙、改角色 | 决定**谁**能做上面这些 |
+
+角色是这些档的**命名组合**:观察者(看)· 操作者(看+用)· 策略作者(看+用+改策略)·
+管理员(全部)。
+
+### 可组合性放在范围上,不放在能力上
 
 ```
-Client → API Key (Ed25519 sign) → Middleware Pipeline → Handler → SignService
-                                                                        │
-                                          ChainAdapter ◄── SignService ─┤
-                                                                        │
-                                          Rule Engine ◄── SignService ─┤
-                                                                        │
-                                          Budget Check ◄── SignService ─┤
-                                                                        │
-                                          Signer ──signs──► Signature ──┤
-                                                                        │
-                                          Audit Log ◄───── Every step ──┘
+策略作者 @ 仅限 <这些签名者 / 这几条链 / 这个协议>
 ```
 
-1. **Authentication** — The client signs the request with its Ed25519 API key. The server verifies the signature, checks nonce uniqueness (replay protection), and validates the timestamp window.
-2. **Authorization** — The server checks whether the API key has permission to use the specified chain type and signer address.
-3. **Rule evaluation** — The two-tier rule engine evaluates the request against blocklist rules first, then whitelist rules.
-4. **Budget enforcement** — If a whitelist rule matched, its budget is checked before approval.
-5. **Manual approval** — If no rule matched and manual approval is enabled, the request enters a pending state awaiting the signer owner's decision.
-6. **Signing** — The chain adapter performs the cryptographic signing operation.
-7. **Audit logging** — Every step produces audit records for the complete trail.
+⭐ **范围只会收窄,永远不会放大**,所以任意组合都安全。能力自由组合不安全 ——
+「改策略 + 写代码」这类交叉项没人算得清。
 
-## Security Boundary
+⛔ **不做「自定义角色 + 勾选权限」。** 那是把「说不清的组合」外包给主人。要扩展,
+扩展范围,不扩展能力表。
 
-The security model follows defense-in-depth across these layers:
+### 三条不变量
 
-| Layer | Controls |
-|-------|----------|
-| Transport | TLS / mTLS |
-| Network | IP whitelist (CIDR, proxy trust) |
-| API | Ed25519 auth, nonce replay protection, rate limiting (IP + per-key) |
-| Authorization | Admin/agent/non-admin roles, per-key scoping |
-| Policy | Two-tier rule engine (blocklist → whitelist), delegation depth limits |
-| Budget | Per-rule spending limits, dynamic budget from simulation |
-| Sandbox | JS rules (20ms timeout, 32MB memory, blocked globals), Solidity rules (disabled cheatcodes) |
-| Alerting | Real-time security alerts (10 alert types, rate-limited) |
-| Audit | Complete request audit, anomaly monitor |
-| Container | Read-only filesystem, seccomp, no-new-privileges, cap_drop ALL |
+1. **能力档只增不跳**:看 ⊂ 用 ⊂ 改策略 ⊂ 全部。不允许「能改策略但不能看」这种洞。
+2. **「写代码」是独立开关**,任何档都可关掉。它是唯一不按包含关系走的。
+3. **G7 对每个身份一视同仁**:谁都不能扩大**自己**的授权。
 
-See [SECURITY.md](SECURITY.md) for the full security model including breach impact analysis.
+⛔ **「改策略」+「写代码」= 实际全权** —— 能写「一律放行」的白名单,就绕开了整个
+策略层。产品上必须把这两档标成一个整体,而不是让主人自己发现。
+⚠️ 现在的「开发」档正好持有这个组合且不需要审批,即 G7 不成立。
+
+### 权限判定属于 domain
+
+⛔ 权限矩阵**不能住在接口层**。住在那里意味着命令行、以及以后任何新接口,都要各自
+再实现一遍同一套判定 —— 而两份判定迟早会在某一条上不一致,不一致的表现是**某条路径
+上放行了本该拒绝的操作**。
+
+## 7. 分叉点
+
+⛔ 这些**没有默认值**。选之前不要往下写模块文档 —— 模块文档会替你把它们定死。
+
+| # | 决策(PRD) | 选 A 会长出 | 选 B 会长出 |
+|---|---|---|---|
+| **F2** | D7 内置条件的定位 | **给人拼**:内置条件要拆到更细的粒度,并需要一套组合语义 | **只给机器生成**:承认「自己写判断逻辑」是主路径,内置条件退成生成器的输出格式 |
+| **F3** | D8 跨链策略 | **一条策略 × 多条链**:新增链只改一处,但「这条链参数不同」要另找地方放 | **每条链一条**:表达直接,但新增链是 N 处改动,且它们会漂 |
+| **F4** | 换钥匙不换身份 | **加一个出口**:身份不动、只换凭据 | **不加**:唯一的路是删身份重建,而那会撞上「名下还有东西」的拦阻 —— 于是实际只能改库 |
+
+---
+
+## 8. 不在这份文档里
+
+- **怎么做** → 模块文档(`docs/modules/`,尚未建立)
+- **为谁解决什么问题** → [`docs/prd.md`](docs/prd.md)
+- **防什么、边界在哪** → [`SECURITY.md`](SECURITY.md)
+- **踩过什么坑** → [`docs/incidents.md`](docs/incidents.md)

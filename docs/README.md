@@ -15,6 +15,7 @@
 | [`prd.md`](prd.md) | **为谁解决什么问题**、必须给出什么保证、哪些事绝不许发生。所有其它文档从这里反推 |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | 系统**应该**长什么样。代码与它不一致 = 缺陷,停下上报 |
 | [`../SECURITY.md`](../SECURITY.md) | 威胁模型、密钥管理、纵深防御 |
+| [`glossary.md`](glossary.md) | **术语**:Signer / Wallet / Rule / Template / Preset / Budget 各是什么 |
 
 ## 运维与配置
 
