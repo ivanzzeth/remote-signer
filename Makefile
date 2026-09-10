@@ -50,11 +50,25 @@ help:
 	@echo "  tidy          Tidy go.mod"
 	@echo "  clean         Remove build artefacts"
 
+## npm_install — 只在依赖真的变了时重装。
+##
+## ⛔ `npm ci` 每次都删掉 node_modules 重装,而 web-e2e 的 pretest 会调用它:
+## 一次不改任何代码的验证跑,也要付两次完整重装的代价。这里用 package-lock
+## 的哈希作为标记文件,锁没变就跳过。
+##
+## ⚠️ 判据仍是 `npm ci` 的语义(严格按锁文件装),不是 `npm install` ——
+## 变的只是「什么时候需要装」,不是「怎么装」。
+define npm_install
+	@cd $(1) && 	  stamp=node_modules/.deps-stamp; 	  want=$$(sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1); 	  if [ ! -f "$$stamp" ] || [ "$$(cat $$stamp 2>/dev/null)" != "$$want" ]; then 	    $(NPM) ci --no-audit --no-fund && printf '%s' "$$want" > "$$stamp"; 	  else 	    echo "deps up to date ($(1))"; 	  fi
+endef
+
 js-client:
-	cd pkg/js-client && $(NPM) ci --no-audit --no-fund && $(NPM) run build
+	$(call npm_install,pkg/js-client)
+	cd pkg/js-client && $(NPM) run build
 
 web: js-client
-	cd web && $(NPM) ci --no-audit --no-fund && $(NPM) run build
+	$(call npm_install,web)
+	cd web && $(NPM) run build
 
 build: build-embed
 
