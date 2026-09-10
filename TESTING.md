@@ -120,7 +120,7 @@ illusion that someone is watching.
 | `arch/10` | `ValidateWithInput` — the direct JS entry point — is called only from `internal/chain/evm/testcase_runner.go`. ⚠️ Not "test cases have one execution path": they have two, answering different questions (the script alone, vs. the whole engine including blocklists and delegation), and `remote-signer validate` deliberately uses the second | template/preset/rule validation each kept its own copy of the test-case loop; two of them substituted variables *before* validating, so **matrix presets validated every test case against the wrong chain** — silently, for months |
 | `arch/20` | Every preset's `template_ids` resolve | A dangling id makes `preset apply` install one rule fewer **without erroring** — it surfaces later as "a signature mysteriously went to `authorizing`" |
 | `arch/30` | `signer` / `test_signer` / `from` hold only allowlisted or structurally-impossible addresses | `b922718` scrubbed operator wallets once; new aori/stargate work reintroduced the same address **23 times**, 2 of them buried inside calldata hex (`…000764602fead…`) where grepping for the address misses them. This submodule is open-source, so a real EOA in a signer field publishes someone's wallet |
-| `arch/05` 🔒 | **AST**, not text: Clean Architecture dependency direction; settings knobs frozen into struct fields (this retired `50-dependency-direction` and `80-settings-single-source` too — one property should not carry two baselines); rule-repo holders and unvalidated writers; `write*` helpers with more than one argument order; **mirror structs** — several structs parsing one config format, compared by serialization tag; **rule-type table** — a declared rule type missing from the one table everything derives from; **engine dispatch** — callers that ask which engine a rule uses; **duplication** — functions whose normalized shape is ≥88% identical | Every grep gate here carries a note about a case its text criterion got wrong, and two were the same mistake: the Solidity ratchet counted `evm_solidity_expression` in comments, and the retired grep gate `40-rule-write-chokepoint` flagged `cmd/archcheck`'s own doc comment for the words `storage.RuleRepository`. Reading declarations instead of lines also widened what is visible — grep saw 3 files breaking dependency direction, the AST saw **13 package edges**, including the `internal/api → internal/config` class it never reported at all. All 13 are now fixed and the baseline is empty |
+| `arch/05` 🔒 | **AST**, not text: Clean Architecture dependency direction; settings knobs frozen into struct fields (this retired `50-dependency-direction` and `80-settings-single-source` too — one property should not carry two baselines); rule-repo holders and unvalidated writers; `write*` helpers with more than one argument order; **mirror structs** — several structs parsing one config format, compared by serialization tag; **rule-type table** — a declared rule type missing from the one table everything derives from; **engine dispatch** — callers that ask which engine a rule uses; **duplication** — functions whose normalized shape is ≥88% identical; **handler path dispatch** — handlers under `internal/api/handler/**` that still slice `r.URL.Path` instead of reading `r.PathValue` | Every grep gate here carries a note about a case its text criterion got wrong, and two were the same mistake: the Solidity ratchet counted `evm_solidity_expression` in comments, and the retired grep gate `40-rule-write-chokepoint` flagged `cmd/archcheck`'s own doc comment for the words `storage.RuleRepository`. Reading declarations instead of lines also widened what is visible — grep saw 3 files breaking dependency direction, the AST saw **13 package edges**, including the `internal/api → internal/config` class it never reported at all. All 13 are now fixed and the baseline is empty |
 | `arch/60` 🔒 | The set of `${var}` substitution implementations only shrinks | Validation uses the strict one (`core/service/substitute.go`, reports errors); evaluation uses the lenient one (`core/rule/effective_config.go`, never errors). One divergence between them = a rule whose test cases are green authorizing something else at runtime |
 | `arch/70` 🔒 | Per-handler `write*` helpers, `RouterConfig` fields and hand-rolled method checks only go down; no new in-handler `HasPermission` | 48 write helpers in **three different argument orders** — swap two and it still compiles (`any` + `int`), shipping errors inside a 200. A permission check in a function body means forgetting one is a bypass, and nothing reports it |
 | `arch/90` | Every `scripts/arch/NN-*.sh` has a row in the table above, every `arch/NN` named here exists, and each script is executable and runnable standalone | This table said "5 gates" while 7 existed — the count was never updated when gates 6 and 7 landed. The damage is not the wrong number: a newcomer reads it as the complete list and never learns `scripts/arch/` exists, so the next gate gets bolted somewhere else. The gate caught itself on its first run |
@@ -197,6 +197,28 @@ implements `SetSize` and `View` the same way because the framework says to. At
 ⚠️ Similar is not duplicated. Two functions can look alike and mean different
 things, and merging those makes the code worse — such a pair belongs in the
 baseline with its reason. What the ratchet forbids is the count growing.
+
+The **handler-path-dispatch** check is the one that measures a migration rather
+than a past incident. 20 functions across 17 files register one mux pattern and
+then fan it out into several logical endpoints by hand, from the request path —
+`handler/evm/rule.go:171-289` serves **12 endpoints behind one pattern**,
+`wallet.go` 8, `settings.go` 18. ⛔ A per-endpoint OpenAPI annotation on such a
+function can only be a guess: there is no one path and no one method to annotate.
+So the annotation work has to wait for the decomposition into Go 1.22+
+method+wildcard patterns, and this ratchet is what makes that decomposition
+monotonic — fix one handler, the baseline shrinks; regress, it goes red.
+
+⭐ It counts the *handler* side deliberately. `router.go:437,445,446` already
+register `{address}` wildcards while `grep -rn "PathValue" internal/` returns **0**
+repo-wide: the wildcards are decorative, because the handlers still slice the
+path themselves. A gate counting registrations would read as partly fixed with
+nothing behind them changed.
+
+`internal/api/middleware/` is out of scope, and that was verified rather than
+assumed: `auth.go:97-100` must sign `EscapedPath()` — the exact bytes the client
+signed, since preset ids contain `/` and arrive as `%2F` while `PathValue`
+returns a decoded segment — and every other middleware read puts the request
+line into the audit log, which has to name the whole path.
 
 ⛔ Widening a layer's `MayImport` to silence a violation is shortening the ruler
 to make someone taller. The baseline is where a violation goes, with its reason.

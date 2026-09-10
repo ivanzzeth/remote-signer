@@ -1,0 +1,63 @@
+# internal/api/handler/** 里自己路由自己的函数(包.接收者.函数名,⛔ 不含行号)。
+#
+# 一条 mux pattern 注册进去,handler 在函数体里用 TrimPrefix/HasSuffix/SplitN
+# 把 r.URL.Path 再切成好几个逻辑端点。最极端的是
+# internal/api/handler/evm/rule.go:171-289 —— **一条 pattern 背后 12 个端点**;
+# wallet.go 8 个,settings.go 18 个。
+#
+# ⛔ 这就是 OpenAPI 注解写不下去的原因:一个还在切 URL.Path 的函数,
+# 它的 @Router / @Summary 只能是猜的 —— 没有唯一的 path,也没有唯一的 method。
+# 所以拆解必须在 spec 之前,而这道门禁盯的是 **handler 一侧**。
+#
+# ⭐ 为什么必须盯 handler 而不是注册侧:router.go:437,445,446 已经用
+# {address} 通配符注册了,而 `grep -rn "PathValue" internal/` 全仓 **0 次** ——
+# 通配符是装饰性的,handler 照样手工切。按注册侧计数的门禁今天就会显示
+# 「修了一部分」,而通配符背后一个字都没变。
+#
+# 每修好一个 handler(按子路径注册 + 改读 r.PathValue),这里少一行;
+# 退回去则棘轮反向报红。⛔ 别往里加行 —— 基线里的每一行都是一个
+# 生成不出 SDK、也写不出诚实注解的端点组。
+#
+# 初始规模(2026-09-10,由 `go run ./cmd/archcheck -list handler-path-dispatch`
+# 生成,⛔ 不是从棘轮 diff 手抄的):**20 个函数,17 个文件**。
+# 草案 docs/drafts/openapi-chain-proposal.md §5 估的是「16 个文件、20–26 条」——
+# 条数落在下沿,文件数多 1(草案漏算了 approval.go 里的第二个 handler:
+# ApprovalHandler 和 PreviewRuleHandler 各有一个 ServeHTTP)。
+#
+# ⚠️ 其中三条不是路径分发,只是把 path 写进日志(evm.SignHandler.ServeHTTP、
+# evm.ApprovalHandler.ServeHTTP 与 evm.PreviewRuleHandler.ServeHTTP 的
+# logger.Warn("...", "path", r.URL.Path))。判据没有为它们开口子:要区分
+# 「只是记日志」和「在分发」,得猜调用上下文,而先赋值给局部变量就能骗过去 ——
+# 松判据比没判据更糟。⭐ 拆解到它们时顺手把日志改成 r.Pattern 或结构化字段,
+# 这几行同样会消失。
+#
+# ⚠️ evm.RPCProxyHandler.ServeHTTP 留在基线里,没有豁免。草案 §2.6 说
+# rpc_proxy「不安全触碰」—— 那是拆解 PR 的排期判断,不是判据的例外:
+# 它的 TrimPrefix(r.URL.Path, "/api/v1/evm/rpc/") 取 chainID,正是 PathValue
+# 该接手的那种读法。豁免它等于用排期理由藏掉一条可修的。
+#
+# ⛔ 不在范围内(判据按包前缀切,理由写在 cmd/archcheck/pathdispatch.go):
+#   - internal/api/middleware/ —— auth.go:97-100 必须对**客户端签过的原始字节**
+#     签名(preset id 含 '/',JS SDK 送 %2F,PathValue 给的是解码后的段,
+#     "修好"它等于把这类请求一律 401);其余全是审计日志里的请求行。
+#   - internal/api/router.go 的 SPA 兜底、internal/web/handler.go 的静态文件。
+internal/api/handler.ACLHandler.ServeHTTP
+internal/api/handler.APIKeyHandler.ServeKeyHTTP
+internal/api/handler.AuditHandler.ServeRequestHTTP
+internal/api/handler.PresetHandler.ServeHTTP
+internal/api/handler.SettingsHandler.ServeHTTP
+internal/api/handler.TemplateHandler.ServeHTTP
+internal/api/handler.TemplateHandler.ServeInstanceHTTP
+internal/api/handler.WalletHandler.ServeWalletHTTP
+internal/api/handler/evm.ApprovalHandler.ServeHTTP
+internal/api/handler/evm.BudgetItemHandler.ServeHTTP
+internal/api/handler/evm.HDWalletHandler.ServeHTTP
+internal/api/handler/evm.PreviewRuleHandler.ServeHTTP
+internal/api/handler/evm.RPCProxyHandler.ServeHTTP
+internal/api/handler/evm.RequestHandler.ServeHTTP
+internal/api/handler/evm.RequestSimulationHandler.ServeHTTP
+internal/api/handler/evm.RuleHandler.ServeHTTP
+internal/api/handler/evm.SignHandler.ServeHTTP
+internal/api/handler/evm.SignerHandler.HandleSignerAction
+internal/api/handler/evm.SignerHandler.HandleWalletSigners
+internal/api/handler/evm.TransactionsHandler.ServeHTTP

@@ -102,6 +102,12 @@ var checks = []checkDef{
 		Run:      checkMirrorStructs,
 	},
 	{
+		Name:     "handler-path-dispatch",
+		Baseline: "handler-path-dispatch.txt",
+		Hint:     "Register the sub-path as its own mux pattern (Go 1.22 `POST /api/v1/evm/rules/{id}/approve`) and read `r.PathValue(\"id\")`. ⛔ A handler still slicing `r.URL.Path` fans one pattern out into many logical endpoints — handler/evm/rule.go serves 12 behind one — so a per-endpoint OpenAPI annotation on it can only be a guess. Fix one handler and this baseline shrinks by a line.",
+		Run:      checkHandlerPathDispatch,
+	},
+	{
 		Name:     "respond-shape",
 		Baseline: "respond-shape.txt",
 		Hint:     "One argument order for all of them, then delete the per-handler copies in favour of a shared respond package.",
