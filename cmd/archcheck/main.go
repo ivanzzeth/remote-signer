@@ -78,6 +78,12 @@ var checks = []checkDef{
 		Run:      checkRuleWrite,
 	},
 	{
+		Name:     "mirror-structs",
+		Baseline: "mirror-structs.txt",
+		Hint:     "Give the format one struct and let the other packages alias it (`type X = pkg.X`). A mirror that is merely brought back in step drifts again the next time a field is added.",
+		Run:      checkMirrorStructs,
+	},
+	{
 		Name:     "respond-shape",
 		Baseline: "respond-shape.txt",
 		Hint:     "One argument order for all of them, then delete the per-handler copies in favour of a shared respond package.",

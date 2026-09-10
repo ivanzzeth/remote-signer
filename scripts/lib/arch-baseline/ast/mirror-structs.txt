@@ -1,0 +1,13 @@
+# 同一份 YAML 格式被多个结构体各解析一份，字段集已经不一致。
+# 每一行都是「某个 key 只有一边看得见」——看不见的那边静默丢弃它。
+# 三次真实事故都长这样，详见 cmd/archcheck/mirrors.go 顶部。
+# ⛔ 修的方向是让格式只有一个结构体，其余包用 type X = pkg.X 别名，
+#    而不是把缺的字段补齐——补齐只能撑到下次有人加字段。
+internal/api.ServerConfig <-> internal/config.ServerConfig
+internal/cli/validate.RuleConfig <-> internal/config.RuleConfig
+internal/cli/validate.RuleConfig <-> internal/config.TemplateConfig
+internal/cli/validate.TemplateFile <-> internal/core/registry.templateYAML
+internal/cli/validate.TemplateVarConfig <-> internal/core/types.TemplateVariable
+internal/config.TemplateConfig <-> internal/core/registry.templateYAML
+internal/config.TemplateVarConfig <-> internal/core/types.TemplateVariable
+internal/config.templateFileContent <-> internal/core/registry.templateYAML
