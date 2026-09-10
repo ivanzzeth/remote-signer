@@ -21,7 +21,26 @@
 | S1② `/api/v1/` JSON 404 兜底 | ✅ 已落地 | `c17665b` `97e4a29` |
 | S1③ maximal-config 冲突测试 | ✅ 已落地 | `8175a6b` |
 | S2 wallet 测试走真 mux | ✅ 已落地 | `e9cdbbf` |
-| S3 起 | ⬜ 未开始 | |
+| （插入）每条路由的权限上棘轮 | ✅ 已落地 | `309065a` |
+| S3 wallet 拆 8 条（**范本**） | ✅ 已落地 | `cb1a624` |
+| S4 hd-wallets 4 条 + api-keys 6 条 | ✅ 已落地 | `8e82a82` |
+| （插入）signers 的动词洞（GET 能解锁） | ✅ 已修 | `6d30ba1` |
+| S4 signers 拆 11 条 | ✅ 已落地 | `2daf1f0` |
+| （插入）blackbox 层吃缓存的假绿 | ✅ 已修 | `2daf1f0` |
+| S5 settings 拆 18 条 | ✅ 已落地 | `0c660bd` |
+| S6 templates + instances 闭包 | ⬜ 未开始 | |
+| S7 requests 闭包 | ⬜ 未开始 | |
+| S8 rule.go 12 条（⛔ 切 3 个 PR） | ⬜ 未开始 | |
+| S9 起（swag / SDK 生成 / 门禁 C） | ⬜ 未开始 | |
+
+### ⏸ 已挂起、**不要顺手清理**的东西
+
+| 项 | 状态 |
+|---|---|
+| **`SignerHandler.HandleWalletSigners`** | ⛔ 没有任何路由注册它，但**不是死代码**——2026-09-10 决定：它是**还没接上的功能**，后续要接路由 **且 Web UI 要调这个 API**。已从 `signer.go` 挪到 `signer_wallet.go` 并留注释。⛔ 别删、别在基线里当债务消掉。接的时候按 AGENTS.md 的「变更影响面检查」表过一遍 SDK / MCP / Skills。 |
+| **hd-wallets 的 RBAC 缺口** | `PermReadHDWallets` / `PermCreateHDWallet` 存在且按角色授予，但四条 hd-wallet 路由都挂 `AuthenticatedOnly(hdWalletGap)`。⛔ 是被刻意推迟的**安全决定**，单独 PR。 |
+| **8 条「写操作挂只读权限」** | `route-mutating-perm` 基线里的 8 行。同上：能被看见和被改掉是两件事。 |
+| **`internal/cli/admin/settings_cmd.go:22-25` 帮助文本陈旧** | 写着「Available groups today: security」，实际九个 group 早就都有了。 |
 
 ### 实测订正 —— 以下几条是**量过的**，不是重读原文得出的
 
