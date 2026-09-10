@@ -14,6 +14,7 @@
 | [`prd.md`](prd.md) | **为谁解决什么问题**、必须给出什么保证、哪些事绝不许发生 |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | 系统**应该**长什么样。代码与它不一致 = 缺陷,停下上报 |
 | [`../SECURITY.md`](../SECURITY.md) | 威胁模型、密钥管理、纵深防御 |
+| [`product-forms.md`](product-forms.md) | **五种壳**(内嵌/独立 Web UI · TUI · 扩展 · 桌面)、profile 切后端、UI 草图 |
 
 ## 动手前
 
