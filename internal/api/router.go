@@ -13,6 +13,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/api/respond"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
@@ -458,10 +459,23 @@ func (r *Router) setupRoutes() error {
 	// which is a resource-scoped decision the route cannot make. Same reason
 	// approval.go keeps its check; see the note in
 	// scripts/lib/arch-baseline/inline-permission-checks.txt.
-	for _, action := range []string{"unlock", "lock", "approve", "transfer"} {
-		r.handle("POST /api/v1/evm/signers/{address}/"+action,
-			Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
-	}
+	//
+	// ⛔ Written out four times rather than as `for _, action := range …` with a
+	// concatenated pattern. The loop registered exactly these four routes, but
+	// the pattern string only existed at run time: anything reading the route
+	// table statically — the archcheck gates here today, an OpenAPI annotation
+	// extractor later — saw one unresolvable pattern (`…/{address}/*`) instead
+	// of four endpoints. A route table that is not readable without running the
+	// program cannot be gated on. Same registrations, same permission, same
+	// handler; only their visibility to a reader changes.
+	r.handle("POST /api/v1/evm/signers/{address}/unlock",
+		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
+	r.handle("POST /api/v1/evm/signers/{address}/lock",
+		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
+	r.handle("POST /api/v1/evm/signers/{address}/approve",
+		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
+	r.handle("POST /api/v1/evm/signers/{address}/transfer",
+		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
 	r.handle("/api/v1/evm/signers/", Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
 
 	// HD wallet management routes
@@ -704,6 +718,10 @@ func (r *Router) setupRoutes() error {
 		r.handle("POST /api/v1/registry/refresh", Permitted(middleware.PermApplyPreset), refreshHandler)
 	}
 
+	// ⭐ The net under the whole API namespace. Registered before the SPA
+	// catch-all below, which is what it exists to keep API clients out of.
+	r.registerAPIFallback()
+
 	// Web UI catch-all. Must be registered LAST so every explicit
 	// /api/v1/* and /health-style route wins ServeMux's longest-prefix
 	// match. The handler internally short-circuits when
@@ -723,6 +741,83 @@ func (r *Router) setupRoutes() error {
 	}
 
 	return nil
+}
+
+// registerAPIFallback installs the least-specific route under /api/v1/, whose
+// only job is to answer JSON where the SPA catch-all would answer HTML.
+//
+// # What it is for (proposal §2.3, row 1)
+//
+// `/api/v1/evm/rules/` is a prefix pattern, so a deep path like
+// /api/v1/evm/rules/a/b/c/d reaches handler/evm/rule.go today and comes back as
+// 400 {"error":"invalid rule_id format"}. Once that handler is decomposed into
+// method+wildcard patterns (proposal S3–S8) such a path matches nothing under
+// /api/v1/ and falls through to `/` — the SPA — which serves text/html with a
+// 200 to a client that is parsing JSON. That is a client-visible regression
+// whose error message would have nothing to do with its cause, so the net goes
+// in *before* the decomposition can trip it, not with it.
+//
+// # Why it shadows nothing
+//
+// Go's ServeMux prefers the more specific pattern, and "more specific" means
+// "matches a strict subset". Every other /api/v1 pattern — literal, method
+// scoped, wildcard, or a longer prefix — is a strict subset of "/api/v1/", so
+// each of them still wins and no pair overlaps without one containing the
+// other (which is the shape that would panic at NewRouter; proposal §2.2).
+// ⚠️ In particular /api/v1/evm/rules/ keeps answering its own 400: this route
+// only ever sees paths that no other pattern claims. Pinned by
+// TestAPIFallback_DoesNotShadowRegisteredRoutes and
+// TestAPIFallback_RulesPrefixStillAnswersItsOwn400.
+//
+// ⚠️ One thing it does change, and it is not the 404: a request whose path
+// matches a method-scoped route with the wrong method (GET on
+// POST /api/v1/evm/simulate). The mux answers 405 only when *nothing* matches;
+// this pattern matches, so such a request now gets 404 here. ⛔ In a daemon
+// that is not a change — the SPA catch-all already matched those requests and
+// returned HTML 200, so there was no 405 to lose. It differs only in a Router
+// built without a SettingsManager, i.e. in tests. Proposal §2.3's "405 语义不变"
+// is true of the decomposition itself and stops being true once this net
+// exists; that trade is deliberate and is the cheaper of the two.
+func (r *Router) registerAPIFallback() {
+	// ⚠️ AuthenticatedOnly, not Public, and the difference is what an
+	// unauthenticated caller learns.
+	//
+	// Today an unauthenticated request to an unknown /api/v1 path is served by
+	// the SPA catch-all: HTML, 200, no credential required. So *neither*
+	// constructor would widen anything relative to today. What separates them
+	// is what survives when the SPA is disabled (settings.web.enabled=false) or
+	// absent (SettingsManager nil — the route below is not registered at all):
+	// Public would leave a credential-free oracle over the entire API
+	// namespace, answering 404 for a path that has no route and 401 for one
+	// that does, which is a map of the route table for anyone who can reach the
+	// port. AuthenticatedOnly makes both answer 401, and the authenticated
+	// client — the only kind with business under /api/v1 — still gets the JSON
+	// 404 this route was added to give it.
+	//
+	// It carries no permission because there is nothing behind it to hold a
+	// permission over: every middleware.Perm* names something a caller may do,
+	// and reaching this route means the caller may do nothing, on any of them.
+	// ⛔ That is the honest reason, not "internal endpoint".
+	r.handle("/api/v1/", AuthenticatedOnly(
+		"the least-specific /api/v1/ pattern, and it is not a resource: it answers JSON 404 for API paths no other "+
+			"pattern claims, so a client that parses JSON stops receiving the SPA's text/html when a path stops "+
+			"matching (proposal §2.3 row 1). No permission, because there is nothing behind it to hold one over — "+
+			"a caller who reaches this route may do nothing at all. ⚠️ AuthenticatedOnly rather than Public: today "+
+			"these paths are served unauthenticated by the `/` catch-all, so neither choice widens anything, but "+
+			"Public would leave an unauthenticated oracle over the whole namespace (404 = no such route, 401 = there "+
+			"is one) for daemons whose Web UI is off or absent. Requiring a key makes both 401."),
+		http.HandlerFunc(r.apiNotFound))
+}
+
+// apiNotFound is the fallback's body: the repo's standard error envelope
+// ({"error": ...}, respond.Error), the same one every handler under /api/v1
+// already writes, so a client needs no second parser for it.
+//
+// ⚠️ It deliberately does not echo the requested path. The message is a
+// constant: an unmatched path is attacker-controlled input and reflecting it
+// buys the caller nothing it did not already type.
+func (r *Router) apiNotFound(w http.ResponseWriter, _ *http.Request) {
+	respond.Error(w, "not found: no such API endpoint", http.StatusNotFound, r.logger)
 }
 
 // withAuth wraps a handler with authentication middleware

@@ -78,6 +78,17 @@ authenticated-only POST /api/v1/evm/hd-wallets/{address}/derive
 # 每一个 eth_sign* 都不在表里,所以非 admin key 不能拿它绕开 /api/v1/evm/sign。
 authenticated-only POST /api/v1/evm/rpc/
 
+# /api/v1 的兜底,**不是一个资源**:任何别的 pattern 都不认领的 API 路径
+# 由它回 JSON 404,免得落到 `/` 的 SPA catch-all 上、给一个在解析 JSON 的
+# 客户端回 text/html(提案 §2.3 第 1 行)。⛔ 它没有权限可挂 —— 每个
+# middleware.Perm* 都命名了「调用者可以做的某件事」,而走到这条路由意味着
+# 它什么都做不了。
+# ⚠️ 选 authenticated-only 而不是 public:今天这些路径本来就由 `/` 无凭据
+# 提供,所以两种选法都不扩大暴露面;但 public 会在 Web UI 关掉或没装
+# (SettingsManager 为 nil,`/` 根本不注册)的部署上留下一个无凭据的探针 ——
+# 404 = 没有这条路由,401 = 有,等于把路由表白送。要 key 之后两者都是 401。
+authenticated-only /api/v1/
+
 # 只读 + 逐行:handler 拿 sign_request.api_key_id 和调用者做 join,
 # 非 admin 只看得到自己发起的那些;哪些行能看不是路由能做的判断。
 authenticated-only GET /api/v1/evm/transactions

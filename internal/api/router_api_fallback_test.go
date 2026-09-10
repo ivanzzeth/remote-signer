@@ -1,0 +1,244 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
+	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
+)
+
+// ---------- the /api/v1/ JSON-404 net (proposal §2.3 row 1, step S1②) ----------
+//
+// ⚠️ What these tests can and cannot reach, said up front so the names are not
+// read as promising more than they check.
+//
+// setupRoutes cannot run in this layer: it builds a SignHandler, which requires
+// a live *service.SignService and a SignerAccessService, which require repos and
+// a database. So the registration under test is reached through
+// registerAPIFallback — the *production* function, holding the production
+// pattern, RouteAuth and handler — rather than through a copy of its arguments
+// written into a fixture. The sibling patterns each test registers alongside it
+// ARE copies of what setupRoutes registers, and what they prove is a property of
+// http.ServeMux's precedence given those patterns, not that setupRoutes still
+// contains them. Proving the latter needs the maximal-config router test, which
+// is item ③ of the same step and is not here yet.
+//
+// ⛔ Nothing below asserts a permission or an auth mode as *correct*; they are
+// asserted only as *unchanged*, which is the property a refactor owes.
+
+// ⚠️ Named for this file rather than shared: a package-level testLogger already
+// exists in router_maximal_config_test.go, and two test files reaching for one
+// helper name is how a merge conflict turns into a compile error.
+func fallbackTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// newChainedTestRouter is newTestRouter plus the two fields the authenticated
+// middleware chain dereferences. Still no database, no verifier: an
+// unauthenticated request is refused by AuthMiddleware before either is read.
+func newChainedTestRouter() *Router {
+	lg := fallbackTestLogger()
+	return &Router{
+		mux:         http.NewServeMux(),
+		routeAuth:   map[string]RouteAuth{},
+		rateLimiter: middleware.NewRateLimiter(lg),
+		logger:      lg,
+	}
+}
+
+// TestAPIFallback_DoesNotShadowRegisteredRoutes is the "prove it shadows
+// nothing" half. It asks the mux the same question Router.Handler asks on every
+// request — which pattern would you dispatch this to? — with the fallback
+// registered alongside patterns copied from setupRoutes.
+//
+// ⚠️ The paths that must NOT reach the fallback are the interesting rows: a
+// prefix route, a method-scoped literal, a wildcard route, and the four signer
+// actions this same change expanded out of a loop.
+func TestAPIFallback_DoesNotShadowRegisteredRoutes(t *testing.T) {
+	r := newChainedTestRouter()
+
+	// Copies of live registrations (router.go), one of each shape.
+	r.handle("POST /api/v1/evm/sign", Public("test fixture"), okHandler("sign"))
+	r.handle("/api/v1/evm/rules", Public("test fixture"), okHandler("rules"))
+	r.handle("/api/v1/evm/rules/", Public("test fixture"), okHandler("rules-prefix"))
+	r.handle("POST /api/v1/evm/rules/{id}/budgets/reset", Public("test fixture"), okHandler("budget-reset"))
+	r.handle("GET /api/v1/evm/signers", Public("test fixture"), okHandler("signers"))
+	r.handle("POST /api/v1/evm/signers/{address}/unlock", Public("test fixture"), okHandler("unlock"))
+	r.handle("POST /api/v1/evm/signers/{address}/transfer", Public("test fixture"), okHandler("transfer"))
+	r.handle("/api/v1/evm/signers/", Public("test fixture"), okHandler("signers-prefix"))
+	r.handle("GET /health", Public("test fixture"), okHandler("health"))
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("spa"))
+
+	// The production registration. If this panicked — the pattern-conflict shape
+	// of proposal §2.2 — the test would fail here, at NewRouter's equivalent.
+	r.registerAPIFallback()
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+		want   string
+	}{
+		{"literal method-scoped route", http.MethodPost, "/api/v1/evm/sign", "POST /api/v1/evm/sign"},
+		{"collection route", http.MethodGet, "/api/v1/evm/rules", "/api/v1/evm/rules"},
+		{"prefix route keeps deep paths", http.MethodGet, "/api/v1/evm/rules/a/b/c/d", "/api/v1/evm/rules/"},
+		{"prefix route keeps one segment", http.MethodGet, "/api/v1/evm/rules/rule-1", "/api/v1/evm/rules/"},
+		{"wildcard sub-path", http.MethodPost, "/api/v1/evm/rules/rule-1/budgets/reset", "POST /api/v1/evm/rules/{id}/budgets/reset"},
+		{"signer collection", http.MethodGet, "/api/v1/evm/signers", "GET /api/v1/evm/signers"},
+		{"signer action unlock", http.MethodPost, "/api/v1/evm/signers/0xabc/unlock", "POST /api/v1/evm/signers/{address}/unlock"},
+		{"signer action transfer", http.MethodPost, "/api/v1/evm/signers/0xabc/transfer", "POST /api/v1/evm/signers/{address}/transfer"},
+		{"signer prefix still serves the rest", http.MethodGet, "/api/v1/evm/signers/0xabc/access", "/api/v1/evm/signers/"},
+		{"non-API route is untouched", http.MethodGet, "/health", "GET /health"},
+		{"SPA still owns everything outside /api/v1", http.MethodGet, "/dashboard/rules", "/"},
+
+		// ⭐ The rows the net exists for: paths under /api/v1 that no pattern
+		// claims. Before this change every one of them landed on "/".
+		{"unknown API path", http.MethodGet, "/api/v1/nope", "/api/v1/"},
+		{"unknown API sub-tree", http.MethodGet, "/api/v1/evm/does-not-exist/deep/path", "/api/v1/"},
+		{"decomposed rules deep path", http.MethodDelete, "/api/v1/evm/rulez/a/b/c/d", "/api/v1/"},
+		{"the namespace root itself", http.MethodGet, "/api/v1/", "/api/v1/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pattern := r.mux.Handler(httptest.NewRequest(tc.method, tc.target, nil))
+			if pattern != tc.want {
+				t.Fatalf("%s %s dispatches to %q, want %q", tc.method, tc.target, pattern, tc.want)
+			}
+		})
+	}
+}
+
+// TestAPIFallback_ReplacesTheSPAsHTMLForAPIPaths is the negative half, run in
+// both directions in one test: the same request against a router without the
+// fallback and with it. Without it the API client receives the SPA's HTML;
+// with it, it does not.
+//
+// ⚠️ The status differs between the two arms for a second reason, and it is the
+// point of AuthenticatedOnly: the request carries no credential, so the chain
+// stops at 401 rather than reaching the 404 body. Either way the answer is no
+// longer HTML, which is what a JSON client breaks on. The 404 body itself is
+// pinned by TestAPIFallback_BodyIsTheStandardErrorEnvelope.
+func TestAPIFallback_ReplacesTheSPAsHTMLForAPIPaths(t *testing.T) {
+	const spaBody = "<!doctype html><html><body>remote-signer web ui</body></html>"
+
+	withSPA := func() *Router {
+		r := newChainedTestRouter()
+		r.handle("POST /api/v1/evm/sign", Public("test fixture"), okHandler("sign"))
+		r.handle("/", PublicUnwrapped("test fixture"), okHandler(spaBody))
+		return r
+	}
+
+	req := func() *http.Request {
+		return httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/a/b/c/d", nil)
+	}
+
+	// Before: the catch-all answers, with HTML, at 200.
+	before := httptest.NewRecorder()
+	withSPA().Handler().ServeHTTP(before, req())
+	if before.Code != http.StatusOK || !strings.Contains(before.Body.String(), "<html") {
+		t.Fatalf("baseline arm answered %d %q — this test's premise (the SPA swallows unmatched API paths) no longer holds",
+			before.Code, before.Body.String())
+	}
+
+	// After: same request, same router plus the fallback.
+	r := withSPA()
+	r.registerAPIFallback()
+	after := httptest.NewRecorder()
+	r.Handler().ServeHTTP(after, req())
+
+	if strings.Contains(after.Body.String(), "<html") || strings.Contains(after.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("an unmatched API path still answers HTML: %d %q content-type=%q",
+			after.Code, after.Body.String(), after.Header().Get("Content-Type"))
+	}
+	if after.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated request to an unmatched API path answered %d, want 401 — "+
+			"the fallback is AuthenticatedOnly, so the chain must refuse before the 404 body", after.Code)
+	}
+}
+
+// TestAPIFallback_BodyIsTheStandardErrorEnvelope pins the shape a client
+// parses: respond.Error's {"error": ...} under application/json, the same
+// envelope the 83 other JSON writes in this API use. ⛔ A second shape here
+// would mean a client needs a second parser for the one response it did not
+// ask for.
+func TestAPIFallback_BodyIsTheStandardErrorEnvelope(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newChainedTestRouter().apiNotFound(rec, httptest.NewRequest(http.MethodGet, "/api/v1/nope", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("content-type %q, want application/json", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body %q is not JSON: %v", rec.Body.String(), err)
+	}
+	if len(body) != 1 || body["error"] == "" {
+		t.Fatalf("body = %v, want exactly one key \"error\" with a message", body)
+	}
+	// ⛔ The path must not be reflected back; see the note on apiNotFound.
+	if strings.Contains(body["error"], "nope") {
+		t.Fatalf("the 404 message echoes the requested path: %q", body["error"])
+	}
+}
+
+// TestAPIFallback_RulesPrefixStillAnswersItsOwn400 is the one the task calls
+// for by name, and it runs the real handler/evm/rule.go — not a marker — behind
+// the real patterns, with the fallback registered.
+//
+// ⚠️ Registered as Public here purely so the request reaches the handler without
+// a signed API key; the live registration is Permitted(PermListRules) and this
+// test says nothing about that. What it pins is that a deep path still reaches
+// RuleHandler and still comes back 400 JSON, and that a real endpoint next to it
+// still reaches its handler and answers 200.
+func TestAPIFallback_RulesPrefixStillAnswersItsOwn400(t *testing.T) {
+	ruleHandler, err := evmhandler.NewRuleHandler(storage.NewMemoryRuleRepository(), fallbackTestLogger())
+	if err != nil {
+		t.Fatalf("building the real rule handler: %v", err)
+	}
+
+	r := newChainedTestRouter()
+	r.handle("/api/v1/evm/rules", Public("test fixture"), ruleHandler)
+	r.handle("/api/v1/evm/rules/", Public("test fixture"), ruleHandler)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<html>spa</html>"))
+	r.registerAPIFallback()
+
+	admin := &types.APIKey{ID: "admin-key", Name: "Admin", Role: types.RoleAdmin, Enabled: true}
+	do := func(method, target string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, target, nil)
+		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, admin))
+		rec := httptest.NewRecorder()
+		r.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	// ⭐ The behaviour proposal §2.3 row 1 says must not change.
+	deep := do(http.MethodGet, "/api/v1/evm/rules/a/b/c/d")
+	if deep.Code != http.StatusBadRequest {
+		t.Fatalf("deep rules path answered %d %q, want 400 from rule.go — the fallback shadowed the prefix route",
+			deep.Code, deep.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(deep.Body.Bytes(), &body); err != nil {
+		t.Fatalf("deep rules path body %q is not JSON: %v", deep.Body.String(), err)
+	}
+	if body["error"] != "invalid rule_id format" {
+		t.Fatalf("deep rules path said %q, want rule.go's own \"invalid rule_id format\"", body["error"])
+	}
+
+	// A known real endpoint still reaches its handler through the same mux.
+	list := do(http.MethodGet, "/api/v1/evm/rules")
+	if list.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/evm/rules answered %d %q, want 200", list.Code, list.Body.String())
+	}
+}

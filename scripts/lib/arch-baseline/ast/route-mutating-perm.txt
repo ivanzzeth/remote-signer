@@ -17,11 +17,20 @@
 #
 # ---------- 清单 ----------
 
-# unlock / lock / approve / transfer 四条(注册处是一个 for 循环拼接的 pattern,
-# `*` 就是那个循环变量)。挂 PermReadSigners 是**有意的**:真正的判断是
-# 资源域的 —— 这把 key 是不是**这个** signer 的 owner —— handler 拿被操作的
-# 那个 signer 去查(handler/evm/signer_locking.go:24-38 的 IsOwner:不是 owner
-# 回 403,连 ownership 记录都没有回 404),路由做不了这个判断,
+# unlock / lock / approve / transfer 四条。挂 PermReadSigners 是**有意的**:
+# 真正的判断是资源域的 —— 这把 key 是不是**这个** signer 的 owner —— handler
+# 拿被操作的那个 signer 去查(handler/evm/signer_locking.go:24-38 的 IsOwner:
+# 不是 owner 回 403,连 ownership 记录都没有回 404),路由做不了这个判断,
 # 路由权限在这里只是外面那道门。
 # ⚠️ 留在基线里不代表它是对的,代表**改它是一个安全决定**,不是重构。
-POST /api/v1/evm/signers/{address}/*
+#
+# ⭐ 2026-09-10:这四行以前是**一行** `POST /api/v1/evm/signers/{address}/*` ——
+# 注册处是 `for _, action := range {...}` 拼出来的 pattern,`*` 就是那个循环
+# 变量,门禁**逐条看不见它们**。展开成四条字面量(提案 S1①)之后,四个
+# 「写操作挂只读权限」第一次以自己的名字出现在这张表里。⛔ 展开那个 PR
+# **没有改权限**,四条仍然是 PermReadSigners:能被看见和被改掉是两件事,
+# 后者是安全决定,按提案 §2.5 单独走。
+POST /api/v1/evm/signers/{address}/approve
+POST /api/v1/evm/signers/{address}/lock
+POST /api/v1/evm/signers/{address}/transfer
+POST /api/v1/evm/signers/{address}/unlock
