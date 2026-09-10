@@ -67,55 +67,17 @@ type Config struct {
 	DSN string `yaml:"dsn"`
 }
 
-// NewDB creates a new database connection with auto-migration
+// NewDB opens the database with logging silenced, which is what every caller
+// outside the CLI's verbose mode wants.
+//
+// ⚠️ This was a 50-line copy of NewDBWithLogger differing in one argument —
+// logger.Silent instead of the caller's level. Everything else was the same
+// sequence of steps: detect dialect, open, tune the pool, auto-migrate, run
+// versioned migrations, backfill foreign keys, repair legacy timestamps. A
+// migration step added to one and not the other is a database that is set up
+// differently depending on which constructor the binary happened to call.
 func NewDB(cfg Config) (*gorm.DB, error) {
-	if cfg.DSN == "" {
-		return nil, fmt.Errorf("database DSN is required")
-	}
-
-	dialector, err := detectDialector(cfg.DSN)
-	if err != nil {
-		return nil, fmt.Errorf("failed to detect database type: %w", err)
-	}
-
-	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-		NowFunc: func() time.Time {
-			return time.Now().UTC()
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
-	}
-
-	if err := tuneSQLite(db, cfg.DSN); err != nil {
-		return nil, fmt.Errorf("failed to tune connection pool: %w", err)
-	}
-
-	if err := autoMigrate(db); err != nil {
-		return nil, err
-	}
-
-	// Run versioned SQL migrations (e.g. widen columns) from internal/storage/migrations/<dialect>/
-	if err := runMigrations(db, cfg.DSN); err != nil {
-		return nil, fmt.Errorf("migrations: %w", err)
-	}
-
-	// Backfill FK constraints on existing SQLite databases. GORM's
-	// AutoMigrate leaves existing tables untouched and only adds FKs on
-	// fresh CREATE TABLE statements. ensureForeignKeys recreates tables
-	// that are missing their FK, matching what the GORM struct tags
-	// declare. Postgres handles this via standard ALTER TABLE ADD
-	// CONSTRAINT migration files.
-	if err := ensureForeignKeys(db, cfg.DSN); err != nil {
-		return nil, fmt.Errorf("ensure foreign keys: %w", err)
-	}
-
-	if err := repairLegacyTimestamps(db); err != nil {
-		return nil, fmt.Errorf("repair legacy timestamps: %w", err)
-	}
-
-	return db, nil
+	return NewDBWithLogger(cfg, logger.Silent)
 }
 
 // NewDBWithLogger creates a new database connection with custom logger
@@ -147,10 +109,17 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	// Versioned SQL migrations (e.g. widen columns) from
+	// internal/storage/migrations/<dialect>/
 	if err := runMigrations(db, cfg.DSN); err != nil {
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
 
+	// Backfill FK constraints on existing SQLite databases. GORM's AutoMigrate
+	// leaves existing tables untouched and only adds FKs on fresh CREATE TABLE
+	// statements. ensureForeignKeys recreates tables that are missing their FK,
+	// matching what the GORM struct tags declare. Postgres handles this via
+	// standard ALTER TABLE ADD CONSTRAINT migration files.
 	if err := ensureForeignKeys(db, cfg.DSN); err != nil {
 		return nil, fmt.Errorf("ensure foreign keys: %w", err)
 	}

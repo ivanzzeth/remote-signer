@@ -1,0 +1,34 @@
+# 形状高度相似的函数对(归一化后 ≥88%,各 ≥30 行)。
+#
+# ⚠️ 相似不等于重复。两个函数可以长得像而意思不同,把那种合并会更糟 ——
+#    这种对就留在这份基线里,写清理由。棘轮禁止的是**数量变多**。
+#
+# 判据怎么定的(实测,不是拍脑袋):
+#   最小行数 15 → 145 对,其中 31% 是 TUI 框架样板(SetSize/View/newXModel,
+#                 Bubble Tea 每个 model 都得那样写,结构相同是设计如此)
+#   最小行数 20 → 49 对,24% 样板
+#   最小行数 25 → 11 对,18% 样板
+#   最小行数 30 →  7 对, 0% 样板   ← 选它
+# 归一化会抹掉标识符、字符串和数字,所以「改了循环变量名的副本」照样算 100%。
+#
+# 这道门禁上线当天,靠它之前的手工扫描抓到的:
+#   - AddDelegationTargets 三份,其中一份把无法解析的配置读成「不委托」,
+#     隔离引擎因此跳过整条委托链,给出一个假的 pass
+#   - PresetRegistry.Sync / TemplateRegistry.Sync 只差循环变量名和日志名词,
+#     而那段代码会**删目录行**
+#   - Solidity 四个 shape 各写一套生成器和求值器,两个 typed_data 还各抄了
+#     同样 7 个 EIP-712 域绑定
+#
+# 2026-09-10:7 → 6。NewDB 是 NewDBWithLogger 的 50 行副本,只差一个
+#   logger.Silent —— 而两份里都写着「检测方言 → 打开 → 调连接池 → automigrate
+#   → 跑版本化迁移 → 补外键 → 修历史时间戳」。哪天有人往其中一份加一步迁移,
+#   数据库就取决于二进制调了哪个构造函数。
+#
+# ⛔ 收敛方向是「同一个形状只留一份实现,两边都用它」。
+#
+internal/api/handler/evm/budget.go:(*BudgetListHandler).annotate <-> internal/api/handler/evm/budget.go:(*BudgetItemHandler).annotate
+internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPCUnchecked <-> internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPC
+internal/core/registry/file_source.go:(*FileTemplateSource).List <-> internal/core/registry/file_source.go:(*FilePresetSource).List
+internal/notify/pushover_client.go:(*PushoverClient).SendToUsers <-> internal/notify/slack_client.go:(*SlackClient).SendToChannels
+internal/notify/slack_client.go:(*SlackClient).SendToChannels <-> internal/notify/telegram_client.go:(*TelegramClient).SendToChats
+internal/storage/preset_repo.go:(*GormPresetRepository).Upsert <-> internal/storage/template_repo.go:(*GormTemplateRepository).Upsert

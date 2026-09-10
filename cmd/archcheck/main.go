@@ -78,6 +78,12 @@ var checks = []checkDef{
 		Run:      checkRuleWrite,
 	},
 	{
+		Name:     "duplication",
+		Baseline: "duplication.txt",
+		Hint:     "Give the shape one implementation and let both callers use it. ⚠️ Similar is not duplicated — a pair that only looks alike belongs in the baseline with the reason, not merged.",
+		Run:      checkDuplication,
+	},
+	{
 		Name:     "rule-type-table",
 		Baseline: "rule-type-table.txt",
 		Hint:     "Add the constant to types.ruleTypes. ⛔ This baseline stays empty — it is a two-line invariant, not debt.",
