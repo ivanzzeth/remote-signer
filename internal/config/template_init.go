@@ -248,7 +248,7 @@ func loadTemplateFromFileStatic(fileCfg TemplateConfig, configDir string, logger
 	// Do NOT apply ExpandEnvWithDefaults here: template files use ${var} for template
 	// variables (substituted later in expandInstanceRule). Expanding env vars would
 	// replace those with empty or env values and break substitution.
-	var fileContent templateFileContent
+	var fileContent TemplateFile
 	if err := yaml.Unmarshal(data, &fileContent); err != nil {
 		return nil, fmt.Errorf("failed to parse template file '%s': %w", path, err)
 	}
@@ -256,13 +256,19 @@ func loadTemplateFromFileStatic(fileCfg TemplateConfig, configDir string, logger
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal template rules: %w", err)
 	}
+	// The file's own metadata wins where it is set, which is what
+	// LoadTemplatesFromDir's derived name is a fallback for. Enabled is the
+	// exception: either side switching the template off switches it off, so an
+	// operator disabling it in config.yaml is not overridden by the file.
 	result := TemplateConfig{
-		Name:           fileCfg.Name,
-		Description:    fileCfg.Description,
+		Name:           firstNonEmpty(fileContent.Name, fileCfg.Name),
+		Description:    firstNonEmpty(fileContent.Description, fileCfg.Description),
+		ChainType:      fileContent.ChainType,
 		Variables:      fileContent.Variables,
+		VariableGroups: fileContent.VariableGroups,
 		BudgetMetering: fileContent.BudgetMetering,
 		TestVariables:  fileContent.TestVariables,
-		Enabled:        fileCfg.Enabled,
+		Enabled:        fileCfg.Enabled && (fileContent.Enabled == nil || *fileContent.Enabled),
 		Config: map[string]interface{}{
 			"rules_json": string(rulesJSON),
 		},
@@ -282,9 +288,43 @@ func (i *TemplateInitializer) expandFileTemplates(templates []TemplateConfig) ([
 	return ExpandTemplatesFromFiles(templates, i.configDir, i.logger)
 }
 
-// templateFileContent represents the YAML structure of a template file
-type templateFileContent struct {
-	Variables      []TemplateVarConfig    `yaml:"variables"`
+// TemplateFile is the YAML structure of an external template file, and the one
+// struct the config and CLI paths both read it with.
+//
+// ⚠️ internal/core/registry.templateYAML parses the same file for the daemon's
+// registry, with `rules` left as []map[string]any because it stores raw bytes
+// and never expands them. That difference is deliberate; a field present in one
+// and absent from the other is not — see cmd/archcheck/mirrors.go.
+type TemplateFile struct {
+	// Name, Description, ChainType and Enabled are the file's own metadata.
+	//
+	// ⚠️ This struct read none of them until 2026-09-10, while
+	// registry.templateYAML read all four from the very same files. templates_dir
+	// is enumerated into `type: file` entries by LoadTemplatesFromDir and then
+	// loaded through here, so both parsers see every file in that directory and
+	// disagreed about it: `enabled: false` was honoured by the registry and
+	// hardcoded to true here, i.e. a template switched off on purpose was
+	// registered anyway.
+	Name           string                `yaml:"name,omitempty"`
+	Description    string                `yaml:"description,omitempty"`
+	Type           string                `yaml:"type,omitempty"`
+	Mode           string                `yaml:"mode,omitempty"`
+	ChainType      string                `yaml:"chain_type,omitempty"`
+	Enabled        *bool                 `yaml:"enabled,omitempty"` // nil = unset, treated as true
+	VariableGroups []types.VariableGroup `yaml:"variable_groups,omitempty"`
+	Config         map[string]any        `yaml:"config,omitempty"`
+
+	Variables []TemplateVarConfig `yaml:"variables"`
+
+	// BudgetMetering stays untyped because it carries ${var} placeholders before
+	// substitution — `unit: "${chain_id}:${token_address}"` will not unmarshal
+	// into types.BudgetMetering until those resolve.
+	//
+	// ⚠️ `remote-signer validate` had no such field until 2026-09-10 and so
+	// ignored budget_metering outright: a unit that cannot resolve passed
+	// validation and surfaced at daemon startup instead, where rule-init refuses
+	// it and the daemon does not boot. Validating it here turns a failed boot
+	// into a failed validate.
 	BudgetMetering map[string]interface{} `yaml:"budget_metering"`
 	TestVariables  map[string]string      `yaml:"test_variables"`
 	Rules          []RuleConfig           `yaml:"rules"`
@@ -327,6 +367,16 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 		return fmt.Errorf("failed to marshal template config: %w", err)
 	}
 
+	// VariableGroups is stored as a JSON blob, and stays nil when unset so an
+	// absent grouping is distinguishable from an empty one.
+	var variableGroupsJSON []byte
+	if len(tmplCfg.VariableGroups) > 0 {
+		variableGroupsJSON, err = json.Marshal(tmplCfg.VariableGroups)
+		if err != nil {
+			return fmt.Errorf("failed to marshal template variable_groups: %w", err)
+		}
+	}
+
 	// Marshal variables
 	variablesJSON, err := json.Marshal(tmplCfg.Variables)
 	if err != nil {
@@ -363,6 +413,8 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 		Description:    tmplCfg.Description,
 		Type:           types.RuleType(tmplCfg.Type),
 		Mode:           types.RuleMode(tmplCfg.Mode),
+		ChainType:      types.ChainType(tmplCfg.ChainType),
+		VariableGroups: variableGroupsJSON,
 		Variables:      variablesJSON,
 		Config:         configJSON,
 		BudgetMetering: budgetMeteringJSON,
@@ -726,7 +778,10 @@ func fillOptionalTemplateVariables(defs []TemplateVarConfig, vars map[string]str
 		if def.Default == nil {
 			return nil, fmt.Errorf("optional variable %q must declare default", def.Name)
 		}
-		result[def.Name] = *def.Default
+		// Default is any: YAML gives a string for most types and a list for
+		// address_list. fmt.Sprint is the same rendering service.resolveDefaults
+		// applies at evaluation time, so validation and the daemon agree.
+		result[def.Name] = renderVarDefault(def.Default)
 	}
 	return result, nil
 }
@@ -805,4 +860,35 @@ func extractTestCasesOverrides(instanceConfig map[string]interface{}) map[string
 		return nil
 	}
 	return overrides
+}
+
+// renderVarDefault turns a template variable's declared default into the string
+// form ${var} substitution needs.
+//
+// ⚠️ The *string case is not reachable from YAML — it exists because
+// TemplateVarConfig's Default was *string until 2026-09-10, and a Go caller
+// still passing one would otherwise be rendered by fmt.Sprint as a pointer
+// address: substitution would then quietly bind `0xc000060910` as the value.
+// A wrong address that looks like an address is the worst possible failure here.
+func renderVarDefault(v any) string {
+	switch d := v.(type) {
+	case string:
+		return d
+	case *string:
+		if d == nil {
+			return ""
+		}
+		return *d
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

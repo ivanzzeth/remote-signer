@@ -3,11 +3,20 @@
 # 三次真实事故都长这样，详见 cmd/archcheck/mirrors.go 顶部。
 # ⛔ 修的方向是让格式只有一个结构体，其余包用 type X = pkg.X 别名，
 #    而不是把缺的字段补齐——补齐只能撑到下次有人加字段。
-internal/api.ServerConfig <-> internal/config.ServerConfig
-internal/cli/validate.RuleConfig <-> internal/config.RuleConfig
-internal/cli/validate.RuleConfig <-> internal/config.TemplateConfig
-internal/cli/validate.TemplateFile <-> internal/core/registry.templateYAML
-internal/cli/validate.TemplateVarConfig <-> internal/core/types.TemplateVariable
+#
+# 2026-09-10: 8 → 1。做掉的：
+#   - cli/validate 的 RuleConfig/TestCaseConfig/TemplateVarConfig/TemplateFile
+#     全部改成 config 的别名。原注释写着「copied to avoid circular imports」，
+#     而该包早就 import 了 config;副本已经漂了一个 priority。
+#   - config.TemplateVarConfig 改成 types.TemplateVariable 的别名,
+#     config/CLI 这才看得见 min/max/pattern/options/enum/sensitive。
+#   - api.ServerConfig 去掉复制来的 yaml tag:它是运行时结构,从不反序列化,
+#     而带着 tag 意味着「可以从 YAML 读」,那样会整段丢掉嵌套的 tls:。
+#   - config.TemplateFile 补齐 name/description/chain_type/enabled/
+#     variable_groups/config,并接到 types.RuleTemplate 上。
+#
+# 剩下这一条不是漏字段,是两种表示:
+#   TemplateConfig 是 config.yaml 里的**条目**,规则放在 config.rules_json 下;
+#   templateYAML 是磁盘上的**模板文件**,规则是顶层 rules:。11 个 key 一致,
+#   差的只有 rules 这一个,且两边都不会丢东西。
 internal/config.TemplateConfig <-> internal/core/registry.templateYAML
-internal/config.TemplateVarConfig <-> internal/core/types.TemplateVariable
-internal/config.templateFileContent <-> internal/core/registry.templateYAML

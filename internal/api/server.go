@@ -12,11 +12,17 @@ import (
 )
 
 // ServerConfig contains configuration for the HTTP server
+// ⛔ No yaml tags. This is the runtime shape, built by DefaultServerConfig and
+// filled from config.ServerConfig — it is never unmarshalled. The first four
+// fields carried yaml tags by copy-paste until 2026-09-10, which claimed a
+// parsing ability this struct does not have: unmarshalling a server: section
+// into it would have silently dropped the whole nested tls: block, i.e. started
+// a plaintext listener from a config that asked for mTLS.
 type ServerConfig struct {
-	Host         string        `yaml:"host"`
-	Port         int           `yaml:"port"`
-	ReadTimeout  time.Duration `yaml:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout"`
+	Host         string
+	Port         int
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
 
 	// TLS
 	TLSEnabled    bool

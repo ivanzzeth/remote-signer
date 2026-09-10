@@ -70,22 +70,25 @@ type TemplateConfig struct {
 	Description    string                 `yaml:"description,omitempty" json:"description,omitempty"`
 	Type           string                 `yaml:"type" json:"type"` // actual rule type or "file" for external file
 	Mode           string                 `yaml:"mode,omitempty" json:"mode,omitempty"`
+	ChainType      string                 `yaml:"chain_type,omitempty" json:"chain_type,omitempty"`
 	Variables      []TemplateVarConfig    `yaml:"variables,omitempty" json:"variables,omitempty"`
+	VariableGroups []types.VariableGroup  `yaml:"variable_groups,omitempty" json:"variable_groups,omitempty"`
 	Config         map[string]interface{} `yaml:"config,omitempty" json:"config,omitempty"`
 	BudgetMetering map[string]interface{} `yaml:"budget_metering,omitempty" json:"budget_metering,omitempty"`
 	TestVariables  map[string]string      `yaml:"test_variables,omitempty" json:"test_variables,omitempty"` // default variable values for validation
 	Enabled        bool                   `yaml:"enabled" json:"enabled"`
 }
 
-// TemplateVarConfig defines a template variable in configuration.
-// Optional variables (Required: false) must declare Default; validate-rules enforces this.
-type TemplateVarConfig struct {
-	Name        string  `yaml:"name"`
-	Type        string  `yaml:"type"`
-	Description string  `yaml:"description,omitempty"`
-	Required    bool    `yaml:"required"`
-	Default     *string `yaml:"default,omitempty"` // nil = not declared; optional vars must declare default
-}
+// TemplateVarConfig is a template variable declaration. Optional variables
+// (Required: false) must declare Default; validate-rules enforces this.
+//
+// ⚠️ This was a five-field copy of types.TemplateVariable until 2026-09-10, so
+// the config and CLI paths could not see min, max, pattern, options, enum or
+// sensitive at all: a template could declare `max: "1000"` on a uint256
+// variable and `remote-signer validate` would report it clean while the daemon
+// enforced the bound. Aliasing also widens Default from *string to any, which
+// is what an address_list variable needs to declare a list default.
+type TemplateVarConfig = types.TemplateVariable
 
 // TestCaseConfig defines a single test case for rule validation (evm_js, solidity, etc.)
 type TestCaseConfig struct {

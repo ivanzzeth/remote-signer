@@ -47,33 +47,15 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 		return nil, 0, 0, fmt.Errorf("delegation target validation: %w", err)
 	}
 
-	localRules := make([]RuleConfig, 0, len(rules))
-	for _, r := range rules {
-		// Copy test_cases (from template rules_json), instance variables, and template test_variables for evm_js validation.
-		testCases := make([]TestCaseConfig, 0, len(r.TestCases))
-		for _, tc := range r.TestCases {
-			testCases = append(testCases, TestCaseConfig{
-				Name:               tc.Name,
-				Input:              tc.Input,
-				Variables:          tc.Variables,
-				ExpectPass:         tc.ExpectPass,
-				ExpectReason:       tc.ExpectReason,
-				ExpectBudgetAmount: tc.ExpectBudgetAmount,
-			})
-		}
-		var testVars map[string]string
-		if len(r.TestVariables) > 0 {
-			testVars = make(map[string]string, len(r.TestVariables))
-			for k, v := range r.TestVariables {
-				testVars[k] = v
-			}
-		}
-		localRules = append(localRules, RuleConfig{
-			Id: r.Id, Name: r.Name, Description: r.Description, Type: r.Type, Mode: r.Mode,
-			ChainType: r.ChainType, ChainID: r.ChainID, APIKeyID: r.APIKeyID, SignerAddress: r.SignerAddress,
-			Config: r.Config, Variables: r.Variables, TestVariables: testVars, TestCases: testCases, Enabled: r.Enabled,
-		})
-	}
+	// rules is already []RuleConfig — this package aliases config's types rather
+	// than mirroring them.
+	//
+	// ⚠️ There was a field-by-field copy here until 2026-09-10, built when the
+	// two RuleConfigs were separate structs. It enumerated 14 fields and so
+	// dropped the 15th: Priority, which decides whitelist order and therefore
+	// which spending authorization applies to a request. `remote-signer validate`
+	// was checking rules whose ordering it had just discarded.
+	localRules := rules
 	log.Debug("Validating expanded rules from config", "config", configPath, "rules", len(localRules))
 	// Validate each rule in isolation (blocklist + rule under test) so template expected-fail cases apply per-rule.
 	return validateRules(ctx, localRules, validator, msgValidator, jsValidator, nil, log, verbose, false)

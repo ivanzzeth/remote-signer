@@ -27,7 +27,7 @@ func TestTemplateRulesJSON_ContainsPlaceholders(t *testing.T) {
 		return
 	}
 
-	var fileContent templateFileContent
+	var fileContent TemplateFile
 	if err := yaml.Unmarshal(data, &fileContent); err != nil {
 		t.Fatalf("yaml unmarshal: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestSubstituteThenUnmarshal_DomainFilled(t *testing.T) {
 		t.Skipf("template file not found: %v", err)
 		return
 	}
-	var fileContent templateFileContent
+	var fileContent TemplateFile
 	if err := yaml.Unmarshal(data, &fileContent); err != nil {
 		t.Fatalf("yaml unmarshal: %v", err)
 	}
