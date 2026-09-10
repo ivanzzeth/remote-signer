@@ -26,6 +26,7 @@ STEPS=(
     "vet|go vet ./... && go vet -tags integration ./internal/... && go vet -tags e2e ./e2e/..."
     "tests-struct|./scripts/check-tests.sh"
     "arch|./scripts/check-arch.sh"
+    "docs|./scripts/check-docs.sh"
     "fmt|out=\$(gofmt -l \$(git ls-files '*.go' | grep -v ^vendor/)); [ -z \"\$out\" ] || { echo \"未格式化:\"; echo \"\$out\"; false; }"
 )
 

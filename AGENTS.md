@@ -79,6 +79,8 @@ remote-signer/
 
 | 文档 | 用途 |
 |------|------|
+| [`docs/README.md`](docs/README.md) | **文档索引**(专题文档的唯一入口;完整性由 `check-docs.sh` 强制) |
+| [`docs/prd.md`](docs/prd.md) | **产品需求** —— 架构与模块文档从它反推。⛔ 里面不写技术 |
 | `ARCHITECTURE.md` | 核心概念（Signer, Wallet, API Key, Rule, Template, Preset, Budget, Audit）、数据流、安全边界 |
 | `SECURITY.md` | 威胁模型、密钥管理、纵深防御 |
 | `GIT.md` | 分支策略、提交规范、发布流程 |
