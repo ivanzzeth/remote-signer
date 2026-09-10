@@ -2,10 +2,10 @@ package registry
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/ports"
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 // PresetRegistry is the preset counterpart to TemplateRegistry. The
@@ -26,67 +26,19 @@ func NewPresetRegistry(repo ports.PresetRepository, source PresetSource, log *sl
 	return &PresetRegistry{repo: repo, source: source, log: log}
 }
 
-// Sync mirrors TemplateRegistry.Sync. See that method's doc for the
-// invariants — they apply identically here.
+// Sync mirrors the source into the repository: upsert what the source lists,
+// prune the rows it no longer does. The loop is shared with the other
+// catalogue — see syncCatalogue for why.
 func (r *PresetRegistry) Sync(ctx context.Context) (SyncReport, error) {
-	items, err := r.source.List(ctx)
-	if err != nil {
-		return SyncReport{Source: r.source.Kind()}, fmt.Errorf("source list: %w", err)
-	}
+	return syncCatalogue(ctx, r.repo, r.source, presetIdent, "preset", r.log)
+}
 
-	report := SyncReport{Source: r.source.Kind()}
-	seen := make(map[string]bool, len(items))
-
-	for _, p := range items {
-		if p == nil || p.ID == "" {
-			report.Errors = append(report.Errors, SyncError{Err: fmt.Errorf("nil or empty ID in source list")})
-			continue
-		}
-		if seen[p.ID] {
-			report.Errors = append(report.Errors, SyncError{
-				ID:   p.ID,
-				Path: p.SourcePath,
-				Err:  fmt.Errorf("duplicate ID %q (collides with earlier file)", p.ID),
-			})
-			continue
-		}
-		seen[p.ID] = true
-
-		changed, err := r.repo.Upsert(ctx, p)
-		if err != nil {
-			report.Errors = append(report.Errors, SyncError{ID: p.ID, Path: p.SourcePath, Err: err})
-			continue
-		}
-		if changed {
-			report.Changed++
-		} else {
-			report.Skipped++
-		}
+// presetIdent reports the item's ID and source path, and an empty ID for a nil
+// entry — which is how a source yielding nil becomes a reported error rather
+// than a panic.
+func presetIdent(p *types.RulePreset) (string, string) {
+	if p == nil {
+		return "", ""
 	}
-
-	existing, err := r.repo.ListIDsBySource(ctx, r.source.Kind())
-	if err != nil {
-		return report, fmt.Errorf("list existing: %w", err)
-	}
-	var toDelete []string
-	for _, id := range existing {
-		if !seen[id] {
-			toDelete = append(toDelete, id)
-		}
-	}
-	if len(toDelete) > 0 {
-		if err := r.repo.DeleteMany(ctx, toDelete); err != nil {
-			return report, fmt.Errorf("prune: %w", err)
-		}
-		report.Deleted = len(toDelete)
-	}
-
-	r.log.Info("preset sync complete",
-		"source", string(r.source.Kind()),
-		"changed", report.Changed,
-		"skipped", report.Skipped,
-		"deleted", report.Deleted,
-		"errors", len(report.Errors),
-	)
-	return report, nil
+	return p.ID, p.SourcePath
 }
