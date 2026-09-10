@@ -286,7 +286,7 @@ Requests are signed with Ed25519. The message format matches the server middlewa
 
 Headers sent automatically: `X-API-Key-ID`, `X-Timestamp`, `X-Nonce`, `X-Signature` (base64).
 
-For more details, see [Rust SDK README](./pkg/rs-client/README.md).
+For more details, see [Rust SDK README](../pkg/rs-client/README.md).
 
 ---
 
@@ -336,7 +336,7 @@ Add to your MCP config (`.cursor/mcp.json` or `.mcp.json`):
 }
 ```
 
-Once configured, AI agents can create signers, manage rules, sign transactions, and approve requests through natural language. For more details, see [MCP Server README](./pkg/mcp-server/README.md).
+Once configured, AI agents can create signers, manage rules, sign transactions, and approve requests through natural language. For more details, see [MCP Server README](../pkg/mcp-server/README.md).
 
 ---
 
@@ -473,7 +473,7 @@ await client.approveRequest('request-id', { approved: false });
 
 ## Additional Resources
 
-- [Architecture Overview](ARCHITECTURE.md)
-- [JavaScript Client README](./pkg/js-client/README.md)
-- [Rust SDK README](./pkg/rs-client/README.md)
-- [MCP Server README](./pkg/mcp-server/README.md)
+- [Architecture Overview](../ARCHITECTURE.md)
+- [JavaScript Client README](../pkg/js-client/README.md)
+- [Rust SDK README](../pkg/rs-client/README.md)
+- [MCP Server README](../pkg/mcp-server/README.md)

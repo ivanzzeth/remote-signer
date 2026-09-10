@@ -70,7 +70,6 @@ remote-signer/
 ├── ARCHITECTURE.md          # 核心架构
 ├── SECURITY.md             # 安全模型
 ├── GIT.md                  # Git 工作流 + 版本规范
-├── INTEGRATION.md          # SDK / MCP 集成指南
 ├── TESTING.md              # 测试分层规范
 └── README.md               # 项目 README
 ```
@@ -84,7 +83,7 @@ remote-signer/
 | `ARCHITECTURE.md` | 核心概念（Signer, Wallet, API Key, Rule, Template, Preset, Budget, Audit）、数据流、安全边界 |
 | `SECURITY.md` | 威胁模型、密钥管理、纵深防御 |
 | `GIT.md` | 分支策略、提交规范、发布流程 |
-| `INTEGRATION.md` | Go/TS/Rust SDK、MCP 服务器集成 |
+| `docs/integration.md` | Go/TS/Rust SDK、MCP 服务器集成 |
 | `TESTING.md` | 三层测试体系（unit / integration / e2e）、build tag 规范 |
 | `docs/configuration.md` | `config.yaml` 完整参考 |
 | `docs/deployment.md` | Docker、Kubernetes、HA、备份 |
@@ -92,7 +91,6 @@ remote-signer/
 | `docs/rule-syntax.md` | 所有规则类型及示例 |
 | `docs/tls.md` | TLS/mTLS 证书配置 |
 | `docs/tui.md` | TUI 操作指南 |
-| `docs/testing.md` | 单元测试、E2E、规则验证 |
 
 ## 常用命令
 

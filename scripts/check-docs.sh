@@ -110,6 +110,35 @@ for f in docs/*.md docs/rules/*.md ./*.md; do
     ' "$f" || fail=1
 done
 
+# ---------- 全仓 markdown 链接不能断 ----------
+#
+# ⛔ 原有的索引检查只查 docs/README.md 一份。移动文件时,**其它文档里的相对路径
+# 会一起漂**,而漂了没有任何征兆 —— 2026-09-10 把三份文档从根目录移进 docs/,
+# 当场产生 23 处断链,索引检查一处都没报。
+#
+# 这里查每一份 md 里的每一条本地链接(带锚点的只取路径部分)。
+echo "==> markdown 链接不断"
+if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PYEOF' || fail=1
+import pathlib, re, sys
+bad = 0
+roots = list(pathlib.Path('.').glob('*.md')) + list(pathlib.Path('docs').rglob('*.md'))
+for f in roots:
+    if 'node_modules' in str(f):
+        continue
+    for m in re.finditer(r'\]\(([^)#]+)(?:#[^)]*)?\)', f.read_text()):
+        t = m.group(1)
+        if t.startswith(('http', '#', 'mailto')):
+            continue
+        if not (f.parent / t).resolve().exists():
+            print(f"FAIL: {f} 链到 {t},那个文件不存在。", file=sys.stderr)
+            bad += 1
+sys.exit(1 if bad else 0)
+PYEOF
+else
+    echo "  跳过(没有 python3)"
+fi
+
 # ---------- README 里的命令必须真的存在 ----------
 #
 # README 是新人的第一条路径。命令改名/删除时最容易漏掉它(它不参与编译、

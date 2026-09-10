@@ -233,7 +233,7 @@ remote-signer api-key delete alice
 All operations are admin-only. The full set of fields (including scope
 restrictions like `allowed_signers`, `allowed_hd_wallets`,
 `allowed_chain_types`) is documented at
-`/api/v1/api-keys`. For SDK usage, see [INTEGRATION.md](../INTEGRATION.md).
+`/api/v1/api-keys`. For SDK usage, see [SDK / MCP 集成](integration.md).
 
 ### Permission model
 

@@ -529,7 +529,7 @@ All presets live under `rules/presets/`.
 | **Preset** | `rules/presets/*.yaml` | Pre-filled instance(s); used by CLI/setup to generate or merge rule(s) with minimal overrides. See section 6.2 for the full list. |
 | **Inline / file rules** | `config.rules` (type other than `instance` / `file`) or external YAML | Static or file-loaded rules without template expansion. |
 
-For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer validate** or `remote-signer validate`. See [testing.md](testing.md) and [configuration.md](configuration.md).
+For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer validate** or `remote-signer validate`. See [testing.md](../TESTING.md) and [configuration.md](configuration.md).
 
 ---
 

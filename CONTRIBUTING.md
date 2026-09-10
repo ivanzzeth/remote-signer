@@ -2,7 +2,7 @@
 
 ## Development Environment
 
-See [DEVELOPMENT.md](./DEVELOPMENT.md) for local development setup.
+See [本地开发](docs/development.md) for local development setup.
 
 ## Git Workflow
 
@@ -10,7 +10,7 @@ See [GIT.md](./GIT.md) for branch strategy, commit conventions, and release flow
 
 ## AI Agent Workflow
 
-See [WORKFLOW.md](./WORKFLOW.md) for the full issue-to-submission workflow.
+See [AI 协作工作流](docs/agent-workflow.md) for the full issue-to-submission workflow.
 
 ## Testing
 
@@ -41,7 +41,7 @@ Pre-commit hooks run automatically:
 1. Create a feature/fix branch from `main`
 2. Implement changes with tests (coverage ≥ 80%)
 3. Run all tests locally (`make test-integration`)
-4. Update relevant documentation (see [WORKFLOW.md](./WORKFLOW.md) §⑥)
+4. Update relevant documentation (see [AI 协作工作流](docs/agent-workflow.md) §⑥)
 5. Submit PR against `main`
 6. Ensure CI passes
 
@@ -62,4 +62,4 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 - [docs/rules-templates-and-presets.md](./docs/rules-templates-and-presets.md) — Rule engine concepts
 - [docs/rule-syntax.md](./docs/rule-syntax.md) — Rule type reference
 - [docs/deployment.md](./docs/deployment.md) — Docker, Kubernetes, HA
-- [INTEGRATION.md](./INTEGRATION.md) — Go/TS/Rust SDKs, MCP server
+- [SDK / MCP 集成](docs/integration.md) — Go/TS/Rust SDKs, MCP server

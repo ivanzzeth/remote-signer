@@ -86,7 +86,7 @@ Delegation enables a whitelist rule to unpack a wrapper payload (e.g. a Gnosis S
 
 **Cross-template delegation:** Templates reference target sub-rules by YAML-level IDs (e.g. `polymarket-v2-transactions`). During instance creation, `BatchCreateInstances` resolves these to DB-level `inst_<hash>` IDs via a two-phase process: Phase 1 pre-computes all sub-rule IDs into a global map; Phase 2 resolves `delegate_to` references in both Config JSON and Variables JSON before persisting.
 
-See [Rules, Templates & Presets](docs/rules-templates-and-presets.md#10-delegate-mechanism) for the full delegation mechanism including YAML-level configuration and debug queries.
+See [Rules, Templates & Presets](rules-templates-and-presets.md#10-delegate-mechanism) for the full delegation mechanism including YAML-level configuration and debug queries.
 
 ### Template
 

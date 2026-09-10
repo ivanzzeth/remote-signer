@@ -10,7 +10,7 @@
 git config core.hooksPath .githooks
 ```
 
-参考：[DEVELOPMENT.md](./DEVELOPMENT.md)、[.githooks/README.md](./.githooks/README.md)
+参考：[DEVELOPMENT.md](development.md)、[.githooks/README.md](../.githooks/README.md)
 
 ## 工作流
 
@@ -68,7 +68,7 @@ go test -tags e2e ./e2e/...  # E2E 测试
 curl http://127.0.0.1:8548/health
 ```
 
-参考 → [Makefile](./Makefile)
+参考 → [Makefile](../Makefile)
 
 ### ⑥ 文档同步
 
@@ -116,12 +116,12 @@ git push
 
 | 场景 | 查阅 |
 |------|------|
-| 环境搭建 | [DEVELOPMENT.md](./DEVELOPMENT.md) |
-| 分支策略、版本规范 | [GIT.md](./GIT.md) |
-| 测试分层、build tag | [TESTING.md](./TESTING.md) |
-| Git hooks 说明 | [.githooks/README.md](./.githooks/README.md) |
-| Agent/skills 目录规范 | [AGENTS.md](./AGENTS.md) |
-| 常用命令 | [Makefile](./Makefile) |
-| 系统架构 | [ARCHITECTURE.md](./ARCHITECTURE.md) |
-| 安全模型 | [SECURITY.md](./SECURITY.md) |
-| SDK/集成 | [INTEGRATION.md](./INTEGRATION.md) |
+| 环境搭建 | [DEVELOPMENT.md](development.md) |
+| 分支策略、版本规范 | [GIT.md](../GIT.md) |
+| 测试分层、build tag | [TESTING.md](../TESTING.md) |
+| Git hooks 说明 | [.githooks/README.md](../.githooks/README.md) |
+| Agent/skills 目录规范 | [AGENTS.md](../AGENTS.md) |
+| 常用命令 | [Makefile](../Makefile) |
+| 系统架构 | [ARCHITECTURE.md](../ARCHITECTURE.md) |
+| 安全模型 | [SECURITY.md](../SECURITY.md) |
+| SDK/集成 | [INTEGRATION.md](integration.md) |

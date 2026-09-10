@@ -119,7 +119,7 @@ The Electron shell is just a browser window pointed at the daemon's local HTTP s
 npm install remote-signer-client
 ```
 
-Same version cadence as the daemon — `remote-signer-client@0.3.9` matches daemon `v0.3.9`. See [Integration Guide](INTEGRATION.md) for usage.
+Same version cadence as the daemon — `remote-signer-client@0.3.9` matches daemon `v0.3.9`. See [Integration Guide](docs/integration.md) for usage.
 
 ## Chrome Extension
 
@@ -172,11 +172,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
 | [Deployment Guide](docs/deployment.md) | Docker, Kubernetes, HA, monitoring, backup |
 | [Rules, Templates & Presets](docs/rules-templates-and-presets.md) | Concepts: rule templates, instances, presets |
 | [Rule Syntax Reference](docs/rule-syntax.md) | All rule types with examples |
-| [Integration Guide](INTEGRATION.md) | Go/TS/Rust SDKs, MCP server |
+| [Integration Guide](docs/integration.md) | Go/TS/Rust SDKs, MCP server |
 | [TLS / mTLS Guide](docs/tls.md) | Certificate trust model, generation, production practices |
 | [TUI Guide](docs/tui.md) | Remote Signer TUI guide (`remote-signer tui`): build, run, key bindings, real-time request monitoring |
 | [SDK/CLI Matrix](docs/sdk-cli-matrix.md) | Go SDK surface mapped to CLI commands, coverage gaps, and operator tools |
-| [Testing Guide](docs/testing.md) | Unit tests, E2E, rule validation |
+| [Testing](TESTING.md) | Unit tests, E2E, rule validation |
 | [GIT.md](GIT.md) | Release flow, version conventions, NPM_TOKEN setup, Docker compose modes |
 
 ## License

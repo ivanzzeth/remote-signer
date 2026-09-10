@@ -53,7 +53,7 @@ make integration        # 黑盒集成测试
 | `rules` | 规则实例定义 |
 | `presets.dir` | 预设目录路径 |
 
-参考 → [docs/configuration.md](docs/configuration.md)
+参考 → [docs/configuration.md](configuration.md)
 
 ## 测试策略
 
@@ -64,7 +64,7 @@ make integration        # 黑盒集成测试
 | 黑盒集成 | `make integration` | CLI/HTTP 黑盒测试 | 二进制 |
 | E2E | `go test -tags e2e ./e2e/...` | 完整流程 | 链上 RPC |
 
-参考 → [TESTING.md](TESTING.md)
+参考 → [TESTING.md](../TESTING.md)
 
 ## 项目结构
 
@@ -99,7 +99,7 @@ HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml u
 docker compose up -d
 ```
 
-参考 → [docs/deployment.md](docs/deployment.md)
+参考 → [docs/deployment.md](deployment.md)
 
 ## 常用命令速查
 
