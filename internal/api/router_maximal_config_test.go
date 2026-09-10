@@ -3,6 +3,7 @@ package api
 import (
 	"io"
 	"log/slog"
+	"net/http"
 	"reflect"
 	"sort"
 	"testing"
@@ -265,7 +266,6 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 		{"RPCProvider (rpc proxy)", "POST /api/v1/evm/rpc/"},
 		{"RuleEngine + signer access service", "POST /api/v1/evm/sign/batch"},
 		{"APIKeyRepo", "/api/v1/api-keys"},
-		{"WalletRepo", "/api/v1/wallets"},
 		{"IPWhitelistConfigForRead", "GET /api/v1/acls/ip-whitelist"},
 		{"SettingsManager", "/api/v1/admin/settings/"},
 		{"SettingsManager (SPA catch-all)", "/"},
@@ -279,4 +279,33 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 				tc.pattern, tc.gatedBy)
 		}
 	}
+
+	// ⛔ The WalletRepo branch used to be one row above, named by the literal
+	// "/api/v1/wallets". S3 turned that branch into eight patterns, and writing
+	// eight literals here would make this file a second copy of the wallet route
+	// table — the drift wallet_routes_test.go exists to prevent. So the patterns
+	// come from the module, and what is asserted is stronger than the row it
+	// replaces: *every* wallet pattern reached the real router's mux, not just
+	// one of them. A route added to walletsModule and lost to a conditional will
+	// fail here by name.
+	walletsMod, err := NewWalletsModule(&stubWalletRepo{}, &stubSignerOwnershipRepo{}, &stubSignerAccessRepo{}, testLogger())
+	if err != nil {
+		t.Fatalf("building the wallets module: %v", err)
+	}
+	if walletsMod == nil {
+		t.Fatal("NewWalletsModule returned no module for a non-nil repo, so this check would assert nothing")
+	}
+	walletsMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("wallet pattern %q is absent from the router, so the branch gated by WalletRepo "+
+				"registered less than walletsModule.Routes() says it serves", pattern)
+		}
+	}))
 }
+
+// patternCollector is a RouteRegistrar that only reports what it was asked to
+// register. ⚠️ It exists so that a test can ask a module for its patterns
+// instead of restating them.
+type patternCollector func(pattern string, auth RouteAuth)
+
+func (c patternCollector) Handle(pattern string, auth RouteAuth, _ http.Handler) { c(pattern, auth) }

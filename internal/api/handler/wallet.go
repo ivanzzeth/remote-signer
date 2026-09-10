@@ -41,22 +41,40 @@ func NewWalletHandler(repo storage.WalletRepository, ownershipRepo storage.Signe
 }
 
 // --- Request/Response types ---
+//
+// ⚠️ Exported, and the reason is not style. These seven types are the wallet
+// API's wire contract, and the plan they belong to (docs/drafts/
+// openapi-chain-proposal.md §1.4, §3.3) turns each of them into a schema name in
+// a generated OpenAPI document and from there into a type name in the generated
+// Go and TypeScript SDKs. A generator has nothing to call an unexported type: it
+// either invents an unreadable name or skips the type and inlines an anonymous
+// schema, and either way the SDK stops matching the handler by name. ⛔ So the
+// export is not cosmetic and it is not reversible without breaking that chain —
+// renaming one of these later is a client-visible rename of an SDK type.
+//
+// ⛔ The JSON tags are the actual contract and none of them changed here. A
+// field name a client parses lives in the tag, not in the Go identifier.
 
-type createWalletRequest struct {
+// CreateWalletRequest is the body of POST /api/v1/wallets.
+type CreateWalletRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
 
-type updateWalletRequest struct {
+// UpdateWalletRequest is the body of PATCH /api/v1/wallets/{id}. Both fields are
+// pointers so that "absent" and "set to empty" stay distinguishable.
+type UpdateWalletRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
 
-type addMemberRequest struct {
+// AddMemberRequest is the body of POST /api/v1/wallets/{id}/members.
+type AddMemberRequest struct {
 	SignerAddress string `json:"signer_address"`
 }
 
-type walletResponse struct {
+// WalletResponse is one wallet as the API returns it.
+type WalletResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -65,116 +83,152 @@ type walletResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-type walletListResponse struct {
-	Wallets []walletResponse `json:"wallets"`
+// WalletListResponse is the body of GET /api/v1/wallets.
+type WalletListResponse struct {
+	Wallets []WalletResponse `json:"wallets"`
 	Total   int              `json:"total"`
 	HasMore bool             `json:"has_more"`
 }
 
-type memberResponse struct {
+// MemberResponse is one wallet member: a signer address bound to a wallet.
+type MemberResponse struct {
 	WalletID      string `json:"wallet_id"`
 	SignerAddress string `json:"signer_address"`
 	AddedAt       string `json:"added_at"`
 }
 
-type membersListResponse struct {
-	Members []memberResponse `json:"members"`
+// MembersListResponse is the body of GET /api/v1/wallets/{id}/members.
+type MembersListResponse struct {
+	Members []MemberResponse `json:"members"`
 }
 
 // --- Handler entry points ---
+//
+// # One exported function per endpoint (proposal S3)
+//
+// These eight replace two: ServeHTTP, which switched on r.Method for
+// /api/v1/wallets, and ServeWalletHTTP, which took r.URL.Path apart with
+// TrimPrefix/TrimSuffix/SplitN and fanned out into six more. The registration
+// that used to hide those eight behind two prefix patterns is
+// internal/api/module_wallets.go, and it now names each one.
+//
+// ⭐ Why both halves had to move at once (proposal §1.3): registering
+// `GET /api/v1/wallets/{id}` while the handler still read r.URL.Path would leave
+// the wildcard decorative — the handler would keep working when reached by some
+// other pattern, and the handler-path-dispatch gate would not move. The path
+// segments are read through r.PathValue here, which only a matching pattern can
+// populate, so these functions are now reachable only from a route that names
+// their shape.
+//
+// ⛔ WalletHandler is deliberately no longer an http.Handler. It has no
+// ServeHTTP, so there is no way to hand the whole wallet surface to one pattern
+// again by accident.
 
-// ServeHTTP handles /api/v1/wallets (list, create).
-func (h *WalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		h.listWallets(w, r)
-	case http.MethodPost:
-		h.createWallet(w, r)
-	default:
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-	}
+// ListWallets serves GET /api/v1/wallets.
+func (h *WalletHandler) ListWallets(w http.ResponseWriter, r *http.Request) {
+	h.listWallets(w, r)
 }
 
-// ServeWalletHTTP handles /api/v1/wallets/{id} and /api/v1/wallets/{id}/members[/{signerAddress}]
-func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) {
-	// Parse: /api/v1/wallets/{id}[/members[/{signerAddress}]]
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/wallets/")
-	path = strings.TrimSuffix(path, "/")
+// CreateWallet serves POST /api/v1/wallets.
+func (h *WalletHandler) CreateWallet(w http.ResponseWriter, r *http.Request) {
+	h.createWallet(w, r)
+}
 
-	parts := strings.SplitN(path, "/", 3)
-	if len(parts) < 1 || parts[0] == "" {
-		respond.Error(w, "wallet ID required", http.StatusBadRequest, h.logger)
+// GetWallet serves GET /api/v1/wallets/{id}.
+func (h *WalletHandler) GetWallet(w http.ResponseWriter, r *http.Request) {
+	_, wallet, ok := h.resolveOwnedWallet(w, r)
+	if !ok {
 		return
 	}
+	h.getWallet(w, wallet)
+}
 
-	walletID := parts[0]
+// UpdateWallet serves PATCH /api/v1/wallets/{id}.
+func (h *WalletHandler) UpdateWallet(w http.ResponseWriter, r *http.Request) {
+	_, wallet, ok := h.resolveOwnedWallet(w, r)
+	if !ok {
+		return
+	}
+	h.updateWallet(w, r, wallet)
+}
 
-	// Verify the wallet exists and the caller owns it
+// DeleteWallet serves DELETE /api/v1/wallets/{id}.
+func (h *WalletHandler) DeleteWallet(w http.ResponseWriter, r *http.Request) {
+	walletID, _, ok := h.resolveOwnedWallet(w, r)
+	if !ok {
+		return
+	}
+	h.deleteWallet(w, r, walletID)
+}
+
+// ListMembers serves GET /api/v1/wallets/{id}/members.
+func (h *WalletHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
+	walletID, _, ok := h.resolveOwnedWallet(w, r)
+	if !ok {
+		return
+	}
+	h.listMembers(w, r, walletID)
+}
+
+// AddMember serves POST /api/v1/wallets/{id}/members.
+func (h *WalletHandler) AddMember(w http.ResponseWriter, r *http.Request) {
+	walletID, _, ok := h.resolveOwnedWallet(w, r)
+	if !ok {
+		return
+	}
+	h.addMember(w, r, walletID)
+}
+
+// RemoveMember serves DELETE /api/v1/wallets/{id}/members/{signerAddress}.
+func (h *WalletHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
+	walletID, _, ok := h.resolveOwnedWallet(w, r)
+	if !ok {
+		return
+	}
+	h.removeMember(w, r, walletID, r.PathValue("signerAddress"))
+}
+
+// resolveOwnedWallet is the check ServeWalletHTTP ran once, before its own
+// dispatch, for every path with an {id} in it. It is called by each of the six
+// {id} routes instead.
+//
+// ⛔ Its three answers are copied verbatim and their order matters, because each
+// one is what a caller learns: no API key is 401; a wallet that does not exist
+// is 404 "wallet not found"; and a wallet owned by someone else is *also* 404
+// "wallet not found", not 403 — telling the two apart would let any key
+// enumerate other owners' wallet ids. ⚠️ Reordering the ownership check after
+// the repository lookup, or making it a 403, is a security change wearing a
+// refactor's clothes.
+//
+// It returns the id as the path spelled it (which is what the operations below
+// take) as well as the loaded wallet, since some callers need each.
+func (h *WalletHandler) resolveOwnedWallet(w http.ResponseWriter, r *http.Request) (string, *types.Wallet, bool) {
+	walletID := r.PathValue("id")
+
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
-		return
+		return "", nil, false
 	}
 
 	wallet, err := h.repo.Get(r.Context(), walletID)
 	if err != nil {
 		if types.IsNotFound(err) {
 			respond.Error(w, "wallet not found", http.StatusNotFound, h.logger)
-			return
+			return "", nil, false
 		}
 		h.logger.Error("failed to get wallet", "error", err)
 		respond.Error(w, "internal error", http.StatusInternalServerError, h.logger)
-		return
+		return "", nil, false
 	}
 
-	// Only owner or admin can access
+	// Only owner or admin can access.
 	if wallet.OwnerID != apiKey.ID && !apiKey.IsAdmin() {
 		respond.Error(w, "wallet not found", http.StatusNotFound, h.logger)
-		return
+		return "", nil, false
 	}
 
-	if len(parts) == 1 {
-		// /api/v1/wallets/{id}
-		switch r.Method {
-		case http.MethodGet:
-			h.getWallet(w, wallet)
-		case http.MethodPatch:
-			h.updateWallet(w, r, wallet)
-		case http.MethodDelete:
-			h.deleteWallet(w, r, walletID)
-		default:
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		}
-		return
-	}
-
-	if parts[1] == "members" {
-		if len(parts) == 2 {
-			// /api/v1/wallets/{id}/members
-			switch r.Method {
-			case http.MethodGet:
-				h.listMembers(w, r, walletID)
-			case http.MethodPost:
-				h.addMember(w, r, walletID)
-			default:
-				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			}
-			return
-		}
-		if len(parts) == 3 {
-			// /api/v1/wallets/{id}/members/{signerAddress}
-			signerAddress := parts[2]
-			switch r.Method {
-			case http.MethodDelete:
-				h.removeMember(w, r, walletID, signerAddress)
-			default:
-				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			}
-			return
-		}
-	}
-
-	respond.Error(w, "not found", http.StatusNotFound, h.logger)
+	return walletID, wallet, true
 }
 
 // --- CRUD operations ---
@@ -186,7 +240,7 @@ func (h *WalletHandler) createWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req createWalletRequest
+	var req CreateWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
@@ -251,8 +305,8 @@ func (h *WalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := walletListResponse{
-		Wallets: make([]walletResponse, 0, len(result.Wallets)),
+	resp := WalletListResponse{
+		Wallets: make([]WalletResponse, 0, len(result.Wallets)),
 		Total:   result.Total,
 		HasMore: result.HasMore,
 	}
@@ -268,7 +322,7 @@ func (h *WalletHandler) getWallet(w http.ResponseWriter, wallet *types.Wallet) {
 }
 
 func (h *WalletHandler) updateWallet(w http.ResponseWriter, r *http.Request, wallet *types.Wallet) {
-	var req updateWalletRequest
+	var req UpdateWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
@@ -319,11 +373,11 @@ func (h *WalletHandler) listMembers(w http.ResponseWriter, r *http.Request, wall
 		return
 	}
 
-	resp := membersListResponse{
-		Members: make([]memberResponse, 0, len(members)),
+	resp := MembersListResponse{
+		Members: make([]MemberResponse, 0, len(members)),
 	}
 	for _, m := range members {
-		resp.Members = append(resp.Members, memberResponse{
+		resp.Members = append(resp.Members, MemberResponse{
 			WalletID:      m.WalletID,
 			SignerAddress: m.SignerAddress,
 			AddedAt:       m.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -340,7 +394,7 @@ func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, wallet
 		return
 	}
 
-	var req addMemberRequest
+	var req AddMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
@@ -381,7 +435,7 @@ func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, wallet
 		return
 	}
 
-	respond.JSON(w, memberResponse{
+	respond.JSON(w, MemberResponse{
 		WalletID:      member.WalletID,
 		SignerAddress: member.SignerAddress,
 		AddedAt:       member.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -432,8 +486,8 @@ func (h *WalletHandler) removeMember(w http.ResponseWriter, r *http.Request, wal
 
 // --- Helpers ---
 
-func (h *WalletHandler) toResponse(c *types.Wallet) walletResponse {
-	return walletResponse{
+func (h *WalletHandler) toResponse(c *types.Wallet) WalletResponse {
+	return WalletResponse{
 		ID:          c.ID,
 		Name:        c.Name,
 		Description: c.Description,

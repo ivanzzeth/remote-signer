@@ -220,13 +220,19 @@ func TestWalletHandler_ServeWalletHTTP_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestWalletHandler_ServeWalletHTTP_NoWalletID asserted 400 before S3, for the
+// reason spelled out on TestWallet_ServeWalletHTTP_NoID in
+// wallet_route_coverage_test.go: the bare "/api/v1/wallets/" was a prefix
+// pattern and reached the handler's own "wallet ID required" guard. No pattern
+// claims it now.
 func TestWalletHandler_ServeWalletHTTP_NoWalletID(t *testing.T) {
 	mux, _, _ := walletMuxWithDB(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/", nil)
 	req = req.WithContext(walletCtx("user-1", string(types.RoleDev)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.NotContains(t, w.Body.String(), "wallet ID required")
 }
 
 func TestWalletHandler_ServeWalletHTTP_NoAPIKey(t *testing.T) {

@@ -41,6 +41,18 @@
 #     签名(preset id 含 '/',JS SDK 送 %2F,PathValue 给的是解码后的段,
 #     "修好"它等于把这类请求一律 401);其余全是审计日志里的请求行。
 #   - internal/api/router.go 的 SPA 兜底、internal/web/handler.go 的静态文件。
+#
+# ---------- 棘轮记事 ----------
+#
+# 2026-09-10 · 提案 S3（wallet 拆解）:**20 → 19 条,17 → 16 个文件**。
+# 删掉的是 `internal/api/handler.WalletHandler.ServeWalletHTTP` —— 唯一一条。
+# ⚠️ **一条,不是两条**:`WalletHandler.ServeHTTP` 从来就不在基线里,它只
+# `switch r.Method`,一个字都没读 path。所以「wallet 有两个 mux 入口」
+#（提案 §0 订正 5)与「基线里有几条」不是一回事 —— 这道判据数的是**读 path 的
+# 函数**,不是注册了几条 pattern,也不是藏了几个端点(wallet 藏了 8 个)。
+# ⭐ 这正是后面 S4–S8 估工作量时最容易估错的地方:基线少一行 ≠ 少一个端点。
+# 那 8 个端点现在是 internal/api/module_wallets.go 里 8 条 method+wildcard
+# pattern,handler 侧读的是 r.PathValue —— 全仓第一次真正用上它。
 internal/api/handler.ACLHandler.ServeHTTP
 internal/api/handler.APIKeyHandler.ServeKeyHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
@@ -48,7 +60,6 @@ internal/api/handler.PresetHandler.ServeHTTP
 internal/api/handler.SettingsHandler.ServeHTTP
 internal/api/handler.TemplateHandler.ServeHTTP
 internal/api/handler.TemplateHandler.ServeInstanceHTTP
-internal/api/handler.WalletHandler.ServeWalletHTTP
 internal/api/handler/evm.ApprovalHandler.ServeHTTP
 internal/api/handler/evm.BudgetItemHandler.ServeHTTP
 internal/api/handler/evm.HDWalletHandler.ServeHTTP

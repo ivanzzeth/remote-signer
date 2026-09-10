@@ -23,12 +23,10 @@
 // external test package can, because nothing imports it. The cost is that these
 // tests can only use exported identifiers, and the two that matter are:
 //
-//   - the wallet DTOs are unexported, so the response shapes are mirrored below
-//     as *Wire structs. ⚠️ A mirror can drift; what stops it here is that these
-//     are the JSON field names a client parses, so a drift breaks the same
-//     assertion a real client would break on. Exporting the DTOs is S3's job
-//     (proposal §3.3), and doing it here would be a production change under a
-//     test refactor.
+//   - the wallet DTOs were unexported, so the response shapes were mirrored
+//     below as hand-copied *Wire structs. ✅ S3 exported them (proposal §1.4,
+//     §3.3 — they become SDK type names), so the mirrors are gone and the
+//     aliases below point at the handler's own types.
 //   - tests that call WalletHandler's unexported methods directly
 //     (createWallet, addMember, …) cannot move and did not: they stayed in
 //     wallet_coverage_test.go and wallet_test.go as `package handler`. They were
@@ -69,33 +67,15 @@ import (
 
 // ---------- wire shapes ----------
 //
-// Mirrors of handler/wallet.go's unexported walletResponse / walletListResponse
-// / membersListResponse, by JSON tag.
+// ⭐ S3 exported the wallet DTOs, so these are no longer mirrors: the tests
+// decode into handler.WalletResponse / handler.WalletListResponse /
+// handler.MembersListResponse, the very types the handler encodes. The three
+// hand-copied structs that stood here until then are gone, and with them the
+// drift they could have carried.
 
-type walletWire struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	OwnerID     string `json:"owner_id"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-}
-
-type walletListWire struct {
-	Wallets []walletWire `json:"wallets"`
-	Total   int          `json:"total"`
-	HasMore bool         `json:"has_more"`
-}
-
-type memberWire struct {
-	WalletID      string `json:"wallet_id"`
-	SignerAddress string `json:"signer_address"`
-	AddedAt       string `json:"added_at"`
-}
-
-type membersListWire struct {
-	Members []memberWire `json:"members"`
-}
+type walletWire = handler.WalletResponse
+type walletListWire = handler.WalletListResponse
+type membersListWire = handler.MembersListResponse
 
 // ---------- the registrar ----------
 
@@ -149,13 +129,23 @@ func walletTestDB(t *testing.T) *gorm.DB {
 
 // TestWalletRoutes_RegistersExactlyTheProductionPatterns is the one assertion
 // that would notice the harness quietly registering nothing, or registering
-// something else. ⚠️ It does not say these two patterns are *right* — it says
-// the mux the tests below drive is the mux walletsModule builds, which is the
-// only reason a green run here means anything about the daemon.
+// something else. ⚠️ It does not say these patterns are *right* — it says the
+// mux the tests below drive is the mux walletsModule builds, which is the only
+// reason a green run here means anything about the daemon.
 //
-// ⛔ If S3 changes this list, that is the change, not a number to update: every
-// test in this package then routes through the new patterns, and a difference in
-// results is the decomposition's, which is the whole point of doing S2 first.
+// ⭐ S3 rewrote this list, and rewriting it *was* the change: the two prefix
+// patterns became the eight endpoints they had been hiding, so every test in
+// this package now routes through a named method+wildcard pattern and any
+// difference in results is the decomposition's.
+//
+// ⛔ Its more important half is the permission, and after S3 it is load-bearing
+// rather than merely tidy. Splitting one pattern into six is exactly the moment
+// a reviewer's eye slides past `Permitted(PermManageWallets)` on the GET routes
+// and someone "improves" one to a read permission or to AuthenticatedOnly.
+// Nothing else in the wallet family would notice: the test registrar drops the
+// RouteAuth entirely (see the package comment), so not one test below runs the
+// middleware chain. Verified negatively by changing one route's constructor in
+// module_wallets.go and watching this fail on that row alone.
 func TestWalletRoutes_RegistersExactlyTheProductionPatterns(t *testing.T) {
 	repo, ownershipRepo, accessRepo := walletRepos(t, walletTestDB(t))
 	mod, err := api.NewWalletsModule(repo, ownershipRepo, accessRepo, slog.Default())
@@ -167,15 +157,17 @@ func TestWalletRoutes_RegistersExactlyTheProductionPatterns(t *testing.T) {
 		got = append(got, pattern+" → "+auth.String())
 	}})
 
-	// ⛔ The auth half is here because S2 was allowed to move these registrations
-	// and forbidden to change what they decide. Both were
-	// Permitted(PermManageWallets) inline in setupRoutes; if either had silently
-	// become AuthenticatedOnly on the way into the module, nothing else in this
-	// package would notice — none of these tests goes through the middleware
-	// chain at all.
+	// ⚠️ Order is the registration order, not sorted: a module registering the
+	// same set in a different order is a different edit and worth seeing.
 	assert.Equal(t, []string{
-		"/api/v1/wallets → permitted(manage_wallets)",
-		"/api/v1/wallets/ → permitted(manage_wallets)",
+		"GET /api/v1/wallets → permitted(manage_wallets)",
+		"POST /api/v1/wallets → permitted(manage_wallets)",
+		"GET /api/v1/wallets/{id} → permitted(manage_wallets)",
+		"PATCH /api/v1/wallets/{id} → permitted(manage_wallets)",
+		"DELETE /api/v1/wallets/{id} → permitted(manage_wallets)",
+		"GET /api/v1/wallets/{id}/members → permitted(manage_wallets)",
+		"POST /api/v1/wallets/{id}/members → permitted(manage_wallets)",
+		"DELETE /api/v1/wallets/{id}/members/{signerAddress} → permitted(manage_wallets)",
 	}, got)
 	assert.Equal(t, "wallets", mod.Name())
 }
@@ -193,17 +185,24 @@ func (r recordingRegistrar) Handle(pattern string, auth api.RouteAuth, _ http.Ha
 // step S2 actually changed something, run as a controlled pair: the same request
 // dispatched directly at the handler and dispatched through the mux.
 //
-// ⭐ WalletHandler.ServeHTTP never looks at the path at all — it switches on the
-// method — so called directly it answers 200 with a wallet listing for *any*
-// path whatsoever, including one no wallet route claims. That is what every test
-// in this package was doing before S2: asserting a status code the URL had no
-// influence over. Through the mux the same request reaches nothing and gets the
-// mux's own 404.
+// ⭐ WalletHandler's list endpoint never looks at the path at all, so called
+// directly it answers 200 with a wallet listing for *any* path whatsoever,
+// including one no wallet route claims. That is what every test in this package
+// was doing before S2: asserting a status code the URL had no influence over.
+// Through the mux the same request reaches nothing and gets the mux's own 404.
 //
-// ⚠️ The `direct` arm below is the last h.ServeHTTP call in the wallet family
+// ⚠️ The `direct` arm below is the last direct handler call in the wallet family
 // and it is deliberate: it is the control, not the harness. Delete it and this
 // test degrades to "a 404 came back", which a mux with no routes at all would
 // also satisfy.
+//
+// ⚠️ S3 changed which function that arm calls and nothing else about it. It was
+// h.ServeHTTP, which switched on the method for /api/v1/wallets; S3 deleted
+// ServeHTTP — WalletHandler is no longer an http.Handler — so the control is
+// now the endpoint function that switch reached, h.ListWallets. The property
+// under test is unchanged and so is the assertion: an endpoint function is
+// indifferent to the path, and the route table is what makes the path decide
+// anything.
 func TestWalletRoutes_UnclaimedPathNoLongerReachesTheHandler(t *testing.T) {
 	const unclaimed = "/api/v1/wallets-archive"
 
@@ -219,9 +218,9 @@ func TestWalletRoutes_UnclaimedPathNoLongerReachesTheHandler(t *testing.T) {
 	}
 
 	direct := httptest.NewRecorder()
-	h.ServeHTTP(direct, newReq())
+	h.ListWallets(direct, newReq())
 	require.Equal(t, http.StatusOK, direct.Code,
-		"premise of this test: dispatched directly, the handler serves %s as though it were /api/v1/wallets. "+
+		"premise of this test: called directly, the handler serves %s as though it were /api/v1/wallets. "+
 			"If that stops being true the control arm is gone and the routed arm proves nothing on its own", unclaimed)
 	require.Contains(t, direct.Body.String(), `"wallets"`)
 

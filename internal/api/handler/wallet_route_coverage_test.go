@@ -80,6 +80,23 @@ func TestWallet_ServeHTTP_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
 
+// TestWallet_ServeWalletHTTP_NoID pins one of the three answers S3 changed.
+//
+// ⛔ It used to assert 400 {"error":"wallet ID required"} — ServeWalletHTTP's own
+// guard for `parts[0] == ""`, reached because "/api/v1/wallets/" was a prefix
+// pattern that matched the bare path. There is no such pattern now: every wallet
+// route names a segment, and "/api/v1/wallets/" names none, so it matches
+// nothing. ⚠️ The 400 could only be preserved by re-registering a prefix
+// pattern, which would bring back the swallow of deep paths that this step
+// exists to remove — so the answer changed, deliberately, and this test records
+// which way rather than being softened out of the way.
+//
+// ⚠️ The 404 body differs between here and a daemon: this mux is bare, so the
+// answer is net/http's own "404 page not found"; under the real router the
+// /api/v1/ fallback answers with the standard JSON envelope. That difference is
+// the fallback's subject, and it is pinned in package api by
+// TestAPIFallback_WalletDeepPathAndWrongMethod — a JSON client never sees the
+// plain-text form.
 func TestWallet_ServeWalletHTTP_NoID(t *testing.T) {
 	mux, _, _ := walletMuxWithDB(t)
 
@@ -87,8 +104,11 @@ func TestWallet_ServeWalletHTTP_NoID(t *testing.T) {
 	req = req.WithContext(walletAdminCtx(t))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "wallet ID required")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.NotContains(t, w.Body.String(), "wallet ID required",
+		"the handler's own no-id guard answered, which means some pattern still claims the bare prefix")
+	assert.NotContains(t, w.Body.String(), `"wallets"`,
+		"a wallet listing came back for a path that names no wallet")
 }
 
 func TestWallet_ServeWalletHTTP_UnauthorizedNoKey(t *testing.T) {

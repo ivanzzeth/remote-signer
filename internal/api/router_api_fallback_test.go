@@ -209,6 +209,110 @@ func TestAPIFallback_BodyIsTheStandardErrorEnvelope(t *testing.T) {
 	}
 }
 
+// TestAPIFallback_WalletDeepPathAndWrongMethod is the net being cashed in.
+//
+// ⭐ Everything above was written *before* any handler was decomposed, so it
+// proved the fallback catches paths a decomposition *would* strand. Wallet is
+// the first one decomposed (proposal S3), so this is the first test where the
+// stranded paths are real rather than hypothetical: "/api/v1/wallets/a/b/c/d"
+// and "/api/v1/wallets/" were both swallowed by the "/api/v1/wallets/" prefix
+// pattern and answered by WalletHandler; no wallet pattern claims them now.
+//
+// ⛔ The patterns come from walletsModule.Routes(), never from literals here. A
+// literal list would be a second route table that stays green while describing
+// routes the daemon does not serve — and this test's entire subject is which
+// paths the daemon's own patterns leave over.
+//
+// ⚠️ What each half checks, and why they are different questions:
+//
+//   - dispatch: which pattern the mux resolves each path to. Exact, and the only
+//     way to say "this path reaches the fallback and not a wallet route".
+//   - the answer: unauthenticated, so the AuthenticatedOnly fallback stops at
+//     401. That is fine and is the point — what matters to a JSON client is that
+//     it is no longer the SPA's text/html 200. The 404 body itself is
+//     TestAPIFallback_BodyIsTheStandardErrorEnvelope's subject.
+func TestAPIFallback_WalletDeepPathAndWrongMethod(t *testing.T) {
+	walletsMod, err := NewWalletsModule(&stubWalletRepo{}, &stubSignerOwnershipRepo{}, &stubSignerAccessRepo{}, fallbackTestLogger())
+	if err != nil {
+		t.Fatalf("building the wallets module: %v", err)
+	}
+
+	// Collect the real patterns so the "still reaches its own route" rows below
+	// are generated rather than restated.
+	var walletPatterns []string
+	walletsMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		walletPatterns = append(walletPatterns, pattern)
+	}))
+	if len(walletPatterns) == 0 {
+		t.Fatal("walletsModule registered nothing, so every row below would pass for the wrong reason")
+	}
+
+	r := newChainedTestRouter()
+	r.mountModules(walletsMod)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<!doctype html><html>spa</html>"))
+	r.registerAPIFallback()
+
+	// Each real endpoint still resolves to its own pattern: the fallback added
+	// nothing that shadows them, and the decomposition left none of them behind.
+	for _, pattern := range walletPatterns {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("wallet pattern %q has no method — the rows below assume method+path patterns", pattern)
+		}
+		// Substitute a value for each wildcard segment.
+		target := strings.NewReplacer("{id}", "w-1", "{signerAddress}", "0xdead").Replace(path)
+		if strings.Contains(target, "{") {
+			t.Fatalf("wallet pattern %q has a wildcard this test does not know how to fill: %q", pattern, target)
+		}
+		if _, got := r.mux.Handler(httptest.NewRequest(method, target, nil)); got != pattern {
+			t.Errorf("%s %s dispatches to %q, want its own route %q", method, target, got, pattern)
+		}
+	}
+
+	// ⭐ And the paths the decomposition stranded reach the fallback, not a
+	// wallet route and not the SPA.
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+	}{
+		{"deep path the prefix used to swallow", http.MethodGet, "/api/v1/wallets/a/b/c/d"},
+		{"the bare prefix, which answered 400 before", http.MethodGet, "/api/v1/wallets/"},
+		{"an unknown sub-resource", http.MethodGet, "/api/v1/wallets/w-1/unknown"},
+		// ⚠️ A trailing slash used to be forgiven by ServeWalletHTTP's
+		// TrimSuffix and served the wallet; Go's mux never strips one, so these
+		// are unmatched now. Listed as rows rather than left to be discovered by
+		// whoever wrote the client that sends them.
+		{"a wallet with a trailing slash", http.MethodGet, "/api/v1/wallets/w-1/"},
+		{"members with a trailing slash", http.MethodGet, "/api/v1/wallets/w-1/members/"},
+		// ⚠️ Proposal §0 correction 9, arriving for real: the mux answers 405
+		// only when *nothing* matches, and "/api/v1/" matches every method. So a
+		// wrong method under /api/v1 is a 404, not a 405. Before S3 this one was
+		// WalletHandler's own 405 JSON.
+		{"a method no wallet route serves", http.MethodDelete, "/api/v1/wallets"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pattern := r.mux.Handler(httptest.NewRequest(tc.method, tc.target, nil))
+			if pattern != "/api/v1/" {
+				t.Fatalf("%s %s dispatches to %q, want the /api/v1/ fallback — "+
+					"a wallet pattern is still claiming more than one endpoint's worth of paths",
+					tc.method, tc.target, pattern)
+			}
+
+			rec := httptest.NewRecorder()
+			r.Handler().ServeHTTP(rec, httptest.NewRequest(tc.method, tc.target, nil))
+			if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+				t.Fatalf("%s %s answered HTML (%d, content-type %q) — a JSON client would break on it",
+					tc.method, tc.target, rec.Code, rec.Header().Get("Content-Type"))
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s answered %d, want 401: the request carries no credential and the fallback is "+
+					"AuthenticatedOnly, so the chain must refuse before the 404 body", tc.method, tc.target, rec.Code)
+			}
+		})
+	}
+}
+
 // TestAPIFallback_RulesPrefixStillAnswersItsOwn400 is the one the task calls
 // for by name, and it runs the real handler/evm/rule.go — not a marker — behind
 // the real patterns, with the fallback registered.

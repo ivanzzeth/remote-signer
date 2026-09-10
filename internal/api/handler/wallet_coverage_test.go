@@ -78,7 +78,7 @@ func TestWallet_createWallet_RepoError(t *testing.T) {
 	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
 	require.NoError(t, err)
 
-	body, _ := json.Marshal(createWalletRequest{Name: "Test Wallet"})
+	body, _ := json.Marshal(CreateWalletRequest{Name: "Test Wallet"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets", bytes.NewReader(body))
 	req = req.WithContext(walletAdminCtx(t))
 	w := httptest.NewRecorder()
@@ -138,7 +138,7 @@ func TestWallet_updateWallet_RepoError(t *testing.T) {
 	sqlDB.Close()
 
 	name := "Updated Name"
-	body, _ := json.Marshal(updateWalletRequest{Name: &name})
+	body, _ := json.Marshal(UpdateWalletRequest{Name: &name})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/wallets/"+wallet.ID, bytes.NewReader(body))
 	req = req.WithContext(walletAdminCtx(t))
 	w := httptest.NewRecorder()
@@ -245,7 +245,7 @@ func TestWallet_addMember_Unauthorized(t *testing.T) {
 	require.NoError(t, err)
 
 	// No API key in context
-	body, _ := json.Marshal(addMemberRequest{SignerAddress: "0x1234567890abcdef1234567890abcdef12345678"})
+	body, _ := json.Marshal(AddMemberRequest{SignerAddress: "0x1234567890abcdef1234567890abcdef12345678"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/wallet-1/members", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.addMember(w, req, "wallet-1")
@@ -266,7 +266,7 @@ func TestWallet_addMember_EmptySignerAddress(t *testing.T) {
 	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
 	require.NoError(t, err)
 
-	body, _ := json.Marshal(addMemberRequest{SignerAddress: ""})
+	body, _ := json.Marshal(AddMemberRequest{SignerAddress: ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/wallet-1/members", bytes.NewReader(body))
 	req = req.WithContext(walletAdminCtx(t))
 	w := httptest.NewRecorder()
@@ -294,7 +294,7 @@ func TestWallet_addMember_RepoError(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB.Close()
 
-	body, _ := json.Marshal(addMemberRequest{SignerAddress: "0x1234567890abcdef1234567890abcdef12345678"})
+	body, _ := json.Marshal(AddMemberRequest{SignerAddress: "0x1234567890abcdef1234567890abcdef12345678"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/wallet-1/members", bytes.NewReader(body))
 	req = req.WithContext(walletAdminCtx(t))
 	w := httptest.NewRecorder()
@@ -391,7 +391,7 @@ func TestWallet_createWallet_EmptyName(t *testing.T) {
 	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
 	require.NoError(t, err)
 
-	body, _ := json.Marshal(createWalletRequest{Name: ""})
+	body, _ := json.Marshal(CreateWalletRequest{Name: ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets", bytes.NewReader(body))
 	req = req.WithContext(walletAdminCtx(t))
 	w := httptest.NewRecorder()
@@ -414,7 +414,7 @@ func TestWallet_createWallet_Unauthorized(t *testing.T) {
 	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
 	require.NoError(t, err)
 
-	body, _ := json.Marshal(createWalletRequest{Name: "Test"})
+	body, _ := json.Marshal(CreateWalletRequest{Name: "Test"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.createWallet(w, req)
@@ -458,7 +458,7 @@ func TestWallet_updateWallet_EmptyName(t *testing.T) {
 	require.NoError(t, err)
 
 	emptyName := ""
-	body, _ := json.Marshal(updateWalletRequest{Name: &emptyName})
+	body, _ := json.Marshal(UpdateWalletRequest{Name: &emptyName})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/wallets/some-id", bytes.NewReader(body))
 	req = req.WithContext(walletAdminCtx(t))
 	w := httptest.NewRecorder()
