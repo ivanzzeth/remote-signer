@@ -60,8 +60,28 @@ for name in $layers; do
         echo "==> $name 层:没有匹配的包,跳过"; continue
     fi
     tagflag=(); [ -n "$tag" ] && tagflag=(-tags "$tag")
+
+    # ⛔ blackbox 与 e2e 必须 -count=1,禁用 go 的测试结果缓存。
+    #
+    # 这两层测的不是被编译进测试二进制的代码 —— 它们**起一个单独构建的 daemon**
+    # 然后打它的 HTTP 口。go 的缓存只看测试包自己的输入(源码 + 依赖 + 环境),
+    # 它**看不见那个 daemon 二进制变了**,于是改完 internal/api 之后照样重放
+    # 上一次的 `ok (cached)`。
+    #
+    # 2026-09-10 实测的后果:`/api/v1/` 兜底路由改了鉴权模式,
+    # tests/integration 的 TestWeb_UnknownAPIRouteIsNotSwallowed 从那一刻起
+    # 就是红的,而 pre-push 连续 **10 个提交**打印 `ok (cached)` 一次都没真跑。
+    # ⚠️ 而 ci.yml 只在 main/dev 和 PR 上触发,feature 分支的 push 不跑这两层,
+    # 所以两道门同时是哑的。
+    #
+    # 判据:*这个测试的结论依赖于测试二进制之外的东西吗?* 是,就不能吃缓存。
+    countflag=()
+    case "$name" in
+        blackbox|e2e) countflag=(-count=1) ;;
+    esac
+
     printf '==> %s 层%s\n' "$name" "${tag:+ (tags=$tag)}"
     # shellcheck disable=SC2086
-    $GO test "${tagflag[@]}" "${runflag[@]}" $pkgs || rc=1
+    $GO test "${tagflag[@]}" "${countflag[@]}" "${runflag[@]}" $pkgs || rc=1
 done
 exit "$rc"

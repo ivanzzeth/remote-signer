@@ -57,6 +57,23 @@ func TestWeb_HistoryFallback(t *testing.T) {
 // TestWeb_UnknownAPIRouteIsNotSwallowed guards against the regression where
 // the catch-all "/" handler accidentally serves HTML for unknown
 // /api/v1/* paths — that would mask 404s as 200s and confuse clients.
+//
+// ⚠️ The status assertion is deliberately "401 or 404", not "404". This request
+// carries **no credential**, and the `/api/v1/` fallback is registered
+// AuthenticatedOnly, so an anonymous caller stops at 401 and never sees the 404
+// body. That is the intended design and not a regression: making the fallback
+// Public would answer 404 here, but then 404-vs-401 tells an unauthenticated
+// caller which routes exist — a free map of the route table, and there is no SPA
+// catch-all to hide behind on a daemon whose Web UI is off. Decided 2026-09-11.
+//
+// ⛔ What this test is actually for is the other assertion: **not HTML**. Both
+// 401 and 404 satisfy the property in the comment above; serving the SPA does
+// not. Pinning the exact status was over-tight, and it went red for a change
+// that preserved the property it exists to protect.
+//
+// ⚠️ This test was red for 10 commits before anyone saw it: pre-push ran the
+// blackbox layer without -count=1, and Go's cache cannot see that the separately
+// built daemon changed, so it replayed `ok (cached)`. Fixed in run-tests.sh.
 func TestWeb_UnknownAPIRouteIsNotSwallowed(t *testing.T) {
 	d := startDaemon(t)
 	resp, err := http.Get(d.url() + "/api/v1/this-route-does-not-exist")
@@ -64,8 +81,8 @@ func TestWeb_UnknownAPIRouteIsNotSwallowed(t *testing.T) {
 		t.Fatalf("GET /api/v1/typo: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("/api/v1/typo status = %d, want 404", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusNotFound {
+		t.Errorf("/api/v1/typo status = %d, want 401 (anonymous) or 404", resp.StatusCode)
 	}
 	if ct := resp.Header.Get("Content-Type"); strings.HasPrefix(ct, "text/html") {
 		t.Errorf("unknown API path should not return HTML; got content-type %q", ct)

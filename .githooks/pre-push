@@ -86,13 +86,21 @@ fi
 echo "   ✅ No large files."
 
 # ─── 3. 测试 ────────────────────────────────────────────────
+#
+# ⛔ 走 `make test LAYER=...`,不要在这里另写一份 `go test`。
+#
+# 这里原本直接调 `go test -tags integration ./tests/integration/...`,于是
+# 有两个问题同时成立:① 包列表在 scripts/lib/layers.sh 之外又抄了一份;
+# ② 少了 `-count=1`,而 blackbox 层起的是**单独构建的 daemon**,go 的缓存
+# 看不见那个二进制变了。2026-09-10 的后果:`/api/v1/` 兜底改了鉴权模式后
+# TestWeb_UnknownAPIRouteIsNotSwallowed 一直是红的,而这里连续 10 个提交
+# 打印 `ok (cached)`,一次都没真跑。-count=1 现在由 run-tests.sh 按层决定。
 if [ "$IS_TAG_PUSH" = true ]; then
     echo "→ SemVer tag push detected, running ALL tests..."
-    (cd "$REPO_ROOT" && go test -tags integration ./internal/...) || exit 1
-    (cd "$REPO_ROOT" && go test -tags integration ./tests/integration/...) || exit 1
+    (cd "$REPO_ROOT" && make test LAYER=all) || exit 1
 else
-    echo "→ Running integration tests..."
-    (cd "$REPO_ROOT" && go test -tags integration ./tests/integration/...) || exit 1
+    echo "→ Running blackbox layer..."
+    (cd "$REPO_ROOT" && make test LAYER=blackbox) || exit 1
 fi
 
 echo "✅ All pre-push checks passed."
