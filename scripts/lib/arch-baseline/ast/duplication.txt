@@ -36,9 +36,17 @@
 #   照常。两份已经在文档上漂了:模板那份的注释写着「解析失败不中断遍历,跳过该
 #   文件」,而代码其实是 return err 中断整棵树 —— 注释描述的是早就不存在的行为。
 
+# 2026-09-10:4 → 3。两个 Upsert(模板 / preset)合成泛型 upsertCatalogueRow,
+#   两张表各自的差异收进一个 fresh 谓词。preset 那份的注释写着「Mirrors
+#   TemplateRepository.Upsert exactly」—— 而它不是:模板那份的跳过条件除了
+#   content_hash 还比 type/mode(用来修老版本写进去的 type="" 的 bundle 行),
+#   preset 那份只看 hash。差异本身是对的(RulePreset 没有 type/mode),错的是
+#   那句「exactly」:下一个照着 preset 抄第三张表的人会连模板的修复逻辑一起漏掉。
+#   selectCols 与 fresh 现在挨着写 —— 投影里漏一列,那列读回来是零值、永远比不
+#   相等,跳过分支会退化成每次启动整表 UPDATE。
+
 # ⛔ 收敛方向是「同一个形状只留一份实现,两边都用它」。
 #
 internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPCUnchecked <-> internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPC
 internal/notify/pushover_client.go:(*PushoverClient).SendToUsers <-> internal/notify/slack_client.go:(*SlackClient).SendToChannels
 internal/notify/slack_client.go:(*SlackClient).SendToChannels <-> internal/notify/telegram_client.go:(*TelegramClient).SendToChats
-internal/storage/preset_repo.go:(*GormPresetRepository).Upsert <-> internal/storage/template_repo.go:(*GormTemplateRepository).Upsert

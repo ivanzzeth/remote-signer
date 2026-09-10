@@ -116,39 +116,12 @@ func (r *GormPresetRepository) Count(ctx context.Context, filter PresetFilter) (
 	return int(count), nil
 }
 
-// Upsert inserts or updates p based on ContentHash. Mirrors
-// TemplateRepository.Upsert exactly — when the on-disk hash matches
-// the cached row, skip the JSON marshal + UPDATE entirely.
+// Upsert inserts or updates p based on ContentHash. Presets carry no
+// type/mode, so the hash alone decides whether the write can be skipped —
+// see presetUpsert in catalogue_upsert.go, next to the template table's
+// stricter answer to the same question.
 func (r *GormPresetRepository) Upsert(ctx context.Context, p *types.RulePreset) (bool, error) {
-	if p == nil {
-		return false, fmt.Errorf("preset cannot be nil")
-	}
-	if p.ID == "" {
-		return false, fmt.Errorf("preset id is required")
-	}
-	var existing types.RulePreset
-	err := r.db.WithContext(ctx).Select("id, content_hash").
-		First(&existing, "id = ?", p.ID).Error
-	now := time.Now()
-	if err == gorm.ErrRecordNotFound {
-		p.CreatedAt = now
-		p.UpdatedAt = now
-		if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
-			return false, fmt.Errorf("failed to create preset: %w", err)
-		}
-		return true, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("failed to check existing preset: %w", err)
-	}
-	if existing.ContentHash != "" && existing.ContentHash == p.ContentHash {
-		return false, nil
-	}
-	p.UpdatedAt = now
-	if err := r.db.WithContext(ctx).Save(p).Error; err != nil {
-		return false, fmt.Errorf("failed to update preset: %w", err)
-	}
-	return true, nil
+	return upsertCatalogueRow(ctx, r.db, p, presetUpsert)
 }
 
 // ListIDsBySource returns IDs of presets sourced from `source`.

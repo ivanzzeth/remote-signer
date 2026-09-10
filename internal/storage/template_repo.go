@@ -114,48 +114,11 @@ func (r *GormTemplateRepository) List(ctx context.Context, filter TemplateFilter
 	return templates, nil
 }
 
-// Upsert inserts or updates tmpl based on content_hash. The Registry
-// uses this on every Sync — most boots see no template changes, so the
-// hash-equality fast path matters: it's a single SELECT vs. a full
-// JSON marshal + UPDATE for every row in the source.
+// Upsert inserts or updates tmpl based on content_hash, type and mode — see
+// templateUpsert in catalogue_upsert.go for why type/mode are in the
+// freshness check and the preset table's are not.
 func (r *GormTemplateRepository) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
-	if tmpl == nil {
-		return false, fmt.Errorf("template cannot be nil")
-	}
-	if tmpl.ID == "" {
-		return false, fmt.Errorf("template id is required")
-	}
-	var existing types.RuleTemplate
-	err := r.db.WithContext(ctx).Select("id, content_hash, type, mode").
-		First(&existing, "id = ?", tmpl.ID).Error
-	now := time.Now()
-	if err == gorm.ErrRecordNotFound {
-		tmpl.CreatedAt = now
-		tmpl.UpdatedAt = now
-		if err := r.db.WithContext(ctx).Create(tmpl).Error; err != nil {
-			return false, fmt.Errorf("failed to create template: %w", err)
-		}
-		return true, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("failed to check existing template: %w", err)
-	}
-	// Skip the write when content_hash matches AND the stored
-	// type/mode agree with the incoming row. The extra type/mode
-	// guard rescues rows from older registry builds that stored
-	// bundle-style templates with type="" (the bundle dispatch then
-	// silently did nothing). A code change in file_source.go can leave
-	// the YAML file's hash untouched but still need a fresh upsert to
-	// repair the stored shape.
-	if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash &&
-		existing.Type == tmpl.Type && existing.Mode == tmpl.Mode {
-		return false, nil
-	}
-	tmpl.UpdatedAt = now
-	if err := r.db.WithContext(ctx).Save(tmpl).Error; err != nil {
-		return false, fmt.Errorf("failed to update template: %w", err)
-	}
-	return true, nil
+	return upsertCatalogueRow(ctx, r.db, tmpl, templateUpsert)
 }
 
 // ListIDsBySource returns IDs of templates that came from the given source.
