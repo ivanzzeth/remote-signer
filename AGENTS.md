@@ -53,7 +53,7 @@ remote-signer/
 │   ├── rs-client/          # Rust SDK
 │   └── ...                 # 共享工具
 ├── web/                    # React Web UI (Vite)
-├── tui/                    # Terminal UI (Bubble Tea)
+├── tui/                    # ⛔ 冻结的遗留终端界面（2026-04-03；只修 bug，不接新功能）
 ├── electron/               # Electron 桌面壳
 ├── extension/              # Chrome 浏览器扩展
 ├── e2e/                    # E2E 测试（build tag: e2e）
@@ -90,7 +90,8 @@ remote-signer/
 | `docs/rules-templates-and-presets.md` | 规则模板、实例、预设概念 |
 | `docs/rule-syntax.md` | 所有规则类型及示例 |
 | `docs/tls.md` | TLS/mTLS 证书配置 |
-| `docs/tui.md` | TUI 操作指南 |
+| [`docs/product-forms.md`](docs/product-forms.md) | 五种壳；⛔ **TUI 已冻结**的缺口清单（§3.3）与 PRD **D16** |
+| `docs/tui.md` | TUI 操作指南 —— ⛔ 冻结的遗留形态，新功能一律进 Web UI |
 
 ## 常用命令
 
@@ -122,7 +123,7 @@ make clean              # 清理构建产物
 ./remote-signer server stop            # 优雅停止（读取 ~/.remote-signer/remote-signer.pid）
 tail -f ~/.remote-signer/remote-signer.log
 
-# 启动 TUI
+# 启动 TUI（⛔ 冻结的遗留形态，与 Web UI 不对等 —— docs/product-forms.md §3.3）
 ./remote-signer tui
 
 # 验证规则
@@ -152,6 +153,7 @@ go test -tags e2e ./e2e/...
 | `integration` | `internal/...`（真 SQLite 的仓储测试在这里） | `integration` | 慢 |
 | `blackbox` | `tests/integration/...` | `integration` | 慢 |
 | `e2e` | `e2e/...` | `e2e` | 慢 |
+| `web-unit` | Vitest 打 `web/src`（`src/lib/*.test.ts`） | 无（`@cmd`，不是 go test） | 只需 node，≈18s，**进 `all`** |
 | `web-e2e` | Playwright 打嵌入式 React UI | 无（`@cmd`，不是 go test） | 需 node + 浏览器，`all` 不含；`LAYER=web-e2e` 或 `everything` |
 
 ⭐ `unit` 是**余量**而非写死列表 —— 这样**新包不可能逃出所有层**。写死的那一版

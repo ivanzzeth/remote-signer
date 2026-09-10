@@ -2,13 +2,15 @@
 
 This document is the **auditable** mapping between the Go SDK surface (`github.com/ivanzzeth/remote-signer/pkg/client`) and what `remote-signer` exposes today.
 
-It exists to prevent accidental “full parity” claims: **the SDK is a superset of what we want to expose via a terminal UX**, and some workflows are intentionally **TUI-first** or **HTTP-only**.
+It exists to prevent accidental “full parity” claims: **the SDK is a superset of what we want to expose via a terminal UX**, and some workflows are intentionally **UI-first** or **HTTP-only**.
+
+⛔ **“UI-first” means the Web UI.** The TUI is a **frozen legacy surface** (frozen 2026-04-03, no new features — [`product-forms.md`](product-forms.md) §3.3, PRD **D16**), so it must never be used as the deferral route for a capability it does not already have.
 
 ## Legend
 
 - **CLI covered**: there is a `remote-signer` subcommand that calls the SDK method(s) directly.
 - **CLI partial**: CLI exists but does not expose every filter/field the SDK supports (gap is noted).
-- **Intentionally not CLI (defer)**: deliberate product choice; use TUI/HTTP/SDK for now.
+- **Intentionally not CLI (defer)**: deliberate product choice; use the Web UI / HTTP / SDK for now.
 - **Needs board scope**: would materially expand operator-facing surface area or security posture; should be a separate decision.
 
 ## CLI-only observability (not an SDK mapping)
@@ -77,11 +79,11 @@ The EVM SDK is large (signing, rules, wallets, requests, simulation, broadcast, 
 
 These are **SDK-present** capabilities that are still intentionally **not** mirrored as CLI commands because they are primarily interactive or are not “safe” as scriptable operators:
 
-- **Anything better served by the TUI** (interactive workflows): use `remote-signer tui` (pass-through) or the web/TUI surfaces.
+- **Anything better served by an interactive surface**: use the **Web UI**. ⚠️ `remote-signer tui` covers only what it already had when it froze; do not route a new capability there.
 - **Low-level “compose arbitrary calldata” helpers** (if added in the future): must remain behind explicit, validated intent types (per product governance), not free-form blobs.
 
 ## Change policy (how to edit this file)
 
 1. If you add a new SDK service method, update this matrix **in the same PR**.
-2. If CLI is intentionally not added, mark **Intentionally not CLI (defer)** and link to the TUI/HTTP route.
+2. If CLI is intentionally not added, mark **Intentionally not CLI (defer)** and link to the Web UI / HTTP route.
 3. If you need a new CLI command family, confirm **no divergence** with the Founding Engineer’s stack boundaries first.

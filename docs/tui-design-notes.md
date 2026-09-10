@@ -6,6 +6,10 @@
 
 **现状**看 [`tui.md`](tui.md);**代码**是唯一权威。
 
+⛔ **终端界面本身已于 2026-04-03 冻结**(PRD **D16**,缺口清单见
+[`product-forms.md`](product-forms.md) §3.3)。⚠️ 这两份提案里没做完的部分**不是待办**
+—— 它们不会再被实现。
+
 ---
 
 ## 提案一:Rules 收纳 Templates / Presets

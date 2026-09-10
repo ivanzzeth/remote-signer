@@ -12,8 +12,8 @@ A secure, policy-driven signing service for EVM chains. Controls **what** gets s
 |-----------|-------------|
 | **Server** | Daemon exposing a REST API (`:8548`), with Ed25519 auth, SQLite or PostgreSQL, and a rule engine |
 | **CLI** | `remote-signer` binary — unified entrypoint for `server start`, `tui`, `validate`, `api-key`, `evm sign/broadcast/simulate`, rule management |
-| **TUI** | Terminal UI (`remote-signer tui`) for interactive monitoring and management |
-| **Web UI** | React dashboard served by the daemon at `http://127.0.0.1:8548` |
+| **Web UI** | React dashboard served by the daemon at `http://127.0.0.1:8548` — **the full-featured surface; all feature work happens here** |
+| **TUI** | ⛔ **Frozen legacy** (frozen 2026-04-03). Terminal UI (`remote-signer tui`) for read-mostly monitoring; **not** at parity with the Web UI and **no new features accepted** — gaps in [`docs/product-forms.md`](docs/product-forms.md) §3.3 |
 | **Desktop** | Electron shell (`.dmg`/`.exe`/`.AppImage`) wrapping the daemon + Web UI |
 | **Chrome Extension** | EIP-1193 provider injection (`window.ethereum`) for dApp connectivity |
 | **MCP Server** | `remote-signer-mcp` (npm) — exposes all operations as MCP tools for AI agents (Claude Code, Cursor, etc.) |
@@ -174,7 +174,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
 | [Rule Syntax Reference](docs/rule-syntax.md) | All rule types with examples |
 | [Integration Guide](docs/integration.md) | Go/TS/Rust SDKs, MCP server |
 | [TLS / mTLS Guide](docs/tls.md) | Certificate trust model, generation, production practices |
-| [TUI Guide](docs/tui.md) | Remote Signer TUI guide (`remote-signer tui`): build, run, key bindings, real-time request monitoring |
+| [Product Forms](docs/product-forms.md) | The five shells, profile-based backend switching, and ⛔ the frozen-TUI capability gaps (§3.3) |
+| [TUI Guide](docs/tui.md) | ⛔ **Frozen legacy** (2026-04-03): build, run, key bindings. Not at parity with the Web UI |
 | [SDK/CLI Matrix](docs/sdk-cli-matrix.md) | Go SDK surface mapped to CLI commands, coverage gaps, and operator tools |
 | [Testing](TESTING.md) | Unit tests, E2E, rule validation |
 | [GIT.md](GIT.md) | Release flow, version conventions, NPM_TOKEN setup, Docker compose modes |

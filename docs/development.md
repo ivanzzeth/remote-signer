@@ -79,7 +79,7 @@ remote-signer/
 │   └── storage/            # 数据层 (GORM)
 ├── pkg/                    # 公开 SDK
 ├── web/                    # React Web UI
-├── tui/                    # Terminal UI
+├── tui/                    # ⛔ 冻结的遗留终端界面（见 product-forms.md §3.3）
 ├── electron/               # Electron 桌面壳
 ├── extension/              # Chrome 扩展
 ├── e2e/                    # E2E 测试
@@ -121,7 +121,7 @@ go fmt ./...            # 格式化
 ./remote-signer validate rules/
 ./remote-signer validate
 
-# TUI
+# TUI（⛔ 已冻结，不接新功能 —— product-forms.md §3.3）
 ./remote-signer tui
 
 # 清理

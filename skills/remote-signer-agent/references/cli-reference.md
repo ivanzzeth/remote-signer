@@ -63,7 +63,7 @@ Run `./remote-signer doctor --url http://127.0.0.1:8548 --tls-skip-verify` to sa
 ```bash
 # Server
 ./remote-signer                          # Start daemon
-./remote-signer tui                      # Terminal UI
+./remote-signer tui                      # Terminal UI (frozen legacy; Web UI is the full surface)
 ./remote-signer validate rules/          # Offline rule validation (needs forge)
 
 # API Key management (requires admin auth)

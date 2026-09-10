@@ -1,5 +1,20 @@
 # TUI (Terminal User Interface)
 
+> ⛔ **Frozen legacy surface — frozen 2026-04-03 (`abc01e5`). No new features are
+> accepted here.** Decision recorded as **D16** in [`prd.md`](prd.md) §7.
+
+| | |
+|---|---|
+| Status | Kept in the repo, still builds, still runs; bug fixes and security fixes only |
+| New features | **Not accepted.** Feature work happens in the **Web UI** |
+| Why it is kept | It still works for the read-mostly operator flows it already covers |
+| What it cannot do | ⛔ It is **not** at parity with the Web UI. The concrete missing-capability table is in [`product-forms.md`](product-forms.md) §3.3 |
+| Rewrite | ⛔ Rejected — a single static binary ships with no Node runtime; see [`product-forms.md`](product-forms.md) §3.3 |
+
+⭐ One capability runs the other way: the **Metrics** view (Prometheus `/metrics`,
+p50/p95 latency histograms) exists **only** here. Closing that gap is tracked as
+**F1** in [`product-forms.md`](product-forms.md) §5.
+
 The remote-signer includes a terminal-based management interface for monitoring and managing the signing service.
 
 ## Build
@@ -44,9 +59,14 @@ When connecting to a TLS-enabled server, see [tls.md](tls.md#client-usage) for t
 
 - **Dashboard** — Service health, request counts by status, rules summary
 - **Requests** — View all sign requests, filter by status, approve/reject pending requests
+  (⛔ one at a time — batch approve/reject is Web UI only)
 - **Rules** — View/edit authorization rules, toggle enable/disable, delete rules
+  (⛔ no propose/approve flow, no validation, budgets are read-only here)
 - **Signers** — Create keystores, import/create HD wallets (mnemonic wallets), derive addresses
 - **Audit Logs** — View all audit events, filter by event type or severity
+- **Metrics** — ⭐ Prometheus `/metrics` scrape with p50/p95 latency histograms.
+  **The only view with no Web UI equivalent**
+- **API Keys · Templates · Presets · Security** — ⚠️ browse only; all writes are Web UI only
 
 ## Key Bindings
 
