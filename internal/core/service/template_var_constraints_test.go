@@ -100,7 +100,7 @@ func TestValidateVariableConstraints(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateVariableConstraints(tc.def, tc.value)
+			err := ValidateVariableConstraints(tc.def, tc.value)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("want accepted, got %v", err)

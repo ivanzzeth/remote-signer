@@ -29,6 +29,15 @@ func validateTemplateOptionalVarsHaveDefault(vars []TemplateVarConfig, filePath 
 		if v.Default == nil {
 			return fmt.Errorf("optional variable %q must declare default (file: %s)", v.Name, filePath)
 		}
+		// A default that violates the variable's own options/pattern/min/max is
+		// a template the operator can never apply, and without this it only
+		// says so at apply time — after the preset has been chosen and the
+		// values filled in.
+		if def, ok := v.Default.(string); ok {
+			if err := service.ValidateVariableConstraints(v, def); err != nil {
+				return fmt.Errorf("variable %q: default violates its own constraint: %w (file: %s)", v.Name, err, filePath)
+			}
+		}
 	}
 	return nil
 }

@@ -1,9 +1,12 @@
 package validate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 func TestValidateTemplateOptionalVarsHaveDefault_AllRequired(t *testing.T) {
@@ -97,4 +100,29 @@ func TestExtractTestCasesFromConfig_InvalidTestCases(t *testing.T) {
 	}
 	extractTestCasesFromConfig(rules)
 	assert.Len(t, rules[0].TestCases, 0)
+}
+
+// TestValidateTemplateOptionalVarsHaveDefault_RejectsDefaultOutsideItsOwnBound:
+// a default the template's own max forbids can never be applied, and saying so
+// at validate time beats saying it after the operator has filled in a preset.
+func TestValidateTemplateOptionalVarsHaveDefault_RejectsDefaultOutsideItsOwnBound(t *testing.T) {
+	max := "1000"
+	err := validateTemplateOptionalVarsHaveDefault([]TemplateVarConfig{
+		{Name: "cap", Type: types.VarTypeBigInt, Required: false, Default: "5000", Max: &max},
+	}, "t.yaml")
+	if err == nil {
+		t.Fatal("want an error: default 5000 exceeds the declared max 1000")
+	}
+	if !strings.Contains(err.Error(), "above max") {
+		t.Errorf("error should name the bound, got %v", err)
+	}
+}
+
+func TestValidateTemplateOptionalVarsHaveDefault_AcceptsDefaultInsideItsBound(t *testing.T) {
+	max := "1000"
+	if err := validateTemplateOptionalVarsHaveDefault([]TemplateVarConfig{
+		{Name: "cap", Type: types.VarTypeBigInt, Required: false, Default: "999", Max: &max},
+	}, "t.yaml"); err != nil {
+		t.Fatalf("want accepted, got %v", err)
+	}
 }

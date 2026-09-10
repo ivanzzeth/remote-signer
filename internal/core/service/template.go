@@ -1036,7 +1036,7 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 			return err
 		}
 		// Declared constraints, applied after the type check.
-		if err := validateVariableConstraints(def, val); err != nil {
+		if err := ValidateVariableConstraints(def, val); err != nil {
 			return err
 		}
 	}
@@ -1044,7 +1044,7 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 	return nil
 }
 
-// validateVariableConstraints enforces the Options / Pattern / Min / Max a
+// ValidateVariableConstraints enforces the Options / Pattern / Min / Max a
 // template declares on a variable.
 //
 // ⚠️ These four fields shipped documented as enforced — "Validator requires the
@@ -1057,7 +1057,10 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 // ⚠️ An empty value skips every constraint, matching the convention the type
 // checks already use: empty means "unconstrained / not supplied" for address and
 // the list types, and an optional variable left blank must not trip a bound.
-func validateVariableConstraints(def types.TemplateVariable, value string) error {
+// ValidateVariableConstraints is exported so `remote-signer validate` applies the
+// same rules the daemon does at apply time. ⛔ Two implementations of a bound is
+// how the two ends come to disagree about the same template.
+func ValidateVariableConstraints(def types.TemplateVariable, value string) error {
 	if value == "" {
 		return nil
 	}
