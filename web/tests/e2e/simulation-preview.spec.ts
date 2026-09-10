@@ -64,23 +64,23 @@ test.describe("SimulationPreview on RequestDetail", () => {
     // 3. The Simulation preview heading + decision badge land within
     //    a couple seconds of mount (first poll fires immediately,
     //    daemon roundtrip is single-digit ms in test).
-    await expect(authedPage.getByText("Simulation preview")).toBeVisible({
+    await expect(authedPage.getByText("Simulation preview").first()).toBeVisible({
       timeout: 5_000,
     });
-    await expect(authedPage.getByText("would auto-approve")).toBeVisible();
+    await expect(authedPage.getByText("would auto-approve").first()).toBeVisible();
     // Gas + balance change + contracts touched all surface from the
     // seeded row.
-    await expect(authedPage.getByText("287,453")).toBeVisible();
-    await expect(authedPage.getByText(/Balance changes/i)).toBeVisible();
-    await expect(authedPage.getByText(/Decoded calldata/i)).toBeVisible();
-    await expect(authedPage.getByText(/Contracts touched/i)).toBeVisible();
+    await expect(authedPage.getByText("287,453").first()).toBeVisible();
+    await expect(authedPage.getByText(/Balance changes/i).first()).toBeVisible();
+    await expect(authedPage.getByText(/Decoded calldata/i).first()).toBeVisible();
+    await expect(authedPage.getByText(/Contracts touched/i).first()).toBeVisible();
     // ⚠️ .first(): the seeded row names 0xabc twice — once as the event's
     // emitting address and once in "contracts touched" — and the panel renders
     // both, so the bare locator fails on ambiguity rather than on absence.
     await expect(authedPage.getByText("0xabc").first()).toBeVisible();
 
     // 4. Sanity: the auto-refresh indicator names a fresh fetch.
-    await expect(authedPage.getByText(/auto-refresh/i)).toBeVisible();
+    await expect(authedPage.getByText(/auto-refresh/i).first()).toBeVisible();
   });
 
   test("renders 'evaluating' loading state when no simulation row exists", async ({
@@ -106,14 +106,14 @@ test.describe("SimulationPreview on RequestDetail", () => {
       window.history.pushState({}, "", `/requests/${id}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
     }, requestID);
-    await expect(authedPage.getByText("Simulation preview")).toBeVisible({
+    await expect(authedPage.getByText("Simulation preview").first()).toBeVisible({
       timeout: 5_000,
     });
     // Pin to the exact spinner copy. A loose /Evaluating/i regex
     // would also match the seeded request id ("req-sim-evaluating-…")
     // and pass even if the spinner never rendered.
     await expect(
-      authedPage.getByText("Evaluating… first simulation takes a few seconds."),
+      authedPage.getByText("Evaluating… first simulation takes a few seconds.").first(),
     ).toBeVisible();
   });
 
@@ -141,9 +141,9 @@ test.describe("SimulationPreview on RequestDetail", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     }, requestID);
     // The Request card mounts; the Simulation preview does NOT.
-    await expect(authedPage.getByText("Request ID")).toBeVisible({
+    await expect(authedPage.getByText("Request ID").first()).toBeVisible({
       timeout: 5_000,
     });
-    await expect(authedPage.getByText("Simulation preview")).toHaveCount(0);
+    await expect(authedPage.getByText("Simulation preview").first()).toHaveCount(0);
   });
 });

@@ -26,7 +26,7 @@ test("Audit page loads + filtering by event_type reissues the query", async ({
   await filteredQuery;
 
   // No auth_failure events on a clean daemon → empty state.
-  await expect(authedPage.locator("text=No matching audit events")).toBeVisible();
+  await expect(authedPage.locator("text=No matching audit events").first()).toBeVisible();
 
   // Clear filters restores the unfiltered view.
   await authedPage.click("text=Clear filters");

@@ -103,7 +103,7 @@ test("edit a rule's config + name persists across reload", async ({
   // the config editor into Advanced raw-JSON so we can swap the whole
   // addresses list in one shot.
   const newName = `${rule.name}-updated`;
-  const editPanel = authedPage.locator("text=Edit rule").locator("..");
+  const editPanel = authedPage.locator("text=Edit rule").first().locator("..");
   await editPanel.locator("input").nth(0).fill(newName);
   await editPanel.getByLabel(/Advanced \(raw JSON\)/).check();
   await editPanel.locator("textarea").fill(

@@ -70,7 +70,7 @@ test("expanded rule detail shows CodeBlock with config JSON", async ({
 
   // The JSON config should be visible (CodeBlock defaultOpen).
   await expect(
-    authedPage.locator("text=0x0000000000000000000000000000000000000001"),
+    authedPage.locator("text=0x0000000000000000000000000000000000000001").first(),
   ).toBeVisible();
 });
 
@@ -98,6 +98,6 @@ test("expanded rule detail shows owner attribution", async ({
   // The detail panel should show "Created by" with the admin key ID.
   // The admin key ID in the test daemon is "admin".
   await expect(
-    authedPage.locator("text=Created by"),
+    authedPage.locator("text=Created by").first(),
   ).toBeVisible();
 });

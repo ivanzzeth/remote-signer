@@ -17,8 +17,8 @@ test("Templates page lists built-in templates and routes to detail", async ({
   await expect(
     authedPage.getByRole("heading", { name: "ERC20 transfer/transferFrom limit" }),
   ).toBeVisible();
-  await expect(authedPage.locator("text=Metadata")).toBeVisible();
-  await expect(authedPage.locator("text=Instantiate as rule")).toBeVisible();
+  await expect(authedPage.locator("text=Metadata").first()).toBeVisible();
+  await expect(authedPage.locator("text=Instantiate as rule").first()).toBeVisible();
 });
 
 test("Template detail page shows variable form for required fields", async ({

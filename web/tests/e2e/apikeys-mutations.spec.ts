@@ -39,9 +39,9 @@ test("create new API key surfaces the one-time PEM panel", async ({
   const id = `e2e-create-${Date.now()}`;
   await createApiKey(authedPage, id, { name: `${id} name` });
 
-  await expect(authedPage.locator("text=Save the private key for")).toBeVisible();
+  await expect(authedPage.locator("text=Save the private key for").first()).toBeVisible();
   await expect(authedPage.locator(`text=${id}`).first()).toBeVisible();
-  await expect(authedPage.locator("text=-----BEGIN PRIVATE KEY-----")).toBeVisible();
+  await expect(authedPage.locator("text=-----BEGIN PRIVATE KEY-----").first()).toBeVisible();
 
   await expect(apiKeyRow(authedPage, id)).toBeVisible();
 });
@@ -51,7 +51,7 @@ test("disable + re-enable round-trips through the daemon", async ({
 }) => {
   const id = `e2e-toggle-${Date.now()}`;
   await createApiKey(authedPage, id);
-  await expect(authedPage.locator("text=-----BEGIN PRIVATE KEY-----")).toBeVisible();
+  await expect(authedPage.locator("text=-----BEGIN PRIVATE KEY-----").first()).toBeVisible();
   await authedPage.click("text=Dismiss");
 
   const row = apiKeyRow(authedPage, id);

@@ -1,3 +1,16 @@
+// ⛔ Page-level text assertions in this suite must end in .first() (or .nth()).
+//
+// The whole suite shares one daemon and one database, serially, and every spec
+// leaves rows behind. A word like "Pending" or an address that is unique when a
+// spec runs alone appears three times once earlier specs have run, and
+// Playwright's strict mode then fails on the ambiguity rather than on anything
+// being wrong. Twenty checks were red for forty-odd commits partly for this
+// reason, and every one of them passed when run on its own — which is exactly
+// what made them survive.
+//
+// ⚠️ row.getByText(...) is fine: it is already scoped to one row. It is the
+// page-level ones that go stale.
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";

@@ -27,7 +27,7 @@ test("create wallet + add member + delete via UI", async ({ authedPage }) => {
   await expect(
     authedPage.getByRole("heading", { name: "Members" }),
   ).toBeVisible();
-  await expect(authedPage.locator("text=No members yet")).toBeVisible();
+  await expect(authedPage.locator("text=No members yet").first()).toBeVisible();
 
   // Delete the wallet.
   await row.getByRole("button", { name: "Delete" }).click();

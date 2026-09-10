@@ -28,7 +28,7 @@ test("security max_request_age edit persists via the typed form", async ({
     .first();
   // Actually grab the input by its proximity to the label.
   const input = authedPage
-    .locator("dl > div", { has: authedPage.locator("text=max_request_age") })
+    .locator("dl > div", { has: authedPage.locator("text=max_request_age").first() })
     .locator("input")
     .first();
   await input.fill("90s");

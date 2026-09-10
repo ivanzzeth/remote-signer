@@ -52,7 +52,7 @@ test("derived HD address opens a functional access panel for the owner", async (
   //    IsOwner returns true and the list endpoint returns an empty
   //    array.
   await derivedRow.click();
-  await expect(authedPage.getByText(/not the owner of signer/i)).toHaveCount(0);
+  await expect(authedPage.getByText(/not the owner of signer/i).first()).toHaveCount(0);
 
   // 5. The Grant form must render and be interactive. We assert the
   //    select by its data-testid rather than the visible label so the

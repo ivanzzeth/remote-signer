@@ -14,13 +14,13 @@ test("Dashboard shows sign request queue + full security block", async ({
   await expect(
     authedPage.getByTestId("dashboard-request-queue"),
   ).toBeVisible();
-  await expect(authedPage.getByText("Pending")).toBeVisible();
-  await expect(authedPage.getByText("Authorizing")).toBeVisible();
+  await expect(authedPage.getByText("Pending").first()).toBeVisible();
+  await expect(authedPage.getByText("Authorizing").first()).toBeVisible();
 
-  await expect(authedPage.getByText("Auto-lock")).toBeVisible();
-  await expect(authedPage.getByText("Sign timeout")).toBeVisible();
-  await expect(authedPage.getByText("Audit retention")).toBeVisible();
-  await expect(authedPage.getByText("Content-Type check")).toBeVisible();
+  await expect(authedPage.getByText("Auto-lock").first()).toBeVisible();
+  await expect(authedPage.getByText("Sign timeout").first()).toBeVisible();
+  await expect(authedPage.getByText("Audit retention").first()).toBeVisible();
+  await expect(authedPage.getByText("Content-Type check").first()).toBeVisible();
 });
 
 test("Dashboard shows signers pending approval queue for admin", async ({
@@ -56,7 +56,7 @@ test("Settings shows admin security panel (IP ACL + guard resume)", async ({
     authedPage.getByRole("heading", { name: "Settings" }),
   ).toBeVisible();
   await expect(authedPage.getByTestId("admin-security-panel")).toBeVisible();
-  await expect(authedPage.getByText("IP whitelist (read-only)")).toBeVisible();
+  await expect(authedPage.getByText("IP whitelist (read-only)").first()).toBeVisible();
   // E2E daemon enables approval_guard; production may show "not configured" instead.
   const resume = authedPage.getByTestId("guard-resume");
   const notConfigured = authedPage.getByTestId("guard-not-configured");
@@ -227,7 +227,7 @@ test("Request detail shows approval panel with preview rule on agent-owned reque
   );
 
   await authedPage.getByRole("button", { name: "Preview rule" }).click();
-  await expect(authedPage.getByText("Preview config")).toBeVisible({
+  await expect(authedPage.getByText("Preview config").first()).toBeVisible({
     timeout: 15_000,
   });
 });

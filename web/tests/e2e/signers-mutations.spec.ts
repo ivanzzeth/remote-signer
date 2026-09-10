@@ -15,7 +15,7 @@ test("create + lock + unlock + delete via the UI", async ({ authedPage }) => {
   // Newly created signer lands in the table. The exact address is random
   // so locate by display name.
   const row = authedPage.locator("tr", {
-    has: authedPage.locator("text=e2e-signer"),
+    has: authedPage.locator("text=e2e-signer").first(),
   });
   await expect(row).toBeVisible({ timeout: 5_000 });
   // Freshly created signers are unlocked by default — the create call
@@ -29,7 +29,7 @@ test("create + lock + unlock + delete via the UI", async ({ authedPage }) => {
 
   // Unlock dialog.
   await row.getByRole("button", { name: "Unlock" }).click();
-  const dialog = authedPage.locator("text=Unlock signer").locator("..");
+  const dialog = authedPage.locator("text=Unlock signer").first().locator("..");
   await expect(dialog).toBeVisible();
   await authedPage.fill("input[type=password]", PASSWORD);
   await authedPage.locator("button:has-text('Unlock')").last().click();
@@ -38,7 +38,7 @@ test("create + lock + unlock + delete via the UI", async ({ authedPage }) => {
   // Delete
   await row.getByRole("button", { name: "Delete" }).click();
   await acceptConfirm(authedPage);
-  await expect(authedPage.locator("text=e2e-signer")).toHaveCount(0);
+  await expect(authedPage.locator("text=e2e-signer").first()).toHaveCount(0);
 });
 
 test("import existing private key produces the expected EVM address", async ({
@@ -134,7 +134,7 @@ test("import with malformed hex shows a client-side error", async ({
   await authedPage.click("button:has-text('Import signer')");
 
   await expect(
-    authedPage.locator("text=private key must be 64 hex chars"),
+    authedPage.locator("text=private key must be 64 hex chars").first(),
   ).toBeVisible();
 });
 
@@ -149,6 +149,6 @@ test("password mismatch in create form is caught client-side", async ({
   await authedPage.click("button:has-text('Create signer')");
 
   await expect(
-    authedPage.locator("text=passwords do not match"),
+    authedPage.locator("text=passwords do not match").first(),
   ).toBeVisible();
 });

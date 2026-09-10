@@ -91,7 +91,7 @@ test("walkthrough step 1 — Simulations page runs dry-run and surfaces a result
   // E2E daemon may not register the simulate handler (404). Either outcome
   // proves the UI wired the POST and rendered feedback.
   const result = authedPage.getByRole("heading", { name: "Result" });
-  const simError = authedPage.getByText("HTTP 404: 404 page not found");
+  const simError = authedPage.getByText("HTTP 404: 404 page not found").first();
   await expect(result.or(simError).first()).toBeVisible({ timeout: 20_000 });
 });
 
@@ -145,10 +145,10 @@ test("walkthrough step 2 — admin previews rule on agent-submitted request (no 
   const req = await previewReq;
   expect(req.method()).toBe("POST");
 
-  await expect(authedPage.getByText("Preview config")).toBeVisible({
+  await expect(authedPage.getByText("Preview config").first()).toBeVisible({
     timeout: 15_000,
   });
-  await expect(authedPage.getByText(/HTTP 403/i)).toHaveCount(0);
+  await expect(authedPage.getByText(/HTTP 403/i).first()).toHaveCount(0);
 });
 
 test("walkthrough step 2 — admin approves agent-submitted request from detail panel", async ({

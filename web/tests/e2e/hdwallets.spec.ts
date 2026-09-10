@@ -19,11 +19,11 @@ test("create HD wallet + derive a child index via the UI", async ({
 
   // Click the first wallet row to expand its panel.
   await rows.first().click();
-  await expect(authedPage.locator("text=Derived addresses")).toBeVisible();
+  await expect(authedPage.locator("text=Derived addresses").first()).toBeVisible();
 
   // Fresh wallets ship with index 0 already derived. Count current rows,
   // derive index 7, and assert a new row landed.
-  const derivedTable = authedPage.locator("text=Derived addresses").locator(
+  const derivedTable = authedPage.locator("text=Derived addresses").first().locator(
     "xpath=ancestor::div[1]//table",
   );
   const primaryIndexCell = derivedTable.locator("tbody tr").first().locator("td").nth(1);
@@ -49,6 +49,6 @@ test("import requires a valid mnemonic", async ({ authedPage }) => {
   await authedPage.click("button:has-text('Import wallet')");
 
   await expect(
-    authedPage.locator("text=mnemonic must be 12/15/18/21/24 words"),
+    authedPage.locator("text=mnemonic must be 12/15/18/21/24 words").first(),
   ).toBeVisible();
 });

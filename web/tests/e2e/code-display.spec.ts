@@ -39,7 +39,7 @@ test("Rules detail panel shows CodeBlock with expand/collapse and copy", async (
 
   // The config JSON should be visible in the CodeBlock body.
   await expect(
-    authedPage.locator("text=0x0000000000000000000000000000000000000001"),
+    authedPage.locator("text=0x0000000000000000000000000000000000000001").first(),
   ).toBeVisible();
 });
 
