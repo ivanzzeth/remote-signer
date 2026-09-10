@@ -479,7 +479,11 @@ func (h *RuleHandler) approveProposal(w http.ResponseWriter, r *http.Request, pr
 
 	// Budget sync if Variables changed and rule has a TemplateID
 	if !bytes.Equal(oldVariables, target.Variables) && target.TemplateID != nil && h.budgetRepo != nil && h.templateRepo != nil {
-		budgetRequests := h.prepareBudgetSync(r.Context(), target)
+		budgetRequests, err := h.prepareBudgetSync(r.Context(), target)
+		if err != nil {
+			respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
+			return
+		}
 		txRepo, ok := h.ruleRepo.(storage.RuleBudgetTransactional)
 		if ok {
 			err = txRepo.RunInRuleBudgetTransaction(r.Context(), func(txRule storage.RuleRepository, txBudget storage.BudgetRepository) error {

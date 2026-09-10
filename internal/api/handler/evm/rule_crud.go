@@ -415,7 +415,11 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		// Pre-resolve budget sync requests outside the transaction.
 		// templateRepo.Get() opens its own DB connection - calling it inside
 		// a GORM transaction serializes on SQLite and causes deadlocks.
-		budgetRequests := h.prepareBudgetSync(r.Context(), rule)
+		budgetRequests, err := h.prepareBudgetSync(r.Context(), rule)
+		if err != nil {
+			respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
+			return
+		}
 
 		txRepo, ok := h.ruleRepo.(storage.RuleBudgetTransactional)
 		if ok {
@@ -738,28 +742,34 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 // prepareBudgetSync resolves template BudgetMetering against current rule
 // variables and returns BudgetSyncRequests ready for upsert. Template fetching
 // happens outside any DB transaction to avoid SQLite serialization deadlocks.
-func (h *RuleHandler) prepareBudgetSync(ctx context.Context, rule *types.Rule) []storage.BudgetSyncRequest {
+func (h *RuleHandler) prepareBudgetSync(ctx context.Context, rule *types.Rule) ([]storage.BudgetSyncRequest, error) {
 	tmpl, err := h.templateRepo.Get(ctx, *rule.TemplateID)
 	if err != nil {
 		h.logger.Warn("budget sync: failed to get template, skipping", "rule_id", rule.ID, "template_id", *rule.TemplateID, "error", err)
-		return nil
+		return nil, nil
 	}
 
 	if len(tmpl.BudgetMetering) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	resolvedJSON := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	// ⛔ An unresolved cap is refused rather than skipped. Returning nil here
+	// means "no budget rows to write", which for a rule that declares limits is
+	// the same outcome as declaring none.
+	resolvedJSON, err := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	if err != nil {
+		return nil, err
+	}
 	var metering types.BudgetMetering
 	if err := json.Unmarshal(resolvedJSON, &metering); err != nil {
 		h.logger.Warn("budget sync: failed to unmarshal budget metering", "rule_id", rule.ID, "error", err)
-		return nil
+		return nil, nil
 	}
 
 	if metering.Dynamic {
-		return buildDynamicBudgetRequests(&metering)
+		return buildDynamicBudgetRequests(&metering), nil
 	}
-	return buildStaticBudgetRequests(rule.Variables, &metering)
+	return buildStaticBudgetRequests(rule.Variables, &metering), nil
 }
 
 func buildDynamicBudgetRequests(metering *types.BudgetMetering) []storage.BudgetSyncRequest {

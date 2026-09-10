@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -73,13 +75,16 @@ func extractUnitBase(rawUnit string) string {
 // Substitution happens on the raw JSON string before unmarshal so that int fields like
 // max_tx_count can be resolved from "${var}" to actual integers.
 // Returns the substituted JSON bytes, or the original if no variables are provided.
-func SubstituteMeteringJSON(meteringJSON []byte, variablesJSON []byte) []byte {
-	if len(meteringJSON) == 0 || len(variablesJSON) == 0 {
-		return meteringJSON
+func SubstituteMeteringJSON(meteringJSON []byte, variablesJSON []byte) ([]byte, error) {
+	if len(meteringJSON) == 0 {
+		return meteringJSON, nil
+	}
+	if len(variablesJSON) == 0 {
+		return meteringJSON, unresolvedCapError(string(meteringJSON))
 	}
 	vars := variablesToStringMap(variablesJSON)
 	if len(vars) == 0 {
-		return meteringJSON
+		return meteringJSON, unresolvedCapError(string(meteringJSON))
 	}
 	// Same expansion the engine performs — see substitution.go. Metering JSON
 	// carries the same placeholder forms as a rule config does, so it must
@@ -87,16 +92,59 @@ func SubstituteMeteringJSON(meteringJSON []byte, variablesJSON []byte) []byte {
 	// ${first:x} and ${hex:x} in place, and the -1 fallback below then silently
 	// turned them into "unlimited".
 	s := ExpandPlaceholders(string(meteringJSON), vars)
-	// Replace any remaining unresolved ${...} with -1 so the JSON remains valid.
-	// String fields (max_total, max_per_tx) get "-1" = unlimited; int fields
-	// (max_tx_count, decimals, alert_pct) get -1 after unquoteIntFields below.
+
+	// ⛔ A spending cap that did not resolve must never continue as a value.
+	// The -1 fallback below keeps the JSON parseable, and -1 is exactly the
+	// value that means "no limit" in all three cap fields:
+	//
+	//	max_total / max_per_tx   EnforcesBudgetLimit("-1") == false
+	//	max_tx_count             the SQL guard is
+	//	                         `max_tx_count <= 0 OR tx_count < max_tx_count`
+	//
+	// so a template referencing ${max_natve_total} — one letter off — shipped a
+	// rule whose cap was silently unlimited, with nothing reporting it. The
+	// engine already treats a budget-check error as fail-closed, so returning
+	// one here turns a silent uncapped rule into a blocked request.
+	//
+	// ⚠️ Only the cap fields. decimals, alert_pct and param_index are not
+	// limits, and -1 remains the right "unset" for them.
+	if err := unresolvedCapError(s); err != nil {
+		return nil, err
+	}
+
+	// Any remaining unresolved ${...} is in a non-cap field; -1 keeps the JSON
+	// valid and reads as "unset" there.
 	s = replaceRemainingPlaceholders(s)
 	// Fix quoted integers: When a template has e.g. max_tx_count: ${var} in YAML,
 	// it becomes "max_tx_count":"50" in JSON after substitution. For int fields,
 	// JSON unmarshal expects unquoted numbers. Detect and fix this pattern.
 	// We look for "field_name":"<digits>" where field is an int type.
 	s = unquoteIntFields(s, []string{"max_tx_count", "decimals", "alert_pct", "max_dynamic_units", "param_index"})
-	return []byte(s)
+	return []byte(s), nil
+}
+
+// capFieldPlaceholder matches a spending-cap field whose value still carries a
+// ${...} — i.e. a limit nobody resolved.
+var capFieldPlaceholder = regexp.MustCompile(`"(max_total|max_per_tx|max_tx_count)"\s*:\s*"?[^",}]*\$\{([^}]+)\}`)
+
+// unresolvedCapError reports the cap fields in s that still hold a placeholder.
+func unresolvedCapError(s string) error {
+	matches := capFieldPlaceholder.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var parts []string
+	for _, m := range matches {
+		key := m[1] + "=${" + m[2] + "}"
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		parts = append(parts, key)
+	}
+	sort.Strings(parts)
+	return fmt.Errorf("budget cap left unresolved (%s): an unresolved cap would read as unlimited", strings.Join(parts, ", "))
 }
 
 // unquoteIntFields replaces "field":"<digits>" with "field":<digits> in JSON for

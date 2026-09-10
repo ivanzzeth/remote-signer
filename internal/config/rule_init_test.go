@@ -946,7 +946,8 @@ func TestSyncDynamicBudgetFromConfig_TemplateVariablesResolved(t *testing.T) {
 	// template BudgetMetering (after variable substitution), and then use
 	// the instance budgetMap's known_units to create budget records.
 	var metering types.BudgetMetering
-	resolvedJSON := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	resolvedJSON, substErr := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	require.NoError(t, substErr, "every cap in this fixture is bound, so substitution must succeed")
 	require.NoError(t, json.Unmarshal(resolvedJSON, &metering), "BudgetMetering JSON with ${var} should unmarshal after substitution")
 	assert.True(t, metering.Dynamic, "metering.Dynamic should be true")
 	assert.Equal(t, "0.01", metering.KnownUnits["native"].MaxTotal)

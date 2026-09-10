@@ -100,7 +100,13 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	}
 	// Substitute template variables in raw JSON before parsing so that int fields
 	// like max_tx_count can be resolved from "${var}" strings to actual integers.
-	meteringJSON := SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	// ⛔ Fail-closed: an unresolved cap is an error here, and the engine turns a
+	// budget-check error into a blocked request. Before this returned an error,
+	// the unresolved cap became -1 and the rule spent without limit.
+	meteringJSON, err := SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	if err != nil {
+		return false, fmt.Errorf("rule %q: %w", rule.ID, err)
+	}
 	if err := json.Unmarshal(meteringJSON, &metering); err != nil {
 		return false, fmt.Errorf("failed to parse budget metering: %w", err)
 	}

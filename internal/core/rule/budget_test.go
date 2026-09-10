@@ -1053,7 +1053,9 @@ func TestSubstituteMeteringJSON_SubstitutesKnownUnits(t *testing.T) {
 	variablesJSON, err := json.Marshal(variables)
 	require.NoError(t, err)
 
-	result := SubstituteMeteringJSON(meteringJSON, variablesJSON)
+	result, err := SubstituteMeteringJSON(meteringJSON, variablesJSON)
+
+	require.NoError(t, err)
 
 	var resolved types.BudgetMetering
 	require.NoError(t, json.Unmarshal(result, &resolved))
@@ -1083,10 +1085,14 @@ func TestSubstituteMeteringJSON_NoVariables(t *testing.T) {
 	}
 	meteringJSON, _ := json.Marshal(metering)
 
-	result := SubstituteMeteringJSON(meteringJSON, nil)
+	result, err := SubstituteMeteringJSON(meteringJSON, nil)
+
+	require.NoError(t, err)
 	assert.Equal(t, meteringJSON, result)
 
-	result2 := SubstituteMeteringJSON(meteringJSON, []byte(`{}`))
+	result2, err2 := SubstituteMeteringJSON(meteringJSON, []byte(`{}`))
+
+	require.NoError(t, err2)
 	assert.Equal(t, meteringJSON, result2)
 }
 
@@ -1103,7 +1109,9 @@ func TestSubstituteMeteringJSON_IntFields(t *testing.T) {
 	}
 	variablesJSON, _ := json.Marshal(variables)
 
-	result := SubstituteMeteringJSON([]byte(raw), variablesJSON)
+	result, err := SubstituteMeteringJSON([]byte(raw), variablesJSON)
+
+	require.NoError(t, err)
 
 	var resolved types.BudgetMetering
 	require.NoError(t, json.Unmarshal(result, &resolved), "should unmarshal after int field unquoting; got: %s", string(result))
@@ -1131,7 +1139,9 @@ func TestSubstituteMeteringJSON_PartialSubstitution(t *testing.T) {
 	}
 	variablesJSON, _ := json.Marshal(variables)
 
-	result := SubstituteMeteringJSON(meteringJSON, variablesJSON)
+	result, err := SubstituteMeteringJSON(meteringJSON, variablesJSON)
+
+	require.NoError(t, err)
 
 	var resolved types.BudgetMetering
 	require.NoError(t, json.Unmarshal(result, &resolved))
@@ -1304,9 +1314,19 @@ func TestBudgetChecker_DynamicBudget_InstanceOverridesNativeTotal(t *testing.T) 
 	assert.False(t, ok2, "second spend should exceed budget (0.004+0.002 > 0.005)")
 }
 
-// TestSubstituteMeteringJSON_UnresolvedVariable replaces unresolved ${var}
-// with -1 so JSON remains valid for unmarshal.
-func TestSubstituteMeteringJSON_UnresolvedVariable(t *testing.T) {
+// TestSubstituteMeteringJSON_UnresolvedCapIsRefused
+//
+// ⚠️ This test used to assert the opposite, and its comment explains why the
+// hole survived: "the unresolved ${nonexistent_var} stays as-is — will fail at
+// budget enforcement", asserting the value became "-1". It does not fail at
+// enforcement. -1 is precisely the value that means *no limit*:
+//
+//	max_total / max_per_tx   EnforcesBudgetLimit("-1") == false
+//	max_tx_count             `max_tx_count <= 0 OR tx_count < max_tx_count`
+//
+// So a template naming a variable that does not exist — one typo — produced a
+// rule that spent without limit, and the test said that was correct.
+func TestSubstituteMeteringJSON_UnresolvedCapIsRefused(t *testing.T) {
 	metering := types.BudgetMetering{
 		Method:  "js",
 		Dynamic: true,
@@ -1315,21 +1335,29 @@ func TestSubstituteMeteringJSON_UnresolvedVariable(t *testing.T) {
 		},
 	}
 	meteringJSON, _ := json.Marshal(metering)
+	variablesJSON, _ := json.Marshal(map[string]interface{}{"some_other_var": "42"})
 
-	// Variables don't contain "nonexistent_var"
-	variables := map[string]interface{}{
-		"some_other_var": "42",
-	}
-	variablesJSON, _ := json.Marshal(variables)
+	_, err := SubstituteMeteringJSON(meteringJSON, variablesJSON)
+	require.Error(t, err, "an unresolved spending cap must be refused, not defaulted to unlimited")
+	assert.Contains(t, err.Error(), "nonexistent_var", "the error must name the variable so it can be fixed")
+	assert.Contains(t, err.Error(), "max_total")
+}
 
-	result := SubstituteMeteringJSON(meteringJSON, variablesJSON)
+// TestSubstituteMeteringJSON_UnresolvedNonCapIsStillTolerated: only caps are
+// refused. decimals, alert_pct and param_index are not limits, and -1 remains
+// the right "unset" for them — refusing those would reject templates that are
+// perfectly safe.
+func TestSubstituteMeteringJSON_UnresolvedNonCapIsStillTolerated(t *testing.T) {
+	meteringJSON := []byte(`{"method":"tx_value","unit":"native","known_units":{"native":{"max_total":"1000","alert_pct":"${pct}"}}}`)
+	variablesJSON := []byte(`{"other":"1"}`)
+
+	out, err := SubstituteMeteringJSON(meteringJSON, variablesJSON)
+	require.NoError(t, err)
 
 	var resolved types.BudgetMetering
-	require.NoError(t, json.Unmarshal(result, &resolved))
-
-	// The unresolved ${nonexistent_var} stays as-is — will fail at budget enforcement
-	assert.Equal(t, "-1", resolved.KnownUnits["native"].MaxTotal,
-		"unresolved variable should be replaced with -1")
+	require.NoError(t, json.Unmarshal(out, &resolved))
+	assert.Equal(t, "1000", resolved.KnownUnits["native"].MaxTotal, "the resolved cap survives")
+	assert.Equal(t, -1, resolved.KnownUnits["native"].AlertPct, "an unresolved non-cap field still falls back to -1")
 }
 
 // TestBudgetChecker_DynamicBudget_UnresolvedMaxTotal_FailsClosed tests that when
@@ -1374,10 +1402,14 @@ func TestBudgetChecker_DynamicBudget_UnresolvedMaxTotal_FailsClosed(t *testing.T
 
 // TestSubstituteMeteringJSON_EmptyJSON handles edge cases.
 func TestSubstituteMeteringJSON_EmptyJSON(t *testing.T) {
-	result := SubstituteMeteringJSON(nil, []byte(`{"x":"1"}`))
+	result, err := SubstituteMeteringJSON(nil, []byte(`{"x":"1"}`))
+
+	require.NoError(t, err)
 	assert.Nil(t, result)
 
-	result2 := SubstituteMeteringJSON([]byte(`{}`), nil)
+	result2, err2 := SubstituteMeteringJSON([]byte(`{}`), nil)
+
+	require.NoError(t, err2)
 	assert.Equal(t, []byte(`{}`), result2)
 }
 

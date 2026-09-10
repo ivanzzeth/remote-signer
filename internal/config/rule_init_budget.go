@@ -87,7 +87,13 @@ func syncBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *types.Rul
 		// Substitute template variables in BudgetMetering JSON so that ${var} placeholders
 		// (e.g. "${max_unknown_token_tx_count}") are resolved before JSON unmarshal.
 		// This is needed because int fields like max_tx_count would fail to parse as "${var}" strings.
-		resolvedJSON := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+		// ⛔ An unresolved cap refuses the boot rather than starting the daemon
+		// with a rule whose spending limit reads as unlimited. Same posture as
+		// an unresolvable budget unit.
+		resolvedJSON, err := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+		if err != nil {
+			return fmt.Errorf("rule %q: %w", rule.ID, err)
+		}
 		if err := json.Unmarshal(resolvedJSON, &metering); err == nil && metering.Dynamic {
 			return syncDynamicBudgetFromConfig(ctx, rule, tmpl, budgetMap, budgetRepo, &metering)
 		}
@@ -256,7 +262,10 @@ func resolveBudgetUnit(rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map
 	if unit == ":" || len(unit) < 3 {
 		if len(tmpl.BudgetMetering) > 0 && len(vars) > 0 {
 			var metering types.BudgetMetering
-			resolvedBM := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+			resolvedBM, err := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+			if err != nil {
+				return "", fmt.Errorf("rule %q: %w", rule.ID, err)
+			}
 			if err := json.Unmarshal(resolvedBM, &metering); err == nil && metering.Unit != "" {
 				unitFallback := metering.Unit
 				unitFallback = rulepkg.ExpandPlaceholders(unitFallback, vars)
@@ -305,7 +314,10 @@ func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl 
 	if unit == ":" || len(unit) < 3 {
 		if len(tmpl.BudgetMetering) > 0 && len(vars) > 0 {
 			var metering types.BudgetMetering
-			resolvedBM := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+			resolvedBM, err := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+			if err != nil {
+				return fmt.Errorf("rule %q: %w", rule.ID, err)
+			}
 			if err := json.Unmarshal(resolvedBM, &metering); err == nil && metering.Unit != "" {
 				unitFallback := metering.Unit
 				unitFallback = rulepkg.ExpandPlaceholders(unitFallback, vars)
