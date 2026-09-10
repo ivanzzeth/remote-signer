@@ -127,7 +127,8 @@ func TestTemplateHandler_ReadOnly_RevokeBlocked(t *testing.T) {
 	r = r.WithContext(contextWithAPIKey(r.Context(), adminAPIKey()))
 	w := httptest.NewRecorder()
 
-	h.ServeInstanceHTTP(w, r)
+	r.SetPathValue("ruleID", "rule_1")
+	h.RevokeInstance(w, r)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")

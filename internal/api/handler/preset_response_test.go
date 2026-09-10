@@ -93,7 +93,7 @@ func TestPresetHandler_List_ReturnsTemplateIDs(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets", nil).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.ListPresets, w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp struct {
@@ -135,7 +135,7 @@ func TestPresetHandler_List_QueryFilter(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets?q=stargate", nil).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.ListPresets, w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp struct {
@@ -185,7 +185,7 @@ func TestPresetHandler_Detail_SlashIDRoundTrips(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets/evm%2Ferc20", nil).
 		WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.GetPreset, w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	var resp PresetDetailResponse
@@ -221,7 +221,7 @@ func TestPresetHandler_Detail_RequiredFlagComesFromOverride(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets/evm%2Fx", nil).
 		WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.GetPreset, w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp PresetDetailResponse
@@ -235,7 +235,7 @@ func TestPresetHandler_Detail_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets/nope", nil).
 		WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.GetPreset, w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -243,15 +243,12 @@ func TestPresetHandler_Detail_NotFound(t *testing.T) {
 // Routing — method dispatch
 // ---------------------------------------------------------------------------
 
-func TestPresetHandler_Routing_RejectsWrongMethod(t *testing.T) {
-	env := newPresetTestEnv(t)
-	// POST /api/v1/presets (the list endpoint accepts only GET)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets", nil).
-		WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// ⚠️ TestPresetHandler_Routing_RejectsWrongMethod (POST on the list endpoint →
+// 405) left this file in proposal S6. It asserted what ServeHTTP did with a
+// method the mux had not looked at, and ServeHTTP is gone: the collection is
+// `GET /api/v1/presets` now, so a POST matches no preset pattern at all. Its
+// replacement is TestPresetRoutes_CollectionRejectsWrongMethod in
+// preset_routes_test.go, driving api.presetsModule's production patterns.
 
 // TestPresetHandler_Apply_ForbiddenWithoutPermission was removed, not lost: the permission is declared on the route now, and a
 // test that calls the handler directly bypasses the router and therefore the
@@ -265,7 +262,7 @@ func TestPresetHandler_Apply_RequiresAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/foo/apply",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code,
 		"missing api key falls through the permission check, which returns 403")
 }

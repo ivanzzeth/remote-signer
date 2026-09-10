@@ -275,7 +275,12 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 		{"SettingsManager", "GET /api/v1/admin/settings/security"},
 		{"SettingsManager (SPA catch-all)", "/"},
 		{"Template", "/api/v1/templates"},
-		{"PresetRepo + Template", "/api/v1/presets"},
+		// ⛔ This row used to be the literal "/api/v1/presets" — a method-less
+		// pattern that answered every verb. S6 replaced the preset branch's three
+		// patterns with four named routes, so the row names one of them (enough to
+		// prove the branch fired) and the module block below proves that *all four*
+		// reached the mux.
+		{"PresetRepo + Template", "GET /api/v1/presets"},
 		{"TemplateRegistry + PresetRegistry", "POST /api/v1/registry/refresh"},
 	} {
 		if _, ok := registered[tc.pattern]; !ok {
@@ -369,6 +374,61 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 				"SettingsManager registered less than settingsModule.Routes() says it serves", pattern)
 		}
 	}))
+
+	// ⛔ And the two modules S6 created. Presets matters here for the same reason
+	// signers does: its four routes replace two method-scoped prefixes that
+	// matched every sub-path, and `GET /api/v1/presets/` reaching "{id}/apply"
+	// is how a GET applied a preset on the read permission. A route lost to a
+	// conditional does not fail closed — it leaves the path to the /api/v1/
+	// fallback while the reader believes it is served.
+	presetsMod, err := NewPresetsModule(maximalPresetHandler(t))
+	if err != nil {
+		t.Fatalf("building the presets module: %v", err)
+	}
+	presetsMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("preset pattern %q is absent from the router, so the branch gated by "+
+				"PresetRepo + Template registered less than presetsModule.Routes() says it serves", pattern)
+		}
+	}))
+
+	// ⚠️ templatesModule registers one route today — the instances sub-tree that
+	// used to be an inline closure. The rest of the templates surface is still
+	// two prefixes in setupRoutes (module_templates.go says why), and the
+	// "Template" row above covers those.
+	templatesMod, err := NewTemplatesModule(maximalTemplateHandler(t))
+	if err != nil {
+		t.Fatalf("building the templates module: %v", err)
+	}
+	templatesMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("template pattern %q is absent from the router, so the branch gated by "+
+				"Template registered less than templatesModule.Routes() says it serves", pattern)
+		}
+	}))
+}
+
+// maximalPresetHandler and maximalTemplateHandler build the handlers the two S6
+// modules wrap. ⚠️ Only their route patterns are read here, never their
+// behaviour, so the same stub repositories maximalRouterConfig hands the router
+// are enough.
+func maximalPresetHandler(t *testing.T) *handler.PresetHandler {
+	t.Helper()
+	h, err := handler.NewPresetHandler(&stubPresetRepo{}, &stubTemplateRepo{}, &gorm.DB{},
+		&service.TemplateService{}, nil, testLogger())
+	if err != nil {
+		t.Fatalf("building the preset handler: %v", err)
+	}
+	return h
+}
+
+func maximalTemplateHandler(t *testing.T) *handler.TemplateHandler {
+	t.Helper()
+	h, err := handler.NewTemplateHandler(&stubTemplateRepo{}, &service.TemplateService{}, testLogger(), nil)
+	if err != nil {
+		t.Fatalf("building the template handler: %v", err)
+	}
+	return h
 }
 
 // maximalSettingsHandler builds the handler the settings module wraps. ⚠️ Only

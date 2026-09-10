@@ -306,7 +306,7 @@ func TestPresetHandler_Apply_PresetNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fnonexistent/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -334,7 +334,7 @@ func TestPresetHandler_Apply_NoDB(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Ftest/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), "database")
 }
@@ -363,7 +363,7 @@ func TestPresetHandler_Apply_MissingRequiredOverride(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Ftest/apply",
 		strings.NewReader(`{"variables":{}}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	// The JSON encoding escapes the quotes: "required override \"my_override\" not supplied"
 	assert.Contains(t, w.Body.String(), `required override`)
@@ -401,7 +401,7 @@ func TestPresetHandler_Apply_RequiredOverrideSupplied(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Ftest/apply",
 		strings.NewReader(`{"variables":{"my_override":"val"}}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ApplyPreset, w, req)
 	// Will fail at resolveInstances (template not found), not at required overrides
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
@@ -433,7 +433,7 @@ func TestPresetHandler_Apply_BudgetSubstitutionError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Ftest/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "substitute preset budget")
 }
@@ -464,7 +464,7 @@ func TestPresetHandler_Apply_ScheduleSubstitutionError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Ftest/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "substitute preset schedule")
 }
@@ -685,7 +685,7 @@ func TestPresetHandler_Validate_NoJSEvaluator(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/foo/validate",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ValidatePreset, w, req)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), "JS evaluator not available")
 }
@@ -722,7 +722,7 @@ func TestPresetHandler_Validate_WithBodyVariables(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fvp/validate",
 		strings.NewReader(`{"variables":{"extra":"value"}}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ValidatePreset, w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp validatePresetResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -761,7 +761,7 @@ func TestPresetHandler_Validate_SubstitutionFailure(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fvp/validate",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ValidatePreset, w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp validatePresetResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -800,7 +800,7 @@ func TestPresetHandler_Validate_WithChainID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fvp/validate",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ValidatePreset, w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
@@ -836,7 +836,7 @@ func TestPresetHandler_Validate_TemplateNotFound_Continues(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fvp/validate",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ValidatePreset, w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp validatePresetResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -873,7 +873,7 @@ func TestPresetHandler_Validate_NilBody(t *testing.T) {
 	ctx := contextWithKey(t, types.RoleAdmin, "admin")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fvp/validate", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ValidatePreset, w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
@@ -957,13 +957,13 @@ func TestCollectTemplateVarDefs_TemplateNotFound(t *testing.T) {
 // ServeHTTP — additional branches
 // ---------------------------------------------------------------------------
 
-func TestPresetHandler_ServeHTTP_UnknownSubAction(t *testing.T) {
-	env := newPresetTestEnv(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets/evm%2Fp/something", nil).WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
+// TestPresetHandler_ServeHTTP_UnknownSubAction was moved, not deleted: it drove
+// `GET /api/v1/presets/evm%2Fp/something` into ServeHTTP, which took the whole
+// remainder as an id and answered 404 "preset not found". ServeHTTP is gone and
+// no preset pattern claims that path, so the question is the route table's now:
+// TestPresetRoutes_UnclaimedPathNoLongerReachesTheHandler in
+// preset_routes_test.go, which additionally asserts the direct call would have
+// answered — i.e. that the 404 comes from routing, not from the handler.
 
 // TestPresetHandler_ServeHTTP_GetSingleMethodNotAllowed was removed: its route is method-scoped now and the mux answers 405 before
 // the handler runs.
@@ -993,6 +993,6 @@ func TestPresetHandler_List_RepoError(t *testing.T) {
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets", nil).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	callPreset(h.ListPresets, w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

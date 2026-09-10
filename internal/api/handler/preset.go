@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -140,68 +139,26 @@ func (h *PresetHandler) SetAuditLogger(al *audit.AuditLogger) {
 	h.auditLogger = al
 }
 
-// ServeHTTP routes /api/v1/presets and /api/v1/presets/{id}/...
+// presetID is the {id} wildcard, as the mux resolved it.
 //
-// v0.3 preset IDs are file stems and contain '/' (e.g. "evm/weth"),
-// which the JS SDK passes through encodeURIComponent → "evm%2Fweth"
-// before sending. Using r.URL.EscapedPath here keeps the encoded form
-// so we can split on a literal '/' boundary (the route separator)
-// without colliding with the slash inside the ID. The ID is then
-// PathUnescape'd before lookup.
-func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rawPath := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/presets")
-	rawPath = strings.Trim(rawPath, "/")
-	if rawPath == "" {
-		switch r.Method {
-		case http.MethodGet:
-			h.list(w, r)
-			return
-		}
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
-	// Detect known sub-actions. Anything matching
-	// "<id>/apply" or "<id>/validate" treats everything before the
-	// sub-action suffix as the encoded ID.
-	encodedID := rawPath
-	sub := ""
-	if strings.HasSuffix(rawPath, "/apply") {
-		encodedID = strings.TrimSuffix(rawPath, "/apply")
-		sub = "apply"
-	}
-	if strings.HasSuffix(rawPath, "/validate") {
-		encodedID = strings.TrimSuffix(rawPath, "/validate")
-		sub = "validate"
-	}
-	id, err := url.PathUnescape(encodedID)
-	if err != nil {
-		respond.Error(w, "invalid preset id", http.StatusBadRequest, h.logger)
-		return
-	}
-	if sub == "" {
-		// ⛔ No method check: GET and POST /api/v1/presets/ are registered
-		// separately, so the mux has already rejected anything else.
-		h.detail(w, r, id)
-		return
-	}
-	if sub == "apply" {
-		// ⛔ No method check: GET and POST /api/v1/presets/ are registered
-		// separately, so the mux has already rejected anything else.
-		h.apply(w, r, id)
-		return
-	}
-	if sub == "validate" {
-		// ⛔ No method check: GET and POST /api/v1/presets/ are registered
-		// separately, so the mux has already rejected anything else.
-		if !middleware.GetAPIKey(r.Context()).IsAdmin() {
-			respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
-			return
-		}
-		h.validatePreset(w, r, id)
-		return
-	}
-	respond.Error(w, "not found", http.StatusNotFound, h.logger)
-}
+// ⭐ There is no PathUnescape here and that is the point. v0.3 preset IDs are
+// file stems containing '/' ("evm/weth"), which every preset client sends
+// percent-encoded — url.PathEscape in pkg/client and pkg/rs-client,
+// encodeURIComponent in pkg/js-client, the extension and the Web UI. Go's
+// ServeMux splits the *escaped* path on literal '/' and unescapes each segment
+// afterwards, so "evm%2Fweth" stays one segment and PathValue hands back
+// "evm/weth" already decoded. Measured, not assumed: see
+// TestPresetRoutes_EncodedSlashID.
+//
+// ⚠️ What this deliberately does NOT accept is the *unencoded* form
+// "/api/v1/presets/evm/weth". The removed ServeHTTP took it, because a prefix
+// pattern matches any depth and the id was whatever was left after stripping a
+// known sub-action suffix. No preset client sends it (checked, every call site
+// encodes), and it is the form that makes the endpoint unnameable: with a
+// literal slash allowed in an id, "/presets/a/b" is both "preset a/b" and
+// "preset a, sub-action b" and only a suffix list can tell them apart. That is
+// the closure this step removes.
+func presetID(r *http.Request) string { return r.PathValue("id") }
 
 // ---------------------------------------------------------------------------
 // List
@@ -219,7 +176,9 @@ type PresetListItem struct {
 	Enabled     bool     `json:"enabled"`
 }
 
-func (h *PresetHandler) list(w http.ResponseWriter, r *http.Request) {
+// ListPresets serves GET /api/v1/presets — the visible catalogue, narrowed by
+// the optional ?q= fuzzy query.
+func (h *PresetHandler) ListPresets(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.presetRepo.List(r.Context(), storage.PresetFilter{})
 	if err != nil {
 		h.logger.Error("list presets failed", "error", err)
@@ -279,7 +238,10 @@ type PresetDetailResponse struct {
 	Matrix      json.RawMessage        `json:"matrix,omitempty"`
 }
 
-func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string) {
+// GetPreset serves GET /api/v1/presets/{id} — the detail view, joining the
+// variable definitions of every template the preset references.
+func (h *PresetHandler) GetPreset(w http.ResponseWriter, r *http.Request) {
+	id := presetID(r)
 	p, err := h.presetRepo.Get(r.Context(), id)
 	if err != nil {
 		respond.Error(w, "preset not found", http.StatusNotFound, h.logger)
@@ -374,11 +336,23 @@ type validatePresetResponse struct {
 	Failed     int                       `json:"failed"`
 }
 
-// validatePreset handles POST /api/v1/presets/{id}/validate.
+// ValidatePreset serves POST /api/v1/presets/{id}/validate.
 // Loads the preset, resolves variables (test_variables + preset defaults +
 // operator overrides), substitutes into each template's config, then runs
 // each rule's test cases through the JS evaluator.
-func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, id string) {
+//
+// ⚠️ The admin check is inside the function, not at the route, and is copied
+// byte for byte from the removed ServeHTTP. It is a role check, not a
+// permission, so there is no Permission constant a route could name; the route
+// carries PermApplyPreset because that is what the POST /api/v1/presets/
+// pattern this endpoint came from carried. ⛔ Changing either is a security
+// decision, not part of this decomposition (proposal §2.5).
+func (h *PresetHandler) ValidatePreset(w http.ResponseWriter, r *http.Request) {
+	if !middleware.GetAPIKey(r.Context()).IsAdmin() {
+		respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
+		return
+	}
+	id := presetID(r)
 	if h.jsEvaluator == nil {
 		respond.Error(w, "JS evaluator not available", http.StatusServiceUnavailable, h.logger)
 		return
@@ -510,7 +484,15 @@ type ApplyPresetRequest struct {
 	SkipValidation bool `json:"skip_validation,omitempty"` //nolint:staticcheck // kept to detect forbidden client requests
 }
 
-func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string) {
+// ApplyPreset serves POST /api/v1/presets/{id}/apply — it creates one rule
+// instance per template_id, in a single transaction.
+//
+// ⛔ POST-only is not cosmetic here. Until this step the apply path sat behind
+// the method-less body of `GET /api/v1/presets/` as well: a GET carrying a JSON
+// body reached this function and applied the preset, on the *read* permission,
+// never touching PermApplyPreset. See module_presets.go for the measurement.
+func (h *PresetHandler) ApplyPreset(w http.ResponseWriter, r *http.Request) {
+	id := presetID(r)
 	apiKey := middleware.GetAPIKey(r.Context())
 	// The route declares PermApplyPreset (POST /api/v1/presets/); only the
 	// presence of a key is checked here.

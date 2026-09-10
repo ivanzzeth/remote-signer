@@ -56,3 +56,20 @@ DELETE /api/v1/evm/signers/{address}
 DELETE /api/v1/evm/signers/{address}/access/{keyID}
 PATCH /api/v1/evm/signers/{address}
 POST /api/v1/evm/signers/{address}/access
+
+# ⭐ 2026-09-11,提案 S6(templates 的 instances 闭包拆解):第九行,**同一形状的
+# 第三批**。上面两批分别是「循环拼出来的 pattern」和「方法无关的前缀」第一次
+# 被看见;这一条来自 `/api/v1/templates/` —— 同样是**不带 method 的前缀**,
+# 同样挂着 read_templates,同样在它背后藏着一个写操作(把某条模板实例停用)。
+#
+# ⛔ 它不是这次改出来的债。那条前缀本来就注册着 PermReadTemplates,revoke
+# 一直在它后面;前缀没有 method 前缀,这条判据对它一个字都说不出来
+# (见上面「它看不见的那一半」)。拆解把它从一条糊掉的记录变成一个有名字的条目。
+#
+# ⚠️ 权限是**逐字照抄**的。这一条与 signers 那八行不同的是:它的真实判断**不是**
+# 资源域的 —— revokeInstance 只按 ruleID 停用规则,没有 owner 检查。也就是说
+# 「读权限能改状态」在这里是**真的松**,不是「路由做不了这个判断」。
+# ⛔ 留在基线里仍然不代表它是对的,代表**改它是一个安全决定**:提案 §2.5 把
+# 「拆解顺手改权限」列为唯一语义不可逆的风险,失败方向不对称(过严会在 e2e 里
+# 显形,过松不会)。单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
+POST /api/v1/templates/instances/{ruleID}/revoke

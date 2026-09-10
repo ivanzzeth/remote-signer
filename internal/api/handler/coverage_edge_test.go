@@ -187,28 +187,21 @@ func TestCoverage_Template_ServeHTTP_EscapedID(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "evm/erc20")
 }
 
-func TestCoverage_Template_ServeInstanceHTTP_NoAPIKey(t *testing.T) {
+func TestCoverage_Template_RevokeInstance_NoAPIKey(t *testing.T) {
 	handler, _ := setupValidateHandler(t)
 	w := httptest.NewRecorder()
-	handler.ServeInstanceHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/templates/instances/rule-1/revoke", nil))
+	handler.RevokeInstance(w, httptest.NewRequest(http.MethodPost, "/api/v1/templates/instances/rule-1/revoke", nil))
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-func TestCoverage_Template_ServeInstanceHTTP_NotFound(t *testing.T) {
-	handler, _ := setupValidateHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates/instances/unknown", nil).WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeInstanceHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
-func TestCoverage_Template_ServeInstanceHTTP_MethodNotAllowed(t *testing.T) {
-	handler, _ := setupValidateHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates/instances/rule-1/revoke", nil).WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeInstanceHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// ⚠️ TestCoverage_Template_ServeInstanceHTTP_NotFound and
+// ..._MethodNotAllowed were removed here in proposal S6, not deleted: both
+// asserted ServeInstanceHTTP's own path/method dispatch (a path with no
+// /revoke suffix, and a GET on the revoke path), and that function is gone
+// because the route decides now. They are
+// TestTemplateInstanceRoutes_UnclaimedPathDoesNotRevoke and
+// TestTemplateInstanceRoutes_RevokeRequiresPost in template_routes_test.go,
+// driving api.templatesModule's production pattern.
 
 type brokenWriter struct{}
 

@@ -94,7 +94,7 @@ func TestPresetHandler_Validate_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Ftest-preset/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.ValidatePreset, w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 
@@ -120,7 +120,7 @@ func TestPresetHandler_Validate_NoTemplateIDs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fno-tmpls/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.ValidatePreset, w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "no template_ids")
@@ -132,7 +132,7 @@ func TestPresetHandler_Validate_PresetNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/nonexistent/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.ValidatePreset, w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -145,7 +145,7 @@ func TestPresetHandler_Validate_NonAdminForbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/foo/validate",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
+	callPreset(env.handler.ValidatePreset, w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
@@ -306,7 +306,7 @@ func TestPresetHandler_Apply_ReadOnly(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/foo/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callPreset(handler.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "readonly")
 }
@@ -337,7 +337,7 @@ func TestPresetHandler_Apply_NoTemplateSvc(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/foo/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callPreset(handler.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), "template service")
 }
@@ -377,7 +377,7 @@ func TestPresetHandler_Apply_DisabledPreset(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fdisabled/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callPreset(handler.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "disabled")
 }
@@ -417,7 +417,7 @@ func TestPresetHandler_Apply_NoTemplateIDs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fno-ids/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callPreset(handler.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "no template_ids")
 }
@@ -459,7 +459,7 @@ func TestPresetHandler_Apply_BadRequestBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fapply-me/apply",
 		strings.NewReader(`{bad json}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callPreset(handler.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "invalid request body")
 }
@@ -518,7 +518,7 @@ func TestPresetHandler_Apply_SolidityForgeUnavailable(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fsol-preset/apply",
 		strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callPreset(handler.ApplyPreset, w, req)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), "forge not available")
 }

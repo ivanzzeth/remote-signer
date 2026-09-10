@@ -106,11 +106,41 @@
 # 选择从 handler 挪到路由表,而 body 类型仍然随 path 的**取值**变 —— 路由表看着
 # 拆开了,表达不了的形状原封不动。
 
+# ⭐ 2026-09-11,提案 S6:**15 → 13**,删掉的是
+# `internal/api/handler.PresetHandler.ServeHTTP` 与
+# `internal/api/handler.TemplateHandler.ServeInstanceHTTP`。
+#
+# 前者背后是 **4 个端点**(list / detail / apply / validate),它切的是
+# `r.URL.EscapedPath()` 而不是 `Path` —— preset id 是文件名词干、含 '/',客户端
+# 送 %2F,所以它必须在编码态上切、再 `url.PathUnescape` 还原。⭐ 现在这一整套
+# 没了:Go 的 mux 按段拆**编码后的**路径、再逐段解码,`{id}` 直接就是
+# "evm/weth"。⛔ 这也是这条判据把 middleware/auth.go 排除在外的那条理由的**另一
+# 面**:签名必须对客户端签过的原始字节,而路由**恰恰**应该读解码后的段 ——
+# 两者读的是同一个 URL 的两种形态,谁也代替不了谁。
+#
+# ⛔ 后者关的是一个**真的洞**,和 6d30ba1 一模一样:`GET /api/v1/presets/` 不带
+# 子路径限制地匹配整棵子树,而 ServeHTTP 的三个分支都写着注释「不用判 method,
+# GET 和 POST 是分开注册的,mux 已经挡掉别的了」—— 那句话是错的,子动作根本不在
+# pattern 里。实测(0866784,带 JS evaluator 的真 handler):
+#   GET /api/v1/presets/evm%2Fgp/apply  + JSON body  → **201 Created,写了一条
+#   rule 实例**,全程只拿着 read_presets,apply_preset 一次都没被问到。
+#
+# ⚠️ TemplateHandler.ServeInstanceHTTP 背后只有 1 个端点,但它是
+# **setupRoutes 里那个 inline 闭包**的另一半(闭包按 `HasPrefix(path,
+# "/api/v1/templates/instances/")` 分发)—— 一张藏在路由表里的第二张路由表,
+# 任何读注册的门禁都看不见它。
+#
+# ⛔ `internal/api/handler.TemplateHandler.ServeHTTP` **留在基线里**,而且这一步
+# 拆不掉:template id 同样是含 '/' 的文件名词干,但 pkg/js-client、extension、
+# web/src 和两个 e2e 用例都是**不编码**直接拼进路径的(pkg/client 与 pkg/rs-client
+# 编码)。未编码的 '/' 让 `/api/v1/templates/a/b` 同时是「模板 a/b」和「模板 a 的
+# 子动作 b」,只有一张已知后缀表能分开它们 —— 那正是 ServeHTTP 里那串 TrimSuffix。
+# 换句话说:这几个端点**在客户端改口之前不可命名**。三条出路写在
+# internal/api/module_templates.go 上,⛔ 那是一个决定,不是重构的执行细节。
+
 internal/api/handler.ACLHandler.ServeHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
-internal/api/handler.PresetHandler.ServeHTTP
 internal/api/handler.TemplateHandler.ServeHTTP
-internal/api/handler.TemplateHandler.ServeInstanceHTTP
 internal/api/handler/evm.ApprovalHandler.ServeHTTP
 internal/api/handler/evm.BudgetItemHandler.ServeHTTP
 internal/api/handler/evm.PreviewRuleHandler.ServeHTTP

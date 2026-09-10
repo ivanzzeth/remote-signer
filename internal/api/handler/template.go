@@ -168,28 +168,35 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ServeInstanceHTTP handles /api/v1/templates/instances/{ruleID}/revoke
-func (h *TemplateHandler) ServeInstanceHTTP(w http.ResponseWriter, r *http.Request) {
-	apiKey := middleware.GetAPIKey(r.Context())
-	if apiKey == nil {
+// RevokeInstance serves POST /api/v1/templates/instances/{ruleID}/revoke.
+//
+// # What this replaced (proposal S6)
+//
+// ServeInstanceHTTP, reached through a closure registered inline in
+// setupRoutes that tested strings.HasPrefix(path, "/api/v1/templates/instances/")
+// and forwarded to it — one of the two closures
+// scripts/lib/arch-baseline/api-layer-counts.txt names as the reason
+// manual_method_checks cannot reach zero.
+//
+// ⚠️ The ruleID comes from PathValue and is therefore exactly one segment.
+// That is not a narrowing that matters: instance rule IDs are minted as
+// "inst_" + 16 hex chars (internal/core/service/template.go:757,910) and cannot
+// contain a slash, and every client builds this path from such an id. The old
+// TrimPrefix/TrimSuffix pair accepted any depth, so
+// POST /api/v1/templates/instances/a/b/revoke reached the service with ruleID
+// "a/b" — measured, and it is the same swallow S4 found on the signer access
+// sub-tree.
+//
+// ⚠️ The nil-API-key guard is kept verbatim. In a daemon it is unreachable —
+// AuthMiddleware runs first — but it is what the two "without_api_key" tests
+// assert, and dropping a 401 on the way past would be a behaviour change
+// smuggled inside a routing change.
+func (h *TemplateHandler) RevokeInstance(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
-
-	// Path: /api/v1/templates/instances/{ruleID}/revoke
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/templates/instances/")
-
-	if strings.HasSuffix(path, "/revoke") {
-		ruleID := strings.TrimSuffix(path, "/revoke")
-		if r.Method == http.MethodPost {
-			h.revokeInstance(w, r, ruleID)
-		} else {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		}
-		return
-	}
-
-	respond.Error(w, "not found", http.StatusNotFound, h.logger)
+	h.revokeInstance(w, r, r.PathValue("ruleID"))
 }
 
 // validateTemplateResponse is the response for POST /api/v1/templates/{id}/validate.

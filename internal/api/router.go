@@ -637,16 +637,23 @@ func (r *Router) setupRoutes() error {
 			return err
 		}
 
+		// ⚠️ These two prefixes are what is LEFT of the templates surface after
+		// proposal S6: the collection and everything under an id. They stay
+		// because a template id is a file stem containing '/' and half the
+		// clients send it unencoded, which makes those paths ambiguous and
+		// therefore unnameable — the measurement and the three ways out are
+		// written up on templatesModule (module_templates.go). ⛔ The next step
+		// here is that decision, not another closure.
 		r.handle("/api/v1/templates", Permitted(middleware.PermReadTemplates), templateHandler)
-		r.handle("/api/v1/templates/", Permitted(middleware.PermReadTemplates), http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			// Route to instance handler if path starts with /instances/
-			if strings.HasPrefix(req.URL.Path, "/api/v1/templates/instances/") {
-				templateHandler.ServeInstanceHTTP(w, req)
-				return
-			}
-			// Otherwise, route to template handler
-			templateHandler.ServeHTTP(w, req)
-		}))
+		r.handle("/api/v1/templates/", Permitted(middleware.PermReadTemplates), templateHandler)
+
+		// The instances sub-tree, which used to be an inline closure in front of
+		// these two, is a named route now.
+		templatesMod, tModErr := NewTemplatesModule(templateHandler)
+		if tModErr != nil {
+			return fmt.Errorf("failed to create templates module: %w", tModErr)
+		}
+		r.mountModules(templatesMod)
 	}
 
 	// Preset API (read: PermReadPresets; apply: PermApplyPreset checked in handler)
@@ -669,12 +676,16 @@ func (r *Router) setupRoutes() error {
 		if r.config.AuditLogger != nil {
 			presetHandler.SetAuditLogger(r.config.AuditLogger)
 		}
-		r.handle("/api/v1/presets", Permitted(middleware.PermReadPresets), presetHandler)
-		// /presets/{id}/apply and /presets/{id}/validate are POSTs that change
-		// the catalogue, so they carry PermApplyPreset at the route instead of
-		// being reached on the read permission and re-checked inside apply().
-		r.handle("GET /api/v1/presets/", Permitted(middleware.PermReadPresets), http.HandlerFunc(presetHandler.ServeHTTP))
-		r.handle("POST /api/v1/presets/", Permitted(middleware.PermApplyPreset), http.HandlerFunc(presetHandler.ServeHTTP))
+		// Four named routes (proposal S6). ⛔ The two method-scoped prefixes
+		// these replaced did not do what their comment claimed: a GET matched
+		// every path under /api/v1/presets/, sub-action included, so
+		// `GET .../{id}/apply` with a body applied the preset on the *read*
+		// permission. See module_presets.go.
+		presetsMod, pModErr := NewPresetsModule(presetHandler)
+		if pModErr != nil {
+			return fmt.Errorf("failed to create presets module: %w", pModErr)
+		}
+		r.mountModules(presetsMod)
 	}
 
 	// Registry refresh endpoint — re-runs Template + Preset Registry

@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +22,33 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
+
+// callPreset invokes one preset endpoint function on a request the caller
+// built, after filling in the {id} wildcard a matching route pattern would have
+// filled in.
+//
+// ⚠️ It is NOT a dispatcher and must not become one. The endpoint is named at
+// the call site — that is the point of the decomposition, and it is what makes
+// these tests say which endpoint they are about. All this does is populate
+// {id}, which httptest.NewRequest cannot know about because no mux matched.
+// Routing itself is asserted in preset_routes_test.go against the production
+// patterns; nothing here proves a path reaches a handler.
+//
+// ⚠️ It unescapes because it is standing in for the mux, which splits the
+// escaped path and unescapes each segment — the call sites write
+// "/api/v1/presets/evm%2Fweth/apply" because that is what a client sends, and
+// the handler must receive "evm/weth". ⛔ Taking the id as an argument instead
+// would put a second copy of it next to the one already inside the path
+// expression, which is a place for the two to disagree.
+func callPreset(fn http.HandlerFunc, rec *httptest.ResponseRecorder, req *http.Request) {
+	rest := strings.TrimPrefix(req.URL.EscapedPath(), "/api/v1/presets/")
+	rest = strings.TrimSuffix(rest, "/apply")
+	rest = strings.TrimSuffix(rest, "/validate")
+	if id, err := url.PathUnescape(rest); err == nil && id != "" && id != "/api/v1/presets" {
+		req.SetPathValue("id", id)
+	}
+	fn(rec, req)
+}
 
 // newPresetApplyTestEnv wires a PresetHandler with a real TemplateService
 // backed by an in-memory SQLite database, suitable for testing commitInstances.

@@ -92,12 +92,31 @@
 # ⚠️ route-mutating-perm **一行都没动**(仍然 8 条):manage_settings 不在
 # readPermissions 里,所以九条 PUT 不构成「写操作挂只读权限」。
 
+# 2026-09-11 · 提案 S6(presets 拆解 + templates 的 instances 闭包):**70 → 72 行**。
+# ⛔ 没有任何一条路由的权限变了。落空的三行 / 新增的五行,逐条对得上:
+#
+#   /api/v1/presets      read_presets   →  GET /api/v1/presets                 read_presets
+#   GET /api/v1/presets/ read_presets   →  GET /api/v1/presets/{id}            read_presets
+#   POST /api/v1/presets/ apply_preset  →  POST /api/v1/presets/{id}/apply     apply_preset
+#                                          POST /api/v1/presets/{id}/validate  apply_preset
+#   (无落空)                            →  POST /api/v1/templates/instances/{ruleID}/revoke read_templates
+#
+# ⭐ 第四行是这次 diff 最该被人看一眼的一行:validate 是**只读**操作,却因为它
+# 原本挂在 `POST /api/v1/presets/` 这条前缀后面,照抄下来就是 apply_preset ——
+# **过严**的方向。⛔ 照抄仍然是规矩:提案 §2.5 把「拆解顺手改权限」列为唯一
+# 语义不可逆的风险,两个方向都算。放松它单独走一个 PR。
+# ⚠️ 第五行是从 `/api/v1/templates/`(不带 method 的前缀)里长出来的:那条前缀
+# 一个字没动,仍在表里 —— templates 的 id 子树这一步没拆,理由写在
+# internal/api/module_templates.go(客户端一半发未编码的 '/' 的那件事)。
+# ⚠️ route-mutating-perm **多了一行**(8 → 9):那条 revoke 是写操作挂 read_templates。
+# 那是**第一次被看见**的既有债,不是这次改出来的 —— 前缀不带 method,那条门禁
+# 一个字都说不出来。⛔ 修它是安全决定,见该基线文件里写下的理由。
+
 /api/v1/evm/guard/resume resume_guard
 /api/v1/evm/requests list_own_requests
 /api/v1/evm/rules list_rules
 /api/v1/evm/rules/ list_rules
 /api/v1/evm/simulations sign_request
-/api/v1/presets read_presets
 /api/v1/templates read_templates
 /api/v1/templates/ read_templates
 DELETE /api/v1/api-keys/{id} manage_api_keys
@@ -125,7 +144,8 @@ GET /api/v1/evm/budgets/ read_budgets
 GET /api/v1/evm/signers read_signers
 GET /api/v1/evm/signers/{address}/access read_signers
 GET /api/v1/evm/simulate/status sign_request
-GET /api/v1/presets/ read_presets
+GET /api/v1/presets read_presets
+GET /api/v1/presets/{id} read_presets
 GET /api/v1/wallets manage_wallets
 GET /api/v1/wallets/{id} manage_wallets
 GET /api/v1/wallets/{id}/members manage_wallets
@@ -148,8 +168,10 @@ POST /api/v1/evm/signers/{address}/transfer read_signers
 POST /api/v1/evm/signers/{address}/unlock read_signers
 POST /api/v1/evm/simulate sign_request
 POST /api/v1/evm/simulate/batch sign_request
-POST /api/v1/presets/ apply_preset
+POST /api/v1/presets/{id}/apply apply_preset
+POST /api/v1/presets/{id}/validate apply_preset
 POST /api/v1/registry/refresh apply_preset
+POST /api/v1/templates/instances/{ruleID}/revoke read_templates
 POST /api/v1/wallets manage_wallets
 POST /api/v1/wallets/{id}/members manage_wallets
 PUT /api/v1/admin/settings/audit_monitor manage_settings

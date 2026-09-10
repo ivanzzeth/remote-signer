@@ -28,10 +28,55 @@
 | S4 signers 拆 11 条 | ✅ 已落地 | `2daf1f0` |
 | （插入）blackbox 层吃缓存的假绿 | ✅ 已修 | `2daf1f0` |
 | S5 settings 拆 18 条 | ✅ 已落地 | `0c660bd` |
-| S6 templates + instances 闭包 | ⬜ 未开始 | |
+| S6 presets 拆 4 条 + instances 闭包拆 1 条 | 🟡 **一半落地** | |
+| S6 余下：templates 的 id 子树（7 个端点） | ⛔ **卡在一个决定**，见下 | |
 | S7 requests 闭包 | ⬜ 未开始 | |
 | S8 rule.go 12 条（⛔ 切 3 个 PR） | ⬜ 未开始 | |
 | S9 起（swag / SDK 生成 / 门禁 C） | ⬜ 未开始 | |
+
+### ⛔ S6 停在哪里(2026-09-11,实测)
+
+**落地的**:presets 三条 pattern → 四条具名路由(`internal/api/module_presets.go`);
+templates 的 instances 闭包 → 一条具名路由(`internal/api/module_templates.go`)。
+`handler-path-dispatch` 15 → 13,`route-perm-binding` 70 → 72,
+`route-mutating-perm` 8 → 9(新**看见**的既有债)。
+
+⛔ **顺手关掉了一个真的洞**:`GET /api/v1/presets/{id}/apply` 带 JSON body,
+在 0866784 上实测 **201 Created 并写了一条 rule 实例** —— 只拿着 `read_presets`,
+`apply_preset` 一次都没被问到(形状与 6d30ba1 相同:`GET /api/v1/presets/` 匹配
+整棵子树,子动作不在 pattern 里,而 handler 的三个分支都注释着「mux 已经挡掉
+别的方法了」)。现在 apply 是 POST-only 路由,那个请求匹配不到任何 pattern。
+
+**没落地的,以及为什么**:templates 的 id 子树(item 的 GET/PATCH/DELETE、
+instantiate、validate、collection 的 GET/POST)。
+
+⚠️ §2.3 row 2 猜的方向错了。Go 的 mux 按**编码后**的路径切段、再逐段解码,所以
+`{id}` **装得下** `evm%2Fweth`,`PathValue` 直接给 `evm/weth` —— 那一半是净收益,
+presets 已经吃到。真正卡住的是反过来的一件事:**一半客户端根本不编码**。
+
+| 客户端 | template id | preset id |
+|---|---|---|
+| `pkg/client` / `pkg/rs-client` | `PathEscape` / `urlencoding` → `evm%2Ferc20` | 同样编码 |
+| `pkg/js-client` | ⛔ **原样插值** → `evm/erc20` | `encodeURIComponent` |
+| `extension/background.js`、`web/src`(经 js-client symlink) | ⛔ 原样 | 编码 |
+| `e2e/e2e_validation_test.go:395`、`e2e_polymarket_test.go:56` | ⛔ 原样拼接 | 无斜杠的 id |
+
+也就是说**这个二进制里自带的 Web UI**,打开一个 registry 模板详情走的就是
+`/api/v1/templates/evm/erc20`。而未编码的 '/' 让这条路径同时是「模板 evm/erc20」
+和「模板 evm 的子动作 erc20」—— 只有一张已知后缀表分得开,那正是 ServeHTTP 里
+那串 TrimSuffix。⛔ **在客户端改口之前,这几个端点不可命名。**
+只注册 `GET /api/v1/templates/{id}` 不会截断 id,它会**不匹配** —— Web UI 的模板页、
+JS SDK、扩展和两个 e2e 用例一起拿到 404(`TestE2E_ValidateTemplate` 现在就在发
+`POST /api/v1/templates/evm/agent/validate`,是跑着的证据)。
+
+三条出路,写在 `internal/api/module_templates.go` 上:(a) 让所有客户端编码 ——
+但已发布的 npm 包和已部署的扩展会对着新 daemon 坏掉;(b) 注册限定深度的兼容
+pattern(`GET /api/v1/templates/{a}/{b}` …)—— 谁都不坏,代价是把今天两级的目录
+布局写进路由表、OpenAPI path 数翻倍;(c) 保持前缀,承认这几个端点写不出诚实注解。
+⛔ 308 重定向**不是**第四条:`middleware/auth.go` 签的是 `EscapedPath()`,客户端
+拿原头去打重定向目标会一律 401。
+
+⛔ 这是一个决定,不是重构的执行细节 —— 等人拍板,别在下一个 PR 里顺手选一个。
 
 ### ⏸ 已挂起、**不要顺手清理**的东西
 
@@ -61,6 +106,12 @@
 8. ⚠️ **wallet 作为范本 PR 在「快反馈」这条轴上偏弱**：三个文件全是 `//go:build integration`，不在 `http` 层，所以 §2.4「mux 冲突 panic 落到 2.5 秒的 http 层」在它身上不成立（那张网由 `router_maximal_config_test.go` 提供）。⭐ 真能兑现这条收益的是 `internal/api/handler/**` 里**无 tag 的那 569 个用例**。wallet 在 §2.5 的其余判据（自包含、测试厚、无跨 handler 闭包）上仍然成立，可以继续当范本 —— 它的可迁移资产是**形状**，不是它跑在哪一层。
 
 9. ⚠️ **§2.3 的「405 语义不变」在 S1② 之后有一处例外**：method 不匹配的请求会落到 `/api/v1/` 拿到 404 而不是 405。⭐ 但只在**没有 `SettingsManager` 的 Router** 上可见 —— 有 Web UI 的部署里 `/` 早就把这类请求接走并回 HTML 200 了，本来就没有 405 可丢。
+
+10. ⛔ **§5 表里 S6 的收益「`manual_method_checks` 7 → 6」不成立**,实测仍是 7。那一处
+   (`handler/template.go:146`,validate 分支的 `r.Method != http.MethodPost`)在
+   `TemplateHandler.ServeHTTP` 里,而 ServeHTTP 这一步拆不掉(见上)。presets 那边
+   一处 `!=` 都没有(它用的是「GET/POST 分开注册」那套错误假设),instances 闭包用的是
+   `==` 而判据只数 `!=`。⭐ 它会随 templates 的 id 子树一起消失,不会更早。
 
 ---
 
@@ -414,7 +465,7 @@ lingxiao 的原话：**「松判据比没判据更糟：它让人以为有人在
 | **S3** | `walletsModule`：8 条路由 + `PathValue` + 导出 7 个 DTO | 基线 −1 文件 |
 | **S4** | hd-wallets / signers-access / api-keys | 基线 −3 |
 | **S5** | `settings` 拆 18 条 | ⭐ 消灭 group 变体 |
-| **S6** | templates + instances 闭包 | `manual_method_checks` 7 → 6 |
+| **S6** | templates + instances 闭包 | ⛔ 实测订正:`manual_method_checks` **仍是 7**,见 §0 订正 10 |
 | **S7** | requests 闭包 | 6 → 2 |
 | **S8** | `rule.go` 拆 12 条 | ⛔ 建议切 3 个 PR |
 | **S9** | swag spike + 注解 + `make openapi` + 子命令 + 门禁 B | |

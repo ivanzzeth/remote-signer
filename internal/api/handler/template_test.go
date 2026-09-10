@@ -494,8 +494,93 @@ func doRequest(t *testing.T, h *TemplateHandler, method, path string, body any, 
 	return rr
 }
 
-// doInstanceRequest is like doRequest but calls ServeInstanceHTTP.
-func doInstanceRequest(t *testing.T, h *TemplateHandler, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
+// ---------------------------------------------------------------------------
+// Exported for the external route tests (proposal S6)
+// ---------------------------------------------------------------------------
+
+// TemplateInstanceFixture is a TemplateHandler over in-memory mocks, plus the
+// rule repository behind it so a caller can seed an instance and read back
+// whether it was revoked.
+//
+// ⚠️ Exported, along with the constructor below, for `package handler_test` —
+// template_routes_test.go drives the production route pattern through
+// internal/api, which cannot be imported from inside package handler (import
+// cycle), and an external test package can only reach exported identifiers.
+// Same idiom as settings_test.go's SettingsTestLogger and apikey_test.go's
+// exported mock repo. ⛔ The mock types themselves stay unexported: the fixture
+// hands out behaviour (Seed/Enabled), not the map.
+type TemplateInstanceFixture struct {
+	Handler *TemplateHandler
+
+	rules *mockRuleRepo
+}
+
+// NewTemplateInstanceFixture builds the handler and seeds one revocable
+// instance rule with the given id.
+func NewTemplateInstanceFixture(t *testing.T, ruleID string) *TemplateInstanceFixture {
+	t.Helper()
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+	templateID := "tmpl-1"
+	seedRule(t, ruleRepo, &types.Rule{
+		ID:         types.RuleID(ruleID),
+		Name:       "Instance under route test",
+		Source:     types.RuleSourceInstance,
+		TemplateID: &templateID,
+		Type:       types.RuleTypeEVMAddressList,
+		Mode:       types.RuleModeWhitelist,
+		Config:     []byte(`{}`),
+		Enabled:    true,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	})
+	return &TemplateInstanceFixture{Handler: newHandler(t, tmplRepo, ruleRepo, budgetRepo), rules: ruleRepo}
+}
+
+// Revoked reports whether the seeded instance has been switched off —
+// RevokeInstance's whole observable effect (TemplateService.RevokeInstance sets
+// Enabled=false).
+//
+// ⛔ The route tests assert on this and not only on the status code: a handler
+// that revokes and then writes 405 would satisfy a status-only check, which is
+// the assertion weakness 6d30ba1 called out by name.
+func (f *TemplateInstanceFixture) Revoked(t *testing.T, ruleID string) bool {
+	t.Helper()
+	rule, err := f.rules.Get(context.Background(), types.RuleID(ruleID))
+	if err != nil {
+		t.Fatalf("seeded rule %q disappeared: %v", ruleID, err)
+	}
+	return !rule.Enabled
+}
+
+// TemplateRouteAdminKey is the API key the external route tests inject.
+func TemplateRouteAdminKey() *types.APIKey { return adminAPIKey() }
+
+// callTemplateInstance invokes one instance endpoint function on a request the
+// caller built, after filling in the wildcard a matching route pattern would
+// have filled in.
+//
+// ⚠️ It is NOT a dispatcher and must not become one. The endpoint is named at
+// the call site — that is the point of the decomposition, and it is what makes
+// these tests say which endpoint they are about. All this does is populate
+// {ruleID}, which httptest.NewRequest cannot know about because no mux matched.
+// Routing itself is asserted in template_routes_test.go against the production
+// pattern; nothing here proves a path reaches a handler.
+//
+// ⛔ Deriving the value from the URL rather than taking it as an argument is
+// deliberate: every call site already spells the rule id inside the path
+// expression, and a second copy is a place for the two to disagree.
+func callTemplateInstance(fn http.HandlerFunc, rec *httptest.ResponseRecorder, req *http.Request) {
+	rest := strings.TrimPrefix(req.URL.Path, "/api/v1/templates/instances/")
+	if id := strings.TrimSuffix(rest, "/revoke"); id != "" {
+		req.SetPathValue("ruleID", id)
+	}
+	fn(rec, req)
+}
+
+// doInstanceRequest is like doRequest but calls one named instance endpoint.
+func doInstanceRequest(t *testing.T, endpoint http.HandlerFunc, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	t.Helper()
 	var bodyReader *bytes.Buffer
 	if body != nil {
@@ -515,7 +600,7 @@ func doInstanceRequest(t *testing.T, h *TemplateHandler, method, path string, bo
 	}
 
 	rr := httptest.NewRecorder()
-	h.ServeInstanceHTTP(rr, req)
+	callTemplateInstance(endpoint, rr, req)
 	return rr
 }
 
@@ -669,7 +754,7 @@ func TestUnauthorized(t *testing.T) {
 	})
 
 	t.Run("ServeInstanceHTTP_without_api_key", func(t *testing.T) {
-		rr := doInstanceRequest(t, h, http.MethodPost, "/api/v1/templates/instances/some-rule/revoke", nil, nil)
+		rr := doInstanceRequest(t, h.RevokeInstance, http.MethodPost, "/api/v1/templates/instances/some-rule/revoke", nil, nil)
 		if rr.Code != http.StatusUnauthorized {
 			t.Errorf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
 		}
@@ -1914,7 +1999,7 @@ func TestRevokeInstance(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doInstanceRequest(t, h, http.MethodPost, "/api/v1/templates/instances/inst_revoke_1/revoke", nil, apiKey)
+		rr := doInstanceRequest(t, h.RevokeInstance, http.MethodPost, "/api/v1/templates/instances/inst_revoke_1/revoke", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rr.Code, rr.Body.String())
 		}
@@ -1955,7 +2040,7 @@ func TestRevokeInstance(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doInstanceRequest(t, h, http.MethodPost, "/api/v1/templates/instances/nonexistent/revoke", nil, apiKey)
+		rr := doInstanceRequest(t, h.RevokeInstance, http.MethodPost, "/api/v1/templates/instances/nonexistent/revoke", nil, apiKey)
 		// The service returns a generic error wrapping ErrNotFound, so the handler
 		// checks types.IsNotFound and returns 404
 		if rr.Code != http.StatusNotFound {
@@ -1986,7 +2071,7 @@ func TestRevokeInstance(t *testing.T) {
 		seedRule(t, ruleRepo, rule)
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doInstanceRequest(t, h, http.MethodPost, "/api/v1/templates/instances/rule_api_1/revoke", nil, apiKey)
+		rr := doInstanceRequest(t, h.RevokeInstance, http.MethodPost, "/api/v1/templates/instances/rule_api_1/revoke", nil, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1996,30 +2081,17 @@ func TestRevokeInstance(t *testing.T) {
 		}
 	})
 
-	t.Run("method_not_allowed_on_revoke", func(t *testing.T) {
-		tmplRepo := newMockTemplateRepo()
-		ruleRepo := newMockRuleRepo()
-		budgetRepo := newMockBudgetRepo()
-		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
-
-		rr := doInstanceRequest(t, h, http.MethodGet, "/api/v1/templates/instances/some-rule/revoke", nil, apiKey)
-		if rr.Code != http.StatusMethodNotAllowed {
-			t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
-		}
-	})
-
-	t.Run("invalid_path_returns_404", func(t *testing.T) {
-		tmplRepo := newMockTemplateRepo()
-		ruleRepo := newMockRuleRepo()
-		budgetRepo := newMockBudgetRepo()
-		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
-
-		// Path without /revoke suffix
-		rr := doInstanceRequest(t, h, http.MethodPost, "/api/v1/templates/instances/some-rule/unknown", nil, apiKey)
-		if rr.Code != http.StatusNotFound {
-			t.Errorf("expected status %d, got %d", http.StatusNotFound, rr.Code)
-		}
-	})
+	// ⚠️ Two sub-tests left this block in proposal S6 —
+	// "method_not_allowed_on_revoke" (GET on the revoke path) and
+	// "invalid_path_returns_404" (a path with no /revoke suffix). Both asserted
+	// what ServeInstanceHTTP did with a path the mux had not looked at, and
+	// ServeInstanceHTTP is gone: which requests reach RevokeInstance is decided
+	// by the route now. They are
+	// TestTemplateInstanceRoutes_RevokeRequiresPost and
+	// TestTemplateInstanceRoutes_UnclaimedPathDoesNotRevoke in
+	// template_routes_test.go, driving the production pattern and additionally
+	// asserting the instance was not revoked — which a status-only check could
+	// not.
 }
 
 // ---------------------------------------------------------------------------
