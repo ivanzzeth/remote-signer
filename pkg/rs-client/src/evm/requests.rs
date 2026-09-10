@@ -1,9 +1,13 @@
 use reqwest::Method;
 
 use crate::error::Error;
+use crate::evm::paths;
 use crate::transport::transport::Transport;
 
-use super::{ApproveRequest, ApproveResponse, ListRequestsFilter, ListRequestsResponse, PreviewRuleRequest, PreviewRuleResponse, RequestStatus, SimulateResponse};
+use super::{
+    ApproveRequest, ApproveResponse, ListRequestsFilter, ListRequestsResponse, PreviewRuleRequest,
+    PreviewRuleResponse, RequestStatus, SimulateResponse,
+};
 
 #[derive(Clone)]
 pub struct RequestService {
@@ -16,66 +20,138 @@ impl RequestService {
     }
 
     pub fn get(&self, request_id: &str) -> Result<RequestStatus, Error> {
-        let path = format!("/api/v1/evm/requests/{}", urlencoding::encode(request_id));
-        self.transport
-            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
+        self.transport.request_json(
+            Method::GET,
+            &paths::request(request_id),
+            Option::<&()>::None,
+            Some(&[200]),
+        )
     }
 
     pub fn list(&self, filter: Option<&ListRequestsFilter>) -> Result<ListRequestsResponse, Error> {
-        let mut path = String::from("/api/v1/evm/requests");
-        let mut params = vec![];
-        if let Some(f) = filter {
-            if let Some(v) = &f.status {
-                params.push(format!("status={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = &f.signer_address {
-                params.push(format!("signer_address={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = &f.chain_id {
-                params.push(format!("chain_id={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = f.limit {
-                params.push(format!("limit={}", v));
-            }
-            if let Some(v) = &f.cursor {
-                params.push(format!("cursor={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = &f.cursor_id {
-                params.push(format!("cursor_id={}", urlencoding::encode(v)));
-            }
-        }
-        if !params.is_empty() {
-            path.push('?');
-            path.push_str(&params.join("&"));
-        }
-        self.transport
-            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
+        self.transport.request_json(
+            Method::GET,
+            &paths::requests_list(filter),
+            Option::<&()>::None,
+            Some(&[200]),
+        )
     }
 
     pub fn approve(&self, request_id: &str, req: &ApproveRequest) -> Result<ApproveResponse, Error> {
-        let path = format!(
-            "/api/v1/evm/requests/{}/approve",
-            urlencoding::encode(request_id)
-        );
-        self.transport
-            .request_json(Method::POST, &path, Some(req), Some(&[200]))
+        self.transport.request_json(
+            Method::POST,
+            &paths::request_approve(request_id),
+            Some(req),
+            Some(&[200]),
+        )
     }
 
-    pub fn preview_rule(&self, request_id: &str, req: &PreviewRuleRequest) -> Result<PreviewRuleResponse, Error> {
-        let path = format!(
-            "/api/v1/evm/requests/{}/preview-rule",
-            urlencoding::encode(request_id)
-        );
-        self.transport
-            .request_json(Method::POST, &path, Some(req), Some(&[200]))
+    pub fn preview_rule(
+        &self,
+        request_id: &str,
+        req: &PreviewRuleRequest,
+    ) -> Result<PreviewRuleResponse, Error> {
+        self.transport.request_json(
+            Method::POST,
+            &paths::request_preview_rule(request_id),
+            Some(req),
+            Some(&[200]),
+        )
     }
 
     pub fn get_simulation(&self, request_id: &str) -> Result<SimulateResponse, Error> {
-        let path = format!(
-            "/api/v1/evm/requests/{}/simulation",
-            urlencoding::encode(request_id)
-        );
-        self.transport
-            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
+        self.transport.request_json(
+            Method::GET,
+            &paths::request_simulation(request_id),
+            Option::<&()>::None,
+            Some(&[200]),
+        )
     }
 }
+
+#[cfg(feature = "async")]
+mod asynchronous {
+    use super::*;
+    use crate::transport::async_transport::AsyncTransport;
+
+    /// Non-blocking counterpart of [`RequestService`].
+    #[derive(Clone)]
+    pub struct AsyncRequestService {
+        transport: AsyncTransport,
+    }
+
+    impl AsyncRequestService {
+        pub fn new(transport: AsyncTransport) -> Self {
+            Self { transport }
+        }
+
+        pub async fn get(&self, request_id: &str) -> Result<RequestStatus, Error> {
+            self.transport
+                .request_json(
+                    Method::GET,
+                    &paths::request(request_id),
+                    Option::<&()>::None,
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn list(
+            &self,
+            filter: Option<&ListRequestsFilter>,
+        ) -> Result<ListRequestsResponse, Error> {
+            self.transport
+                .request_json(
+                    Method::GET,
+                    &paths::requests_list(filter),
+                    Option::<&()>::None,
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn approve(
+            &self,
+            request_id: &str,
+            req: &ApproveRequest,
+        ) -> Result<ApproveResponse, Error> {
+            self.transport
+                .request_json(
+                    Method::POST,
+                    &paths::request_approve(request_id),
+                    Some(req),
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn preview_rule(
+            &self,
+            request_id: &str,
+            req: &PreviewRuleRequest,
+        ) -> Result<PreviewRuleResponse, Error> {
+            self.transport
+                .request_json(
+                    Method::POST,
+                    &paths::request_preview_rule(request_id),
+                    Some(req),
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn get_simulation(&self, request_id: &str) -> Result<SimulateResponse, Error> {
+            self.transport
+                .request_json(
+                    Method::GET,
+                    &paths::request_simulation(request_id),
+                    Option::<&()>::None,
+                    Some(&[200]),
+                )
+                .await
+        }
+    }
+}
+
+#[cfg(feature = "async")]
+pub use asynchronous::AsyncRequestService;

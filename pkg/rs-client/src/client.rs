@@ -65,35 +65,45 @@ pub struct Client {
     transport: Transport,
 }
 
+/// Resolve the Ed25519 signing key from whichever config field is set.
+///
+/// Shared by [`Client`] and the async client so both accept exactly the same
+/// key sources in the same precedence order.
+pub(crate) fn signing_key_from(cfg: &Config) -> Result<SigningKey, Error> {
+    if let Some(hex) = cfg.private_key_hex.as_deref() {
+        auth::Auth::parse_private_key_hex(hex)
+    } else if let Some(b64) = cfg.private_key_base64.as_deref() {
+        auth::Auth::parse_private_key_base64_der(b64)
+    } else if let Some(path) = cfg.private_key_file.as_deref() {
+        auth::Auth::load_private_key_from_pem_file(path)
+    } else {
+        Err(Error::InvalidConfig(
+            "either private_key_hex, private_key_base64, or private_key_file is required"
+                .to_string(),
+        ))
+    }
+}
+
+pub(crate) const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+pub(crate) const DEFAULT_POLL_TIMEOUT: Duration = Duration::from_secs(300);
+
+pub(crate) fn transport_config(cfg: Config) -> TransportConfig {
+    TransportConfig {
+        base_url: cfg.base_url,
+        api_key_id: cfg.api_key_id,
+        timeout: cfg.timeout,
+        tls: cfg.tls,
+    }
+}
+
 impl Client {
     pub fn new(cfg: Config) -> Result<Self, Error> {
-        let signing_key: SigningKey = if let Some(hex) = cfg.private_key_hex.as_deref() {
-            auth::Auth::parse_private_key_hex(hex)?
-        } else if let Some(b64) = cfg.private_key_base64.as_deref() {
-            auth::Auth::parse_private_key_base64_der(b64)?
-        } else if let Some(path) = cfg.private_key_file.as_deref() {
-            auth::Auth::load_private_key_from_pem_file(path)?
-        } else {
-            return Err(Error::InvalidConfig(
-                "either private_key_hex, private_key_base64, or private_key_file is required"
-                    .to_string(),
-            ));
-        };
+        let auth = Auth::new(signing_key_from(&cfg)?);
 
-        let auth = Auth::new(signing_key);
+        let poll_interval = cfg.poll_interval.unwrap_or(DEFAULT_POLL_INTERVAL);
+        let poll_timeout = cfg.poll_timeout.unwrap_or(DEFAULT_POLL_TIMEOUT);
 
-        let transport = Transport::new(
-            TransportConfig {
-                base_url: cfg.base_url,
-                api_key_id: cfg.api_key_id,
-                timeout: cfg.timeout,
-                tls: cfg.tls,
-            },
-            auth,
-        )?;
-
-        let poll_interval = cfg.poll_interval.unwrap_or(Duration::from_secs(2));
-        let poll_timeout = cfg.poll_timeout.unwrap_or(Duration::from_secs(300));
+        let transport = Transport::new(transport_config(cfg), auth)?;
 
         let evm = evm::Service::new(transport.clone(), poll_interval, poll_timeout);
 
@@ -120,5 +130,129 @@ impl Client {
             .transport
             .request_no_auth_raw(Method::GET, "/metrics")?;
         Ok(String::from_utf8_lossy(&bytes).to_string())
+    }
+}
+
+#[cfg(feature = "async")]
+mod asynchronous {
+    use super::*;
+    use crate::transport::async_transport::AsyncTransport;
+
+    /// Non-blocking counterpart of [`Client`].
+    ///
+    /// Accepts the same [`Config`] and exposes the same EVM surface, so moving
+    /// from the blocking client is a matter of adding `.await`.
+    #[derive(Clone)]
+    pub struct AsyncClient {
+        pub evm: evm::AsyncService,
+
+        transport: AsyncTransport,
+    }
+
+    impl AsyncClient {
+        pub fn new(cfg: Config) -> Result<Self, Error> {
+            let auth = Auth::new(signing_key_from(&cfg)?);
+
+            let poll_interval = cfg.poll_interval.unwrap_or(DEFAULT_POLL_INTERVAL);
+            let poll_timeout = cfg.poll_timeout.unwrap_or(DEFAULT_POLL_TIMEOUT);
+
+            let transport = AsyncTransport::new(transport_config(cfg), auth)?;
+
+            Ok(Self {
+                evm: evm::AsyncService::new(transport.clone(), poll_interval, poll_timeout),
+                transport,
+            })
+        }
+
+        pub fn base_url(&self) -> &str {
+            self.transport.base_url()
+        }
+
+        pub async fn health(&self) -> Result<HealthResponse, Error> {
+            let bytes = self
+                .transport
+                .request_no_auth_raw(Method::GET, "/health")
+                .await?;
+            Ok(serde_json::from_slice(&bytes)?)
+        }
+
+        pub async fn metrics(&self) -> Result<String, Error> {
+            let bytes = self
+                .transport
+                .request_no_auth_raw(Method::GET, "/metrics")
+                .await?;
+            Ok(String::from_utf8_lossy(&bytes).to_string())
+        }
+    }
+}
+
+#[cfg(feature = "async")]
+pub use asynchronous::AsyncClient;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn config_without_any_key_source_is_rejected() {
+        let err = signing_key_from(&Config {
+            base_url: "http://localhost:8548".to_string(),
+            api_key_id: "key-1".to_string(),
+            ..Default::default()
+        })
+        .expect_err("should reject");
+        assert_matches!(err, Error::InvalidConfig(_));
+    }
+
+    #[test]
+    fn hex_key_source_is_accepted() {
+        let (key, _) = auth::Auth::generate_keypair();
+        let hex_key = hex::encode(key.to_bytes());
+
+        let parsed = signing_key_from(&Config {
+            private_key_hex: Some(hex_key),
+            ..Default::default()
+        })
+        .expect("should parse");
+
+        assert_eq!(parsed.to_bytes(), key.to_bytes());
+    }
+
+    #[test]
+    fn hex_key_takes_precedence_over_other_sources() {
+        let (key, _) = auth::Auth::generate_keypair();
+
+        let parsed = signing_key_from(&Config {
+            private_key_hex: Some(hex::encode(key.to_bytes())),
+            // Deliberately unusable — must not be reached.
+            private_key_file: Some("/nonexistent/key.pem".to_string()),
+            ..Default::default()
+        })
+        .expect("hex wins");
+
+        assert_eq!(parsed.to_bytes(), key.to_bytes());
+    }
+
+    #[test]
+    fn empty_base_url_is_rejected_by_transport() {
+        let res = Client::new(Config {
+            base_url: String::new(),
+            api_key_id: "key-1".to_string(),
+            private_key_hex: Some(hex::encode([7u8; 32])),
+            ..Default::default()
+        });
+        assert_matches!(res.err(), Some(Error::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn empty_api_key_id_is_rejected_by_transport() {
+        let res = Client::new(Config {
+            base_url: "http://localhost:8548".to_string(),
+            api_key_id: String::new(),
+            private_key_hex: Some(hex::encode([7u8; 32])),
+            ..Default::default()
+        });
+        assert_matches!(res.err(), Some(Error::InvalidConfig(_)));
     }
 }

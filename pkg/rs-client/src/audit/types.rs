@@ -6,6 +6,7 @@ pub struct Record {
     pub id: String,
     pub event_type: String,
     pub severity: String,
+    #[serde(with = "time::serde::rfc3339")]
     pub timestamp: OffsetDateTime,
     #[serde(default)]
     pub api_key_id: Option<String>,

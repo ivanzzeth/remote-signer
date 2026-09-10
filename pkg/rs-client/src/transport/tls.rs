@@ -12,11 +12,12 @@ pub struct TlsConfig {
 
 impl TlsConfig {
     pub fn validate_paths(&self) -> Result<(), Error> {
-        for p in [&self.ca_file, &self.cert_file, &self.key_file] {
-            if let Some(p) = p {
-                if !Path::new(p).exists() {
-                    return Err(Error::InvalidConfig(format!("TLS file not found: {p}")));
-                }
+        for p in [&self.ca_file, &self.cert_file, &self.key_file]
+            .into_iter()
+            .flatten()
+        {
+            if !Path::new(p).exists() {
+                return Err(Error::InvalidConfig(format!("TLS file not found: {p}")));
             }
         }
         Ok(())

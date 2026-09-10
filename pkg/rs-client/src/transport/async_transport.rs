@@ -1,7 +1,12 @@
+//! Non-blocking HTTP transport.
+//!
+//! Mirrors [`crate::transport::transport::Transport`] method for method. Both
+//! share request signing, status handling and TLS setup via
+//! [`crate::transport::common`], so behaviour cannot diverge between them.
+
 use std::time::Duration;
 
-use reqwest::blocking::{Client as HttpClient, ClientBuilder};
-use reqwest::Method;
+use reqwest::{Client as HttpClient, ClientBuilder, Method};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -10,29 +15,17 @@ use crate::transport::auth::Auth;
 use crate::transport::common::{
     configure_builder, is_accepted, parse_api_error, prepare_request,
 };
-use crate::transport::tls::TlsConfig;
+use crate::transport::transport::TransportConfig;
 
-/// Blocking HTTP transport.
-///
-/// See [`crate::transport::async_transport::AsyncTransport`] for the
-/// non-blocking equivalent, available behind the `async` feature.
 #[derive(Clone)]
-pub struct Transport {
+pub struct AsyncTransport {
     base_url: String,
     api_key_id: String,
     auth: Auth,
     http: HttpClient,
 }
 
-#[derive(Debug, Clone)]
-pub struct TransportConfig {
-    pub base_url: String,
-    pub api_key_id: String,
-    pub timeout: Option<Duration>,
-    pub tls: Option<TlsConfig>,
-}
-
-impl Transport {
+impl AsyncTransport {
     pub fn new(cfg: TransportConfig, auth: Auth) -> Result<Self, Error> {
         if cfg.base_url.trim().is_empty() {
             return Err(Error::InvalidConfig("BaseURL is required".to_string()));
@@ -59,17 +52,22 @@ impl Transport {
         &self.base_url
     }
 
-    pub fn request_no_auth_raw(&self, method: Method, path: &str) -> Result<Vec<u8>, Error> {
+    /// Default request timeout used when [`TransportConfig::timeout`] is unset.
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+    pub async fn request_no_auth_raw(&self, method: Method, path: &str) -> Result<Vec<u8>, Error> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self
             .http
             .request(method, url)
             .send()
+            .await
             .map_err(|e| Error::RequestFailed(e.to_string()))?;
 
         let status = resp.status().as_u16();
         let bytes = resp
             .bytes()
+            .await
             .map_err(|e| Error::RequestFailed(e.to_string()))?
             .to_vec();
 
@@ -80,19 +78,19 @@ impl Transport {
         Ok(bytes)
     }
 
-    pub fn request_json<TReq: Serialize, TResp: DeserializeOwned>(
+    pub async fn request_json<TReq: Serialize, TResp: DeserializeOwned>(
         &self,
         method: Method,
         path: &str,
         body: Option<&TReq>,
         accepted: Option<&[u16]>,
     ) -> Result<TResp, Error> {
-        let bytes = self.request_raw(method, path, body, accepted)?;
+        let bytes = self.request_raw(method, path, body, accepted).await?;
         let out = serde_json::from_slice::<TResp>(&bytes)?;
         Ok(out)
     }
 
-    pub fn request_raw<TReq: Serialize>(
+    pub async fn request_raw<TReq: Serialize>(
         &self,
         method: Method,
         path: &str,
@@ -114,10 +112,14 @@ impl Transport {
             .header("X-Nonce", prepared.nonce)
             .header("X-Signature", prepared.signature);
 
-        let resp = req.send().map_err(|e| Error::RequestFailed(e.to_string()))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| Error::RequestFailed(e.to_string()))?;
         let status = resp.status().as_u16();
         let bytes = resp
             .bytes()
+            .await
             .map_err(|e| Error::RequestFailed(e.to_string()))?
             .to_vec();
 
