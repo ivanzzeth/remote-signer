@@ -45,8 +45,18 @@
 #   selectCols 与 fresh 现在挨着写 —— 投影里漏一列,那列读回来是零值、永远比不
 #   相等,跳过分支会退化成每次启动整表 UPDATE。
 
+# 2026-09-10:3 → 2。doRPC / doRPCUnchecked / doRPCRaw 三份(门禁只配到其中
+#   两份,doRPCRaw 是它没配上的第三份)合成一条 rpcRoundTrip:熔断 → 限流 →
+#   组包 → POST → 限长读 → 查状态 → 解信封 → 报 JSON-RPC 错。三份副本各自写了
+#   一遍 recordError —— 而每一处 recordError 都是给整个 provider 的熔断器投票,
+#   哪份漏掉一条失败路径,那条路径就永远打不开熔断器,上游已经挂了守护进程还在
+#   照打。recordSuccess 故意留在外层:解字符串失败要算失败,放进 rpcRoundTrip
+#   的话「200 但结果形状不对」会先清零再加一,永远到不了阈值。
+#   两份已经在外观上漂了:doRPC 的熔断文案多一句「using cached data only」,
+#   而缓存是 TokenMetadataCache 那一层的事,provider 自己并不用缓存 —— 统一成
+#   不带那句的准确文案。
+
 # ⛔ 收敛方向是「同一个形状只留一份实现,两边都用它」。
 #
-internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPCUnchecked <-> internal/chain/evm/rpc_provider.go:(*RPCProvider).doRPC
 internal/notify/pushover_client.go:(*PushoverClient).SendToUsers <-> internal/notify/slack_client.go:(*SlackClient).SendToChannels
 internal/notify/slack_client.go:(*SlackClient).SendToChannels <-> internal/notify/telegram_client.go:(*TelegramClient).SendToChats

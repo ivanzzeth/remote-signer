@@ -428,80 +428,37 @@ func (p *RPCProvider) QueryAllowance(ctx context.Context, chainID, token, owner,
 	return val, nil
 }
 
-// doRPCUnchecked performs a JSON-RPC call without allowedRPCMethods check.
-// Used for server-side operations (broadcast) that are not exposed to JS sandbox.
-func (p *RPCProvider) doRPCUnchecked(ctx context.Context, chainID, method string, params []interface{}) (string, error) {
-	// SECURITY: Check circuit breaker
-	if p.breaker.isOpen() {
-		return "", fmt.Errorf("rpc circuit breaker open: too many consecutive errors")
-	}
-	if !p.limiter.allow() {
-		return "", fmt.Errorf("rpc global rate limit exceeded")
-	}
+// ---------- the one JSON-RPC round trip ----------
+//
+// doRPC, doRPCUnchecked and doRPCRaw were three copies of the same 50-line
+// transport: circuit breaker, rate limiter, marshal the envelope, POST with a
+// 5s deadline, read at most 1MiB, check the status, unmarshal the envelope,
+// surface a JSON-RPC error. They differed in what they wrapped it in — a
+// method allowlist on one end, a string decode on the other — and in nothing
+// else, except one drifted error message (see rpcRoundTrip).
+//
+// ⚠️ Three copies of a circuit breaker is worse than three copies of a getter.
+// Every `p.breaker.recordError()` in this file is a vote towards tripping the
+// breaker for the whole provider; a copy that forgets one on a failure path
+// keeps the breaker closed while that path fails forever, and the daemon goes
+// on hammering an upstream that is already down.
+//
+// recordSuccess deliberately does NOT live in rpcRoundTrip: the string-decoding
+// callers only count a call as successful once the result decodes. Resetting
+// the consecutive-error count here would mean a gateway that answers 200 with
+// a result of the wrong shape could never trip the breaker — each call would
+// reset the counter to zero and then increment it back to one.
 
-	reqBody, err := json.Marshal(jsonRPCRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		Params:  params,
-		ID:      1,
-	})
-	if err != nil {
-		return "", fmt.Errorf("marshal rpc request: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, rpcCallTimeout)
-	defer cancel()
-
-	url := p.rpcURL(chainID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return "", fmt.Errorf("create http request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("rpc request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("read rpc response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		p.breaker.recordError()
-		return "", fmt.Errorf("rpc returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var rpcResp jsonRPCResponse
-	if err := json.Unmarshal(body, &rpcResp); err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("unmarshal rpc response: %w", err)
-	}
-	if rpcResp.Error != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
-	}
-
-	var result string
-	if err := json.Unmarshal(rpcResp.Result, &result); err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("unmarshal rpc result: %w", err)
-	}
-
-	p.breaker.recordSuccess()
-	return result, nil
-}
-
-// doRPCRaw performs a JSON-RPC call and returns the raw result JSON.
-func (p *RPCProvider) doRPCRaw(ctx context.Context, chainID, method string, params []interface{}) (json.RawMessage, error) {
+// rpcRoundTrip performs one JSON-RPC call and returns the raw `result` member.
+// It records breaker errors but not breaker success; the caller does that once
+// it has the value it actually wanted.
+func (p *RPCProvider) rpcRoundTrip(ctx context.Context, chainID, method string, params []interface{}) (json.RawMessage, error) {
+	// SECURITY: Check circuit breaker — if too many consecutive errors, fail fast
 	if p.breaker.isOpen() {
 		return nil, fmt.Errorf("rpc circuit breaker open: too many consecutive errors")
 	}
+
+	// SECURITY: Global rate limit across all evaluations
 	if !p.limiter.allow() {
 		return nil, fmt.Errorf("rpc global rate limit exceeded")
 	}
@@ -533,7 +490,7 @@ func (p *RPCProvider) doRPCRaw(ctx context.Context, chainID, method string, para
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
 	if err != nil {
 		p.breaker.recordError()
 		return nil, fmt.Errorf("read rpc response: %w", err)
@@ -554,10 +511,41 @@ func (p *RPCProvider) doRPCRaw(ctx context.Context, chainID, method string, para
 		return nil, fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
 	}
 
-	p.breaker.recordSuccess()
 	return rpcResp.Result, nil
 }
 
+// doRPCRaw performs a JSON-RPC call and returns the raw result JSON.
+func (p *RPCProvider) doRPCRaw(ctx context.Context, chainID, method string, params []interface{}) (json.RawMessage, error) {
+	raw, err := p.rpcRoundTrip(ctx, chainID, method, params)
+	if err != nil {
+		return nil, err
+	}
+	p.breaker.recordSuccess()
+	return raw, nil
+}
+
+// doRPCUnchecked performs a JSON-RPC call without allowedRPCMethods check and
+// decodes the result as a hex string. Used for server-side operations
+// (broadcast, allowance reads) that are not exposed to the JS sandbox.
+func (p *RPCProvider) doRPCUnchecked(ctx context.Context, chainID, method string, params []interface{}) (string, error) {
+	raw, err := p.rpcRoundTrip(ctx, chainID, method, params)
+	if err != nil {
+		return "", err
+	}
+
+	var result string
+	if err := json.Unmarshal(raw, &result); err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("unmarshal rpc result: %w", err)
+	}
+
+	p.breaker.recordSuccess()
+	return result, nil
+}
+
+// doRPC is doRPCUnchecked behind the JS-sandbox method allowlist. This is the
+// only entry point the rule sandbox can reach, so the two guards below are the
+// sandbox's whole story about which methods exist.
 func (p *RPCProvider) doRPC(ctx context.Context, chainID, method string, params []interface{}) (string, error) {
 	if blockedRPCMethods[method] {
 		return "", fmt.Errorf("rpc method %q is blocked", method)
@@ -565,73 +553,7 @@ func (p *RPCProvider) doRPC(ctx context.Context, chainID, method string, params 
 	if !allowedRPCMethods[method] {
 		return "", fmt.Errorf("rpc method %q is not allowed", method)
 	}
-
-	// SECURITY: Check circuit breaker — if too many consecutive errors, fail fast
-	if p.breaker.isOpen() {
-		return "", fmt.Errorf("rpc circuit breaker open: too many consecutive errors, using cached data only")
-	}
-
-	// SECURITY: Global rate limit across all evaluations
-	if !p.limiter.allow() {
-		return "", fmt.Errorf("rpc global rate limit exceeded")
-	}
-
-	reqBody, err := json.Marshal(jsonRPCRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		Params:  params,
-		ID:      1,
-	})
-	if err != nil {
-		return "", fmt.Errorf("marshal rpc request: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, rpcCallTimeout)
-	defer cancel()
-
-	url := p.rpcURL(chainID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return "", fmt.Errorf("create http request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("rpc request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
-	if err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("read rpc response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		p.breaker.recordError()
-		return "", fmt.Errorf("rpc returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var rpcResp jsonRPCResponse
-	if err := json.Unmarshal(body, &rpcResp); err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("unmarshal rpc response: %w", err)
-	}
-	if rpcResp.Error != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
-	}
-
-	var result string
-	if err := json.Unmarshal(rpcResp.Result, &result); err != nil {
-		p.breaker.recordError()
-		return "", fmt.Errorf("unmarshal rpc result: %w", err)
-	}
-
-	p.breaker.recordSuccess()
-	return result, nil
+	return p.doRPCUnchecked(ctx, chainID, method, params)
 }
 
 // rpcMaxTotalTime is the maximum cumulative time allowed for all RPC calls within a single evaluation.
