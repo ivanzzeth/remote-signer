@@ -8,6 +8,7 @@ import {
   hasStoredKeystore,
   persistKeystore,
   setCredentials,
+  verifyCredentials,
 } from "../lib/auth";
 import {
   decryptKeystore,
@@ -109,6 +110,11 @@ function UnlockForm({
         throw new Error("Encrypted key is gone — please import it again.");
       }
       const { seed } = await decryptKeystore(json, password);
+      // ⚠️ Also verified here, not only at import. A pairing stored before
+      // this check existed is still on disk in someone's browser, and
+      // unlocking it would otherwise walk straight into the same wall of
+      // 401s the import check now prevents.
+      await verifyCredentials(apiKeyID, seed);
       await setCredentials(apiKeyID, seed);
       navigate(intendedPath, { replace: true });
     } catch (err) {
@@ -216,6 +222,10 @@ function OnboardForm({
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // crypto.subtle is what encrypts the key, and browsers withhold it outside a
+  // secure context. Checked here so the page can say so before anything is typed.
+  const secureContextOK =
+    typeof crypto !== "undefined" && Boolean(crypto.subtle);
   const [submitting, setSubmitting] = useState(false);
 
   // Auto-detect input shape. When the operator pastes/uploads an
@@ -273,15 +283,21 @@ function OnboardForm({
           password,
         );
         const id = apiKeyID.trim() || identifier;
+        // ⛔ Verify before persisting. Writing a mismatched pairing to
+        // localStorage first means the operator lands on a dashboard where
+        // every panel 401s, and has to know to come back here and reset.
+        await verifyCredentials(id, seed);
         await setCredentials(id, seed);
         persistKeystore(id, keyInput.trim());
         navigate(intendedPath, { replace: true });
       } else {
         const seed = parsePrivateKey(keyInput);
+        // ⛔ Ask the daemon first. This used to call setCredentials with a
+        // comment saying it verified the credential; it does not, and never
+        // did — it only builds a client in memory. A wrong ID therefore got
+        // past this screen and turned into 401s everywhere else.
+        await verifyCredentials(apiKeyID.trim(), seed);
         const keystore = await encryptSeed(seed, password, apiKeyID.trim());
-        // Verify the daemon accepts this credential BEFORE persisting —
-        // catches "wrong api-key-id" / "key not registered" early so the
-        // operator doesn't get stuck in the unlock screen.
         await setCredentials(apiKeyID.trim(), seed);
         persistKeystore(apiKeyID.trim(), JSON.stringify(keystore));
         navigate(intendedPath, { replace: true });
@@ -317,12 +333,60 @@ function OnboardForm({
   return (
     <div className="flex h-full items-center justify-center bg-ink-50">
       <div className="w-full max-w-md rounded-lg border border-ink-200 bg-white p-6 shadow-sm">
-        <h1 className="text-lg font-semibold text-ink-900">Import API key</h1>
+        {/* ⚠️ This screen is only reached when the daemon already has an
+            admin key — App.tsx routes a daemon with none to Bootstrap. The
+            heading used to read "Import API key" and the text described
+            pasting key material, which reads like first-run setup; an operator
+            took it to mean the daemon had no admin yet and pasted the wrong
+            key under the admin ID. The words now say what this screen is:
+            signing in with a key the daemon already knows. */}
+        <h1 className="text-lg font-semibold text-ink-900">
+          Sign in to this signer
+        </h1>
         <p className="mt-1 text-sm text-ink-500">
-          Paste an encrypted keystore (.json), an Ed25519 private key
-          (hex or base64), or a PKCS#8 PEM file. The key is encrypted locally with
-          your password so the next visit only needs the password.
+          This daemon is already set up. Sign in with a key it already knows —
+          the API key ID has to be the one that key was registered under.
         </p>
+        <p className="mt-2 text-sm text-ink-500">
+          An operator-run daemon keeps its keys under its own{" "}
+          <code className="rounded bg-ink-100 px-1">apikeys/</code> directory
+          (by default{" "}
+          <code className="rounded bg-ink-100 px-1">
+            ~/.remote-signer/apikeys/
+          </code>
+          ): paste an encrypted keystore (<code>.json</code>, with its
+          password), or a private key as PEM, hex, or base64. It is re-encrypted
+          in this browser with the password you choose, so the next visit only
+          needs that password.
+        </p>
+
+        {/* ⚠️ Shown before the operator types anything. Encrypting the key
+            needs crypto.subtle, which browsers withhold outside a secure
+            context — and the daemon binds 0.0.0.0, so reaching it at a LAN
+            address is the normal way to end up here. Without this banner the
+            first sign of trouble is "Cannot read properties of undefined
+            (reading 'importKey')" after a key and a password have been
+            entered. */}
+        {!secureContextOK && (
+          <div
+            data-testid="insecure-context-warning"
+            className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+          >
+            <p className="font-medium">This address can&apos;t encrypt your key.</p>
+            <p className="mt-1">
+              Browsers only expose the crypto this page needs on{" "}
+              <code className="rounded bg-amber-100 px-1">https://</code> or on
+              localhost. Open{" "}
+              <a
+                className="underline"
+                href={`http://localhost:${window.location.port || "8548"}${window.location.pathname}`}
+              >
+                http://localhost:{window.location.port || "8548"}
+              </a>{" "}
+              instead, or enable TLS on the daemon.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={onSubmit} className="mt-5 space-y-4">
           <div>

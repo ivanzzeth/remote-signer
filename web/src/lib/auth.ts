@@ -70,6 +70,51 @@ export async function setCredentials(
   return current;
 }
 
+/**
+ * Asks the daemon whether this key really is the key for this ID.
+ *
+ * ⛔ setCredentials does not do this and never did — it builds a client and
+ * stores it in memory, nothing more. The comment at its one caller claimed it
+ * "verifies the daemon accepts this credential BEFORE persisting", and an
+ * operator who typed the wrong ID got past the login screen, had the wrong
+ * pairing written to localStorage, and then met a wall of 401s on every panel
+ * of the dashboard. The 401s read as "no permission", which sends you looking
+ * at roles when the actual cause is that the key does not belong to that ID.
+ *
+ * ⚠️ The probe is `list own requests` — the only kind of read every role has
+ * (admin, dev, agent and strategy all hold it) — so a working credential
+ * never fails this for lack of permission. It changes nothing.
+ */
+export async function verifyCredentials(
+  apiKeyID: string,
+  privateKey: Uint8Array,
+): Promise<void> {
+  const probe = new RemoteSignerClient({
+    baseURL: window.location.origin,
+    apiKeyID,
+    privateKey,
+  });
+  try {
+    await probe.evm.requests.list({ limit: 1 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/401|unauthorized|signature/i.test(msg)) {
+      throw new Error(
+        `The daemon rejected this key for API key ID "${apiKeyID}". ` +
+          `The key is valid, but it is not the key registered under that ID — ` +
+          `check that the ID matches the key file you pasted.`,
+      );
+    }
+    if (/403|forbidden/i.test(msg)) {
+      throw new Error(
+        `API key ID "${apiKeyID}" exists but is not allowed to read its own requests. ` +
+          `That should not happen for any role; the key may be disabled.`,
+      );
+    }
+    throw err;
+  }
+}
+
 export function clearCredentials(): void {
   // Zeroise the key bytes before dropping the reference so a memory dump
   // post-logout is less likely to leak the seed. Best-effort only — the JS

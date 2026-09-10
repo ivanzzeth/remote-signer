@@ -92,11 +92,37 @@ interface ScryptParams {
  * Identifier is the operator-meaningful label — typically the API key ID
  * (e.g. "admin") so the resulting JSON is self-describing.
  */
+/**
+ * Throws an explanatory error when the page is not in a secure context.
+ *
+ * ⛔ `crypto.subtle` exists only on HTTPS or on localhost/127.0.0.1. Every
+ * other origin gets `undefined`, and the first thing that touches it dies with
+ * "Cannot read properties of undefined (reading 'importKey')" — an error that
+ * tells the operator nothing about what to do.
+ *
+ * ⚠️ `crypto.getRandomValues` *is* available without a secure context, so the
+ * salt and IV are generated successfully and the failure only arrives later,
+ * after the operator has already pasted a key and chosen a password. That is
+ * why this is checked up front rather than left to fail where it fails.
+ *
+ * The daemon binds 0.0.0.0 by default, so reaching it at a LAN address is the
+ * normal way to hit this.
+ */
+export function assertSecureContext(): void {
+  if (typeof crypto !== "undefined" && crypto.subtle) return;
+  throw new Error(
+    "This page needs a secure context to encrypt your key, and this one is not. " +
+      "Open the UI at http://localhost:8548 (or http://127.0.0.1:8548), which browsers " +
+      "treat as secure — or enable TLS on the daemon and use https://.",
+  );
+}
+
 export async function encryptSeed(
   seed: Uint8Array,
   password: string,
   identifier: string,
 ): Promise<KeystoreFile> {
+  assertSecureContext();
   if (seed.length !== SEED_LEN) {
     throw new Error(
       `seed must be ${SEED_LEN} bytes (Ed25519); got ${seed.length}`,
@@ -150,6 +176,7 @@ export async function decryptKeystore(
   json: string | KeystoreFile,
   password: string,
 ): Promise<{ seed: Uint8Array; identifier: string }> {
+  assertSecureContext();
   const ks: KeystoreFile = typeof json === "string" ? JSON.parse(json) : json;
 
   if (ks.version !== 1) {
