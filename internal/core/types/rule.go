@@ -60,27 +60,42 @@ type RuleTypeDescriptor struct {
 	// engine itself can run. Callers ask this instead of naming evm_js.
 	TakesTestCases bool
 
-	// RequiresToolchain names an external binary the engine shells out to,
+	// RequiresToolchain names the external binary the engine shells out to,
 	// empty for engines that run in-process. Callers ask this instead of
 	// naming evm_solidity_expression.
+	//
+	// ⚠️ The executable, not the suite: this string reaches the operator in an
+	// error message, and "forge" is what they install and can check with
+	// `which`. Naming the suite ("foundry") sends them to the config key
+	// instead of to the thing that is missing.
 	//
 	// ⚠️ A rule of such a type cannot be evaluated on a deployment that has
 	// not configured that toolchain, which is what the delivery layer needs
 	// to warn about before a template is applied.
 	RequiresToolchain string
+
+	// ExecutesArbitraryCode marks an engine that runs operator-supplied code
+	// rather than matching a declared shape. Whoever can write such a rule can
+	// express any predicate the sandbox allows.
+	ExecutesArbitraryCode bool
+
+	// GovernsSignerAccess marks a type that decides which signers may be used
+	// at all, rather than what a signer may do. Writing one is a change to who
+	// holds authority, not to policy under that authority.
+	GovernsSignerAccess bool
 }
 
 // ruleTypes is the one list of rule types. Everything else derives from it.
 var ruleTypes = []RuleTypeDescriptor{
-	{Type: RuleTypeSignerRestriction, ChainAgnostic: true},
+	{Type: RuleTypeSignerRestriction, ChainAgnostic: true, GovernsSignerAccess: true},
 	{Type: RuleTypeChainRestriction, ChainAgnostic: true},
 	{Type: RuleTypeSignTypeRestriction, ChainAgnostic: true},
 	{Type: RuleTypeMessagePattern, ChainAgnostic: true},
 	{Type: RuleTypeEVMAddressList},
 	{Type: RuleTypeEVMContractMethod},
 	{Type: RuleTypeEVMValueLimit},
-	{Type: RuleTypeEVMSolidityExpression, RequiresToolchain: "foundry"},
-	{Type: RuleTypeEVMJS, TakesTestCases: true},
+	{Type: RuleTypeEVMSolidityExpression, RequiresToolchain: "forge", ExecutesArbitraryCode: true},
+	{Type: RuleTypeEVMJS, TakesTestCases: true, ExecutesArbitraryCode: true},
 	{Type: RuleTypeEVMDynamicBlocklist},
 	{Type: RuleTypeEVMInternalTransfer},
 }

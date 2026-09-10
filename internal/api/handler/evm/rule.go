@@ -22,17 +22,39 @@ import (
 // - <custom>: config custom IDs (alphanumeric, hyphen, underscore, 1-64 chars).
 var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_[0-9a-f]{16}|cfg_\d+|[a-zA-Z0-9][0-9A-Za-z_\-]{0,63})$`)
 
-// blockedAgentRuleTypes are rule types that agents cannot create or modify to.
-var blockedAgentRuleTypes = map[types.RuleType]bool{
-	types.RuleTypeEVMJS:                 true,
-	types.RuleTypeSignerRestriction:     true,
-	types.RuleTypeEVMSolidityExpression: true,
-}
+// blockedAgentRuleTypes are rule types that agents cannot create or modify to:
+// engines that run operator-supplied code, and types that decide which signers
+// may be used at all.
+//
+// ⚠️ Derived, not listed. As a literal this was fail-open — a new engine was
+// permitted for agents by nobody having thought about it, and the engine that
+// most needs blocking is exactly the kind someone adds last. Describing a new
+// engine correctly in types.ruleTypes now blocks it here by construction.
+//
+// ⛔ Widening agent permissions by clearing a descriptor flag is the same
+// mistake with an extra step. If a code-executing engine should be agent-
+// writable, that belongs in an explicit exception here, with the reason.
+var blockedAgentRuleTypes = func() map[types.RuleType]bool {
+	m := map[types.RuleType]bool{}
+	for _, d := range types.RuleTypes() {
+		if d.ExecutesArbitraryCode || d.GovernsSignerAccess {
+			m[d.Type] = true
+		}
+	}
+	return m
+}()
 
-// blockedDevRuleTypes are rule types that dev role cannot create.
-var blockedDevRuleTypes = map[types.RuleType]bool{
-	types.RuleTypeSignerRestriction: true,
-}
+// blockedDevRuleTypes are rule types the dev role cannot create: dev may write
+// policy, but not change who holds signing authority.
+var blockedDevRuleTypes = func() map[types.RuleType]bool {
+	m := map[types.RuleType]bool{}
+	for _, d := range types.RuleTypes() {
+		if d.GovernsSignerAccess {
+			m[d.Type] = true
+		}
+	}
+	return m
+}()
 
 // RuleHandler handles rule management endpoints
 type RuleHandler struct {

@@ -20,6 +20,15 @@ internal/core/rule/generator.go
 internal/ruleconfig/validate.go
 #
 # ── 这些是调用方在问引擎问题,是要消掉的 ──
-internal/api/handler/evm/rule.go
-internal/api/handler/evm/rule_crud.go
+#
+# 2026-09-10: 9 → 6。
+#   internal/validate        → ValidRuleTypes 改为从 types.RuleTypes() 派生
+#   rule_crud.go             → 问 TakesTestCases / RequiresToolchain,并删掉
+#                              两处重复的 evm_js 校验(ValidateRuleConfig 更严)
+#   rule.go                  → RBAC 两张表改为从 ExecutesArbitraryCode /
+#                              GovernsSignerAccess 派生,从 fail-open 变 fail-closed
+#
+# 只剩 validate_rules.go 一个真调用方,它是三个签名不同的 validator 之间的
+# switch —— 那需要 RuleValidator 接口(照抄 RuleEvaluator + BatchRuleEvaluator
+# 那对已经存在的组合),不是加个描述符字段能解决的。
 internal/cli/validate/validate_rules.go

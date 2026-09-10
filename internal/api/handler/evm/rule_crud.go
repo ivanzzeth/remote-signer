@@ -22,8 +22,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
-
-	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 )
 
 func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
@@ -133,8 +131,12 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	if configMap == nil {
 		configMap = make(map[string]interface{})
 	}
-	// Store test_cases in config for evm_js rules
-	if ruleType == types.RuleTypeEVMJS && len(req.TestCases) > 0 {
+	// Store test_cases for engines that run them.
+	//
+	// ⚠️ Asks the descriptor rather than naming evm_js: a second engine that
+	// takes test cases would otherwise silently drop them here, with the rule
+	// created and its cases gone.
+	if d, ok := types.LookupRuleType(ruleType); ok && d.TakesTestCases && len(req.TestCases) > 0 {
 		configMap["test_cases"] = req.TestCases
 	}
 	configJSON, err := json.Marshal(configMap)
@@ -184,29 +186,16 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		rule.SignerAddress = req.SignerAddress
 	}
 
-	// Reject solidity rules when forge is unavailable
-	if rule.Type == types.RuleTypeEVMSolidityExpression {
+	// Reject rules whose engine shells out to a toolchain this deployment has
+	// not configured. Asks the descriptor rather than naming the engine.
+	if d, ok := types.LookupRuleType(rule.Type); ok && d.RequiresToolchain != "" {
 		if h.solidityValidator == nil {
-			respond.Error(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable, h.logger)
+			respond.Error(w, fmt.Sprintf("%s rules require %s; %s not available", rule.Type, d.RequiresToolchain, d.RequiresToolchain), http.StatusServiceUnavailable, h.logger)
 			return
 		}
 		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
 			h.logger.Error("rule validation failed", "error", err, "rule_type", rule.Type)
 			respond.Error(w, "rule validation failed", http.StatusBadRequest, h.logger)
-			return
-		}
-	}
-
-	// Validate evm_js rules: ensure config is parseable
-	if rule.Type == types.RuleTypeEVMJS {
-		var jsCfg evmchain.JSRuleConfig
-		if err := json.Unmarshal(rule.Config, &jsCfg); err != nil {
-			h.logger.Error("evm_js rule has invalid config", "error", err, "rule_name", rule.Name)
-			respond.Error(w, "invalid evm_js rule config", http.StatusBadRequest, h.logger)
-			return
-		}
-		if jsCfg.Script == "" {
-			respond.Error(w, "evm_js rule must have a script", http.StatusBadRequest, h.logger)
 			return
 		}
 	}
@@ -314,7 +303,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		}
 		// Preserve test_cases from request if provided
 		configMap := req.Config
-		if rule.Type == types.RuleTypeEVMJS && len(req.TestCases) > 0 {
+		if d, ok := types.LookupRuleType(rule.Type); ok && d.TakesTestCases && len(req.TestCases) > 0 {
 			configMap["test_cases"] = req.TestCases
 		}
 		configJSON, err := json.Marshal(configMap)
@@ -405,10 +394,9 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 
 	rule.UpdatedAt = time.Now()
 
-	// Reject solidity rules when forge is unavailable
-	if rule.Type == types.RuleTypeEVMSolidityExpression {
+	if d, ok := types.LookupRuleType(rule.Type); ok && d.RequiresToolchain != "" {
 		if h.solidityValidator == nil {
-			respond.Error(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable, h.logger)
+			respond.Error(w, fmt.Sprintf("%s rules require %s; %s not available", rule.Type, d.RequiresToolchain, d.RequiresToolchain), http.StatusServiceUnavailable, h.logger)
 			return
 		}
 		if req.Config != nil {
@@ -417,20 +405,6 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 				respond.Error(w, "rule validation failed", http.StatusBadRequest, h.logger)
 				return
 			}
-		}
-	}
-
-	// Validate evm_js rules when config is updated
-	if req.Config != nil && rule.Type == types.RuleTypeEVMJS {
-		var jsCfg evmchain.JSRuleConfig
-		if err := json.Unmarshal(rule.Config, &jsCfg); err != nil {
-			h.logger.Error("evm_js update has invalid config", "error", err, "rule_id", ruleID)
-			respond.Error(w, "invalid evm_js rule config", http.StatusBadRequest, h.logger)
-			return
-		}
-		if jsCfg.Script == "" {
-			respond.Error(w, "evm_js rule must have a script", http.StatusBadRequest, h.logger)
-			return
 		}
 	}
 
