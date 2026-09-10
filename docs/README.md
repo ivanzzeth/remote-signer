@@ -42,6 +42,20 @@
 | Uniswap | [EN](rules/uniswap.en.md) · [中文](rules/uniswap.zh.md) |
 | USDC | [EN](rules/usdc.en.md) · [中文](rules/usdc.zh.md) |
 
+## 模块设计
+
+| 文档 | 回答什么 |
+|---|---|
+| [`modules/rule-engine.md`](modules/rule-engine.md) | 判定顺序、每道门失败的方向、委托链 |
+| [`modules/budget.md`](modules/budget.md) | 三个上限字段为何都用同一个值表示「无限」、原子扣减、动态额度的单位数上限 |
+| [`modules/identity.md`](modules/identity.md) | 人和钥匙**尚未分开**、三处归属互不担保、认证失败要分两种结论 |
+| [`modules/permissions.md`](modules/permissions.md) | 权限矩阵住错了层、危险性按属性推导、**G7 目前只成立一半** |
+| [`modules/custody.md`](modules/custody.md) | 私钥只进不出、密钥在磁盘而数据库只存公钥、锁是运行时状态 |
+| [`modules/catalogue.md`](modules/catalogue.md) | 模板/预设/实例三层、变量四个阶段、引用键不被文件覆盖 |
+
+⭐ 每份末尾都有「**重构时必须保住的**」清单 —— 这一层写的不是「代码现在长什么样」
+(重构完就过时),而是**重构不能弄丢什么**。
+
 ## 工程
 
 | 文档 | 回答什么 |
