@@ -28,7 +28,83 @@ const (
 	RuleTypeEVMJS                 RuleType = "evm_js"                  // JS rules (in-process Sobek); validate(input) → { valid, reason?, payload? }
 	RuleTypeEVMDynamicBlocklist   RuleType = "evm_dynamic_blocklist"   // Dynamic blocklist: runtime-synced from external URLs (OFAC, scam DBs)
 	RuleTypeEVMInternalTransfer   RuleType = "evm_internal_transfer"   // Internal transfer: same-owner signer transfers (whitelist-only)
+
+	// ⛔ A new rule type is not finished at this line. Add it to ruleTypes
+	// below — everything else in the tree derives from that table, and the
+	// completeness test refuses a constant that is not in it.
 )
+
+// RuleTypeDescriptor is what the rest of the tree needs to know about a rule
+// type without naming the type.
+//
+// ⚠️ Callers used to answer these questions by comparing against a constant —
+// `if rule.Type == RuleTypeEVMJS && len(req.TestCases) > 0`, and a whole file
+// named solidity_guard.go in the delivery layer. Nine files did that, and the
+// list of rule types was written out five times over: these constants, the
+// ValidRuleTypes map, ruleconfig's config-validation switch, the CLI validate
+// branches and the evaluator wiring.
+//
+// ⛔ That is not a style problem. evm_internal_transfer was registered as an
+// evaluator in four places and left out of ValidRuleTypes, so a fully wired
+// engine rejected every attempt to create a rule for it — via the API, via a
+// template, and via config — and no shipped rule used it, so nobody hit it.
+// A map lookup and a switch with a default both accept an unlisted type in
+// silence; only a single table plus a completeness test does not.
+type RuleTypeDescriptor struct {
+	Type RuleType
+
+	// ChainAgnostic marks a type that does not belong to one chain family.
+	ChainAgnostic bool
+
+	// TakesTestCases marks an engine whose rules carry test_cases that the
+	// engine itself can run. Callers ask this instead of naming evm_js.
+	TakesTestCases bool
+
+	// RequiresToolchain names an external binary the engine shells out to,
+	// empty for engines that run in-process. Callers ask this instead of
+	// naming evm_solidity_expression.
+	//
+	// ⚠️ A rule of such a type cannot be evaluated on a deployment that has
+	// not configured that toolchain, which is what the delivery layer needs
+	// to warn about before a template is applied.
+	RequiresToolchain string
+}
+
+// ruleTypes is the one list of rule types. Everything else derives from it.
+var ruleTypes = []RuleTypeDescriptor{
+	{Type: RuleTypeSignerRestriction, ChainAgnostic: true},
+	{Type: RuleTypeChainRestriction, ChainAgnostic: true},
+	{Type: RuleTypeSignTypeRestriction, ChainAgnostic: true},
+	{Type: RuleTypeMessagePattern, ChainAgnostic: true},
+	{Type: RuleTypeEVMAddressList},
+	{Type: RuleTypeEVMContractMethod},
+	{Type: RuleTypeEVMValueLimit},
+	{Type: RuleTypeEVMSolidityExpression, RequiresToolchain: "foundry"},
+	{Type: RuleTypeEVMJS, TakesTestCases: true},
+	{Type: RuleTypeEVMDynamicBlocklist},
+	{Type: RuleTypeEVMInternalTransfer},
+}
+
+// RuleTypes returns every declared rule type, in declaration order.
+func RuleTypes() []RuleTypeDescriptor {
+	out := make([]RuleTypeDescriptor, len(ruleTypes))
+	copy(out, ruleTypes)
+	return out
+}
+
+// LookupRuleType returns the descriptor for t.
+//
+// ⚠️ ok=false means the type is not declared at all — not that it is disabled.
+// Callers gating on "is this a real rule type" should use this rather than
+// keeping their own set.
+func LookupRuleType(t RuleType) (RuleTypeDescriptor, bool) {
+	for _, d := range ruleTypes {
+		if d.Type == t {
+			return d, true
+		}
+	}
+	return RuleTypeDescriptor{}, false
+}
 
 // RuleSource represents where the rule came from
 type RuleSource string

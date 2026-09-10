@@ -118,19 +118,26 @@ var ValidChainTypes = map[types.ChainType]bool{
 	types.ChainTypeCosmos: true,
 }
 
-// ValidRuleTypes is the set of allowed rule types.
-var ValidRuleTypes = map[types.RuleType]bool{
-	types.RuleTypeSignerRestriction:     true,
-	types.RuleTypeChainRestriction:      true,
-	types.RuleTypeSignTypeRestriction:   true,
-	types.RuleTypeMessagePattern:        true,
-	types.RuleTypeEVMAddressList:        true,
-	types.RuleTypeEVMContractMethod:     true,
-	types.RuleTypeEVMValueLimit:         true,
-	types.RuleTypeEVMSolidityExpression: true,
-	types.RuleTypeEVMJS:                 true,
-	types.RuleTypeEVMDynamicBlocklist:   true,
-}
+// ValidRuleTypes is the set of allowed rule types, derived from the one table
+// in core/types.
+//
+// ⚠️ This was a hand-written map until 2026-09-10, and it had drifted: it left
+// out evm_internal_transfer, whose evaluator is registered in four places. The
+// engine evaluated fine and every path that creates a rule — the API, template
+// creation, config templates — rejected the type as unknown, so a fully wired
+// engine was unreachable. No shipped rule used it, which is the only reason
+// this went unnoticed.
+//
+// ⛔ Do not turn this back into a literal. cmd/archcheck's rule-type-table
+// check keeps the source table complete; a second hand-maintained copy is what
+// let the two disagree in the first place.
+var ValidRuleTypes = func() map[types.RuleType]bool {
+	m := make(map[types.RuleType]bool, len(types.RuleTypes()))
+	for _, d := range types.RuleTypes() {
+		m[d.Type] = true
+	}
+	return m
+}()
 
 // ValidRuleSources is the set of allowed rule source values.
 var ValidRuleSources = map[types.RuleSource]bool{

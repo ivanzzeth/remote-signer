@@ -43,6 +43,7 @@ var ruleTypeDeclPkg = "internal/core/types"
 
 func checkEngineDispatch(r *repo) ([]finding, error) {
 	var out []finding
+	consts := ruleTypeConstNames(r)
 
 	for _, f := range r.Files {
 		if f.Pkg == ruleTypeDeclPkg {
@@ -53,12 +54,12 @@ func checkEngineDispatch(r *repo) ([]finding, error) {
 			switch v := n.(type) {
 			case *ast.SelectorExpr:
 				// types.RuleTypeEVMJS
-				if isRuleTypeConst(v.Sel.Name) {
+				if consts[v.Sel.Name] {
 					seen[v.Sel.Name] = true
 				}
 			case *ast.Ident:
 				// RuleTypeEVMJS, in a file that dot-imports or is in the same package
-				if isRuleTypeConst(v.Name) {
+				if consts[v.Name] {
 					seen[v.Name] = true
 				}
 			}
@@ -83,13 +84,4 @@ func checkEngineDispatch(r *repo) ([]finding, error) {
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
-}
-
-// isRuleTypeConst matches the RuleTypeXxx constants without hardcoding the list,
-// so a new engine's constant is covered the day it is declared.
-//
-// ⚠️ Deliberately excludes the bare type name "RuleType": that is the type, and
-// mentioning it is not dispatch.
-func isRuleTypeConst(name string) bool {
-	return strings.HasPrefix(name, "RuleType") && len(name) > len("RuleType")
 }

@@ -78,6 +78,12 @@ var checks = []checkDef{
 		Run:      checkRuleWrite,
 	},
 	{
+		Name:     "rule-type-table",
+		Baseline: "rule-type-table.txt",
+		Hint:     "Add the constant to types.ruleTypes. ⛔ This baseline stays empty — it is a two-line invariant, not debt.",
+		Run:      checkRuleTypeTable,
+	},
+	{
 		Name:     "engine-dispatch",
 		Baseline: "engine-dispatch.txt",
 		Hint:     "Let the engine answer the question — a RuleValidator interface and a registry, the way RuleEvaluator already works for evaluation. ⛔ Never by removing an engine.",

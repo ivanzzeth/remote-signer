@@ -7,22 +7,19 @@
 #   MessagePatternRuleValidator.ValidateRule(ctx, rule)
 # 于是每个调用方只能手写分支。
 #
-# 判据:一个文件点名 ≥2 个不同的 RuleTypeXxx 常量就是分发点。
-# 点名 1 个是引擎在声明自己的 Type(),那是合法形状;常量声明处
-# internal/core/types 豁免。
+# 判据:一个文件点名 ≥2 个不同的 RuleTypeXxx 常量。点名 1 个是引擎在声明
+# 自己的 Type(),合法;常量声明处 internal/core/types 豁免。
 #
-# ⛔ 收敛的方向是让引擎自己回答问题(RuleValidator 接口 + 注册表,
-#    照抄 RuleEvaluator 那套),⛔ 永远不是删掉某个引擎。
+# ⛔ 收敛方向是让引擎自己回答问题,⛔ 永远不是删掉某个引擎。
 #
-# 下面三个各自列了全部 10 种,是同一张清单的三份抄写:
-internal/cli/validate/validate_rules.go
-internal/ruleconfig/validate.go
-internal/validate/validate.go
-# 这两个是 delivery 层在问引擎问题:
-internal/api/handler/evm/rule.go
-internal/api/handler/evm/rule_crud.go
-# 组装/工厂,多类型是本职,但仍然是「加引擎要改的地方」:
+# ── 这些是注册表:加引擎在这里加一行是应付的成本,不是要消掉的债 ──
 internal/chain/evm/rule_evaluator.go
 internal/cli/server/server_validate.go
 internal/cli/server/server_validate_evm.go
 internal/core/rule/generator.go
+internal/ruleconfig/validate.go
+#
+# ── 这些是调用方在问引擎问题,是要消掉的 ──
+internal/api/handler/evm/rule.go
+internal/api/handler/evm/rule_crud.go
+internal/cli/validate/validate_rules.go

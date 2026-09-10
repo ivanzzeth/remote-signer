@@ -327,16 +327,19 @@ func TestValidChainTypes(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestValidRuleTypes(t *testing.T) {
-	expectedTypes := []string{
-		"signer_restriction", "chain_restriction", "sign_type_restriction",
-		"message_pattern", "evm_address_list", "evm_contract_method",
-		"evm_value_limit", "evm_solidity_expression", "evm_js", "evm_dynamic_blocklist",
+	// ⚠️ Not a hardcoded list. This test used to carry its own copy of the rule
+	// types and assert there were exactly 10 — a sixth copy of a list that had
+	// already drifted five ways, and the thing pinning the drift in place:
+	// evm_internal_transfer was missing from ValidRuleTypes, and this test said
+	// that was correct.
+	//
+	// The property worth testing is the derivation: one entry per declared type,
+	// and nothing else.
+	for _, d := range types.RuleTypes() {
+		assert.True(t, ValidRuleTypes[d.Type], "declared type %q missing from ValidRuleTypes", d.Type)
 	}
-	for _, rt := range expectedTypes {
-		assert.True(t, ValidRuleTypes[types.RuleType(rt)], "expected %q in ValidRuleTypes", rt)
-	}
-	assert.False(t, ValidRuleTypes[types.RuleType("evm_address_whitelist")]) // legacy name NOT in canonical set
-	assert.Equal(t, 10, len(ValidRuleTypes), "expected exactly 10 valid rule types")
+	assert.Equal(t, len(types.RuleTypes()), len(ValidRuleTypes), "ValidRuleTypes must have exactly one entry per declared rule type")
+	assert.False(t, ValidRuleTypes[types.RuleType("evm_address_whitelist")], "legacy name must not be in the canonical set")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

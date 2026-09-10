@@ -22,29 +22,42 @@ var dangerousSolidityPatterns = regexp.MustCompile(`(?i)\b(selfdestruct|delegate
 // Returns an error if format is wrong (e.g. allowed_sign_types as string instead of array,
 // or sign_type_filter with invalid tokens). Call this before persisting rules from API or config.
 func ValidateRuleConfig(ruleType string, config map[string]interface{}) error {
-	ruleType = validate.NormalizeRuleType(ruleType)
-	switch types.RuleType(ruleType) {
-	case types.RuleTypeEVMAddressList:
-		return validateAddressListConfig(config)
-	case types.RuleTypeEVMValueLimit:
-		return validateValueLimitConfig(config)
-	case types.RuleTypeSignerRestriction:
-		return validateSignerRestrictionConfig(config)
-	case types.RuleTypeSignTypeRestriction:
-		return validateSignTypeRestrictionConfig(config)
-	case types.RuleTypeEVMSolidityExpression:
-		return validateSolidityExpressionConfig(config)
-	case types.RuleTypeEVMContractMethod:
-		return validateContractMethodConfig(config)
-	case types.RuleTypeEVMJS:
-		return validateJSRuleConfig(config)
-	case types.RuleTypeEVMDynamicBlocklist:
-		return validateDynamicBlocklistConfig(config)
-	case types.RuleTypeChainRestriction, types.RuleTypeMessagePattern:
-		return nil
-	default:
+	t := types.RuleType(validate.NormalizeRuleType(ruleType))
+	if _, ok := types.LookupRuleType(t); !ok {
 		return fmt.Errorf("unknown rule type: %s", ruleType)
 	}
+	if check := configValidators[t]; check != nil {
+		return check(config)
+	}
+	// Declared, but its config needs no shape check beyond being a map.
+	return nil
+}
+
+// configValidators maps a rule type to the shape check for its config block.
+//
+// ⚠️ A table rather than a switch, because a switch's default answers two
+// different questions with one branch: "this type does not exist" and "this
+// type needs no config check". They were conflated here, and adding
+// evm_internal_transfer to the rule-type table would have made it fail as an
+// unknown type — the engine has been registered in four places since it was
+// written, with nothing able to create a rule for it.
+//
+// ⛔ A type absent from this map is valid with an unchecked config. If a new
+// engine needs its config checked, the entry goes here; if it does not, leave
+// it out deliberately rather than adding a no-op.
+var configValidators = map[types.RuleType]func(map[string]interface{}) error{
+	types.RuleTypeEVMAddressList:        validateAddressListConfig,
+	types.RuleTypeEVMValueLimit:         validateValueLimitConfig,
+	types.RuleTypeSignerRestriction:     validateSignerRestrictionConfig,
+	types.RuleTypeSignTypeRestriction:   validateSignTypeRestrictionConfig,
+	types.RuleTypeEVMSolidityExpression: validateSolidityExpressionConfig,
+	types.RuleTypeEVMContractMethod:     validateContractMethodConfig,
+	types.RuleTypeEVMJS:                 validateJSRuleConfig,
+	types.RuleTypeEVMDynamicBlocklist:   validateDynamicBlocklistConfig,
+
+	// chain_restriction, message_pattern and evm_internal_transfer take no
+	// config shape this layer can check: the first two carry only scope fields
+	// the evaluator reads directly, and the third has one optional match_mode.
 }
 
 func validateAddressListConfig(config map[string]interface{}) error {
