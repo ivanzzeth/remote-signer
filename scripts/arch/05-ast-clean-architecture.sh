@@ -4,8 +4,10 @@
 # 这条排在最前面(05),因为它是**唯一按结构判定**的一条:其余门禁读的是文本。
 # 具体见 cmd/archcheck 的包注释 —— 那里列了两次 grep 判据出错的实例。
 #
-# 十二条检查,各带自己的棘轮基线(scripts/lib/arch-baseline/ast/);⚠️ 有两条是
-# **零基线的硬规则**(rule-type-table、route-auth),它们不是债务清单。
+# 十三条检查,各带自己的棘轮基线(scripts/lib/arch-baseline/ast/);⚠️ 有两条是
+# **零基线的硬规则**(rule-type-table、route-auth),它们不是债务清单;
+# ⚠️ 还有一条(route-perm-binding)的基线是**当前事实的记录**,恰好相反 ——
+# 它本来就该有 46 行,⛔ 不许把它当债务去清理。
 # ⚠️ 这张表漂过:它长期写着「三条」,而 cmd/archcheck/main.go 的 checks 里
 # 早就有八条 —— 权威是那份 checks,这里只是索引。
 #   layers                 依赖方向:内层不许认识外层(层定义在 cmd/archcheck/layers.go)
@@ -20,6 +22,7 @@
 #   route-auth             绕过唯一注册入口摸 mux;豁免没写理由(零基线)
 #   route-auth-exempt      不带权限的路由清单 —— 双向棘轮,补上权限也必须删行
 #   route-mutating-perm    写操作挂在只读权限上
+#   route-perm-binding     每条路由挂哪个权限(pattern+权限一起做 key)—— ⛔ 记录,不是债
 #
 # 单独跑某一条:  go run ./cmd/archcheck layers
 # 看未归层的包:  go run ./cmd/archcheck -unclassified

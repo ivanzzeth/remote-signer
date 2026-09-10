@@ -56,6 +56,14 @@ type checkDef struct {
 	Baseline string // file under the baseline dir; empty = hard rule, must be zero
 	Hint     string
 	Run      checkFunc
+
+	// Record marks a baseline that is a record of current truth rather than a
+	// list of debt. ⚠️ It changes only what reportRatchet *prints*: the two
+	// boilerplate lines ("don't just add it to the baseline", "delete those
+	// lines, the ratchet only goes down") are correct advice for a debt list and
+	// actively wrong for a record — there, the right move on a moved key is to
+	// edit the line, and the baseline is not supposed to shrink at all.
+	Record bool
 }
 
 var checks = []checkDef{
@@ -124,6 +132,13 @@ var checks = []checkDef{
 		Baseline: "route-mutating-perm.txt",
 		Hint:     "A route that changes state must not be reachable on a permission that only means \"may look\". ⚠️ Where the real check is resource-scoped (does this caller own *this* signer?), the route-level permission is only the outer door — those entries are in the baseline with the reason.",
 		Run:      checkRouteMutatingPerm,
+	},
+	{
+		Name:     "route-perm-binding",
+		Baseline: "route-perm-bindings.txt",
+		Hint:     "A route's permission moved. ⛔ This baseline is not debt and is not supposed to shrink — it is the record of which permission every permitted route is gated on, one line per route. If the move is intended, edit the line: that edit *is* the re-approval, and it lands in the diff of a security-relevant file instead of nowhere.",
+		Record:   true,
+		Run:      checkRoutePermBinding,
 	},
 	{
 		Name:     "respond-shape",
@@ -263,14 +278,29 @@ func reportRatchet(c checkDef, found []finding, baselineDir string) bool {
 			fmt.Fprintf(os.Stderr, "      + %s\n        %s:%d %s\n", k, f.Path, f.Line, f.Msg)
 		}
 		fmt.Fprintf(os.Stderr, "    改法:%s\n", c.Hint)
-		fmt.Fprintf(os.Stderr, "    ⛔ 别把它加进 %s 了事 —— 基线是历史债的清单,不是新债的收容所。\n", path)
+		if c.Record {
+			fmt.Fprintf(os.Stderr, "    ⚠️ %s 是**当前事实的记录**,不是债务清单 —— 这一行本来就该在里面。\n", path)
+			fmt.Fprintf(os.Stderr, "       要判断的不是「能不能加」,而是「这次改动是不是有意的」。\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "    ⛔ 别把它加进 %s 了事 —— 基线是历史债的清单,不是新债的收容所。\n", path)
+		}
 	}
 	if len(removed) > 0 {
-		fmt.Fprintf(os.Stderr, "  ✗ 基线里有已经不存在的条目(说明修好了):\n")
+		if c.Record {
+			fmt.Fprintf(os.Stderr, "  ✗ 基线里有对不上任何注册的条目(说明那条路由变了):\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "  ✗ 基线里有已经不存在的条目(说明修好了):\n")
+		}
 		for _, k := range removed {
 			fmt.Fprintf(os.Stderr, "      - %s\n", k)
 		}
-		fmt.Fprintf(os.Stderr, "    改法:把上面这几行从 %s 删掉。棘轮只许往下走。\n", path)
+		if c.Record {
+			fmt.Fprintf(os.Stderr, "    改法:⛔ 别只是删掉它 —— 它落空说明那条路由**变了**。\n")
+			fmt.Fprintf(os.Stderr, "          路由还在、权限改了 → 把这行改成新的那一行(那次编辑就是重新批准);\n")
+			fmt.Fprintf(os.Stderr, "          路由确实删了   → 才把这行删掉,和删路由放在同一个 PR 里。\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "    改法:把上面这几行从 %s 删掉。棘轮只许往下走。\n", path)
+		}
 	}
 	return false
 }

@@ -1,0 +1,112 @@
+# 每一条**带权限**的路由,一行一条:`<mux pattern> <权限的线上取值>`。
+#
+# ⛔⛔ 这张表和本目录里其它每一张基线**意思相反**,先读这一段再动它 ⛔⛔
+#
+# 别的基线是**债务清单**:每一行是一处该被修掉的东西,行数只许往下走,
+# 减到零是目标。这一张不是。这一张是**当前事实的记录** —— 它正确的大小
+# 就是「每一条带权限的路由一行」,今天 46 行。
+#
+#   ⛔ 不要「清理」它,不要试图让它变短。
+#   ⛔ 一行消失**不是**修好了,是那条路由的权限动了 —— 门禁会为此报红,
+#      那正是它存在的理由。
+#   ⭐ 想让它变短的唯一正当方式:删掉一条路由(那时同一个 PR 里删掉那一行)。
+#
+# ---------- 它抓什么(以及为什么前面那三条抓不到) ----------
+#
+# 路由鉴权原本有三条门禁,而它们的覆盖是**朝危险的一侧偏的**:
+#
+#   · 把 DELETE /api/v1/wallets/{id} 改成只读权限  → route-mutating-perm 红。抓得到。
+#   · 把某条路由的权限**整个拿掉**                  → route-auth-exempt 红。抓得到。
+#   · 把 GET /api/v1/wallets/{id} 从 manage_wallets
+#     改成 read_signers(= 任何一把 strategy key 都能读别人的 wallet)
+#                                                   → **15 条门禁全绿**。没有任何东西看得见。
+#
+# 第三条是 2026-09-10 在提案 S3 里实测出来的:改完 `make check` 一个字都不说。
+# 当时站在那儿的只有一个手写的逐 PR 断言
+# (internal/api/handler/wallet_routes_test.go 的 TestWalletRoutes_RegistersExactlyTheProductionPatterns)——
+# 那是一个测试,不是门禁,而 S4–S8 还要从前缀 handler 里拆出 ~50 条路由,
+# 每一次拆解都是一次「顺手把权限写错」的机会。
+#
+# ---------- key 为什么是 pattern + 权限 ----------
+#
+# 只用 pattern 做 key 的话,改权限**不会让 key 移动**,门禁就对它唯一要抓的
+# 那种改动是瞎的 —— 那恰好就是上面那个 bug 换一层再说一遍。
+# `GET /api/v1/wallets/{id} manage_wallets` 两半都会动:
+#   · 路由改名/删掉 → 旧 key 对不上任何注册 → 红
+#   · 权限改了     → 多出一个新 key,旧 key 同时落空 → 红两次
+#
+# 权限写的是**线上取值**(`manage_wallets`)而不是 Go 标识符,因为 API key 的
+# 角色授权比对的是前者:把 `PermManageWallets Permission = "read_signers"` 一改,
+# 所有调用点仍然写着 PermManageWallets,而能进这条路由的人已经换了一批。
+#
+# ---------- ⛔ 不带权限的路由不在这里 ----------
+#
+# AuthenticatedOnly / Public / PublicUnwrapped 那 14 条由 route-auth-exemptions.txt
+# 逐条双向棘轮,那张表的 key 是 `<形状> <pattern>`,连「豁免形态之间互换」都抓。
+# 在这里再列一遍等于同一件事有两个事实源,而本仓库每一处镜像最后都漂了。
+# 边界上也没有缝:permitted → 豁免会**同时**让这里落空一行、那里多出一行,
+# 反过来同理,两个方向都是两张表一起红。
+#
+# ---------- ⚠️ 它证明不了的事 ----------
+#
+# 和 route-auth-exempt 一样:一条前缀 pattern 背后可能有十几个端点,而它只声明
+# 一个权限。`/api/v1/evm/rules/ list_rules` 这一行盯住的是「这条 pattern 挂
+# list_rules」,不是它背后 12 个端点各自该挂什么 —— 那要等 handler 拆解
+# (提案 S3–S8)。⭐ 在那之前它的价值恰恰在拆解本身:拆出来的每一条新路由
+# 都要在这张表里留下自己的名字,而任何一条老路由的权限被顺手改掉都会红。
+#
+# ---------- ⚙️ 怎么重新生成 ----------
+#
+#   go run ./cmd/archcheck -list route-perm-binding
+#
+# ⛔ 别从 `make check` 的输出里手抄:那里只打**与基线不同**的部分,照它重写
+# 会把已经在基线里的行全部丢掉。
+#
+# ---------- 清单 ----------
+
+/api/v1/admin/settings/ manage_settings
+/api/v1/api-keys manage_api_keys
+/api/v1/api-keys/ manage_api_keys
+/api/v1/evm/guard/resume resume_guard
+/api/v1/evm/requests list_own_requests
+/api/v1/evm/rules list_rules
+/api/v1/evm/rules/ list_rules
+/api/v1/evm/signers/ read_signers
+/api/v1/evm/simulations sign_request
+/api/v1/presets read_presets
+/api/v1/templates read_templates
+/api/v1/templates/ read_templates
+DELETE /api/v1/evm/budgets/ manage_budgets
+DELETE /api/v1/wallets/{id} manage_wallets
+DELETE /api/v1/wallets/{id}/members/{signerAddress} manage_wallets
+GET /api/v1/acls/ip-whitelist read_acls
+GET /api/v1/audit read_audit
+GET /api/v1/audit/requests/ read_audit
+GET /api/v1/evm/budgets read_budgets
+GET /api/v1/evm/budgets/ read_budgets
+GET /api/v1/evm/signers read_signers
+GET /api/v1/evm/simulate/status sign_request
+GET /api/v1/presets/ read_presets
+GET /api/v1/wallets manage_wallets
+GET /api/v1/wallets/{id} manage_wallets
+GET /api/v1/wallets/{id}/members manage_wallets
+PATCH /api/v1/evm/budgets/ manage_budgets
+PATCH /api/v1/wallets/{id} manage_wallets
+POST /api/v1/evm/broadcast sign_request
+POST /api/v1/evm/budgets manage_budgets
+POST /api/v1/evm/budgets/ manage_budgets
+POST /api/v1/evm/requests/batch-approve approve_request
+POST /api/v1/evm/rules/{id}/budgets/reset manage_budgets
+POST /api/v1/evm/sign sign_request
+POST /api/v1/evm/sign/batch sign_request
+POST /api/v1/evm/signers create_signers
+POST /api/v1/evm/signers/{address}/approve read_signers
+POST /api/v1/evm/signers/{address}/lock read_signers
+POST /api/v1/evm/signers/{address}/transfer read_signers
+POST /api/v1/evm/signers/{address}/unlock read_signers
+POST /api/v1/evm/simulate sign_request
+POST /api/v1/evm/simulate/batch sign_request
+POST /api/v1/presets/ apply_preset
+POST /api/v1/registry/refresh apply_preset
+POST /api/v1/wallets manage_wallets
+POST /api/v1/wallets/{id}/members manage_wallets

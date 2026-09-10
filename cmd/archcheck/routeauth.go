@@ -268,6 +268,104 @@ func checkRouteMutatingPerm(r *repo) ([]finding, error) {
 	return out, nil
 }
 
+// checkRoutePermBinding records which permission every permitted route is gated
+// on, so that *changing* one has to be re-approved rather than merely reviewed.
+//
+// # The hole it closes, measured
+//
+// The three checks above are asymmetric, and in the dangerous direction:
+//
+//   - tightening or loosening a *mutating* route into a read permission →
+//     route-mutating-perm goes red. Covered.
+//   - a route losing its permission entirely → route-auth-exempt goes red.
+//     Covered.
+//   - loosening a *read* route — `GET /api/v1/wallets/{id}` moving from
+//     Permitted(PermManageWallets) to Permitted(PermReadSigners), i.e. handing
+//     every strategy key someone else's wallet — passed all 15 gates green
+//     (measured during proposal S3). Nothing saw it.
+//
+// The only thing standing there was one hand-written per-PR assertion
+// (handler/wallet_routes_test.go). Steps S4–S8 split ~50 more routes out of
+// prefix handlers, and each split is one opportunity to change a permission by
+// accident; a per-PR assertion is not a gate and does not scale to that.
+//
+// # ⚠️ Why the key carries the permission and not just the pattern
+//
+// A key of the pattern alone would not move when the permission changed, so the
+// gate would be blind to exactly the edit it exists to catch — which is the bug
+// one level up, restated. `GET /api/v1/wallets/{id} manage_wallets` moves on
+// both halves: rename the route and the old key is stranded (red), change its
+// permission and a new key appears while the old one strands (red twice).
+//
+// The permission is spelled as its *wire* value (`manage_wallets`), not its Go
+// identifier, because that is what an API key's role grant is matched against —
+// editing `PermManageWallets Permission = "read_signers"` changes who can reach
+// the route while every call site still reads `PermManageWallets`. ⚠️ If the
+// constant is not resolvable to a literal the identifier is used instead; the
+// key still moves when the binding changes, it just reads less like the wire.
+//
+// # ⛔ Exempt routes are deliberately NOT here
+//
+// AuthenticatedOnly/Public/PublicUnwrapped routes are already ratcheted, key for
+// key and in both directions, by route-auth-exempt — which keys on
+// `<mode> <pattern>`, so it also catches a route moving between exempt shapes.
+// Listing them here too would be a second source of truth for one fact, and the
+// two would drift the way every mirror in this repo has. The boundary is not a
+// gap either: a permitted route becoming exempt strands a key here *and* adds
+// one there, and the reverse strands one there and adds one here. Either
+// direction is red in both files.
+func checkRoutePermBinding(r *repo) ([]finding, error) {
+	perms := permValues(r)
+	var out []finding
+	for _, f := range apiFiles(r) {
+		regs, _ := routeRegs(f, stringValues(f))
+		for _, reg := range regs {
+			if reg.ctor != "Permitted" {
+				continue
+			}
+			out = append(out, finding{
+				Check: "route-perm-binding",
+				Key:   reg.pattern + " " + permWire(perms, reg.perm),
+				Path:  f.Path,
+				Line:  reg.line,
+				Msg: fmt.Sprintf("route %q is gated on %s (%s)",
+					reg.pattern, permWire(perms, reg.perm), reg.perm),
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
+
+// permValues maps every Perm* identifier in internal/api/** to the string it is
+// declared as. ⚠️ Scope-blind for the same reason stringValues is (see its
+// comment); the Perm prefix is what keeps that from mattering — the constants
+// are all declared in one block in internal/api/middleware/rbac.go and nothing
+// else in the tree names a local that way.
+func permValues(r *repo) map[string]string {
+	out := map[string]string{}
+	for _, f := range apiFiles(r) {
+		for name, val := range stringValues(f) {
+			if strings.HasPrefix(name, "Perm") && val != "" {
+				out[name] = val
+			}
+		}
+	}
+	return out
+}
+
+// permWire renders a permission the way a role grant spells it, falling back to
+// the Go identifier when the constant is not a resolvable literal.
+func permWire(vals map[string]string, ident string) string {
+	if v, ok := vals[ident]; ok {
+		return v
+	}
+	if ident == "" {
+		return "?" // Permitted(x) with a non-identifier argument; route-auth has no rule against it, and a key that cannot name the permission is still better than none
+	}
+	return ident
+}
+
 func apiFiles(r *repo) []*goFile {
 	const scope = "internal/api"
 	var out []*goFile
