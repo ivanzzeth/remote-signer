@@ -76,6 +76,14 @@ func TestAPIFallback_DoesNotShadowRegisteredRoutes(t *testing.T) {
 	r.handle("POST /api/v1/evm/signers/{address}/transfer", Public("test fixture"), okHandler("transfer"))
 	r.handle("/api/v1/evm/signers/", Public("test fixture"), okHandler("signers-prefix"))
 	r.handle("GET /health", Public("test fixture"), okHandler("health"))
+	// ⛔ The two routes with the most to lose from being shadowed. They are the
+	// only Public patterns under /api/v1 (module_bootstrap.go), and they are what
+	// a daemon with no API key yet talks to — an operator bringing up a fresh
+	// install has nothing to authenticate with. If the AuthenticatedOnly fallback
+	// ever swallowed them, first-run bootstrap would answer 401 to a caller who
+	// cannot possibly satisfy it, and the daemon would be unbootstrappable.
+	r.handle("GET /api/v1/bootstrap/status", Public("test fixture"), okHandler("bootstrap-status"))
+	r.handle("POST /api/v1/bootstrap/admin", Public("test fixture"), okHandler("bootstrap-admin"))
 	r.handle("/", PublicUnwrapped("test fixture"), okHandler("spa"))
 
 	// The production registration. If this panicked — the pattern-conflict shape
@@ -98,6 +106,15 @@ func TestAPIFallback_DoesNotShadowRegisteredRoutes(t *testing.T) {
 		{"signer action transfer", http.MethodPost, "/api/v1/evm/signers/0xabc/transfer", "POST /api/v1/evm/signers/{address}/transfer"},
 		{"signer prefix still serves the rest", http.MethodGet, "/api/v1/evm/signers/0xabc/access", "/api/v1/evm/signers/"},
 		{"non-API route is untouched", http.MethodGet, "/health", "GET /health"},
+		// ⛔ Unauthenticated bootstrap must keep reaching its own handler. These
+		// are the highest-consequence rows in the table: a caller doing first-run
+		// setup has no key, so a 401 here is not a stricter answer, it is a dead
+		// end. Public under an AuthenticatedOnly namespace is exactly the pairing
+		// that would break quietly — the mux resolves by specificity, so it holds,
+		// but "it holds" is a property worth a test rather than a reading of the
+		// precedence rules.
+		{"bootstrap status stays public", http.MethodGet, "/api/v1/bootstrap/status", "GET /api/v1/bootstrap/status"},
+		{"bootstrap admin stays public", http.MethodPost, "/api/v1/bootstrap/admin", "POST /api/v1/bootstrap/admin"},
 		{"SPA still owns everything outside /api/v1", http.MethodGet, "/dashboard/rules", "/"},
 
 		// ⭐ The rows the net exists for: paths under /api/v1 that no pattern
