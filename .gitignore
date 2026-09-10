@@ -14,6 +14,7 @@
 # Compiled binaries (project-specific)
 /build/
 /remote-signer
+/archcheck
 /e2e-test-server
 /.e2e-test-server
 /remote-signer-tui
