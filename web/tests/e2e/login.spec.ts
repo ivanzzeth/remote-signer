@@ -194,8 +194,11 @@ test("garbage key input surfaces a parse error", async ({ page }) => {
   await page.fill('[data-testid="onboard-password"]', STRONG_PASSWORD);
   await page.fill('[data-testid="onboard-password-confirm"]', STRONG_PASSWORD);
   await page.click('[data-testid="onboard-submit"]');
+  // ⚠️ Asserts the accepted formats are named, not the exact sentence. The
+  // message changed when base64 was added, and pinning the old wording made
+  // this fail on a strictly better error.
   await expect(page.locator('[data-testid="onboard-error"]')).toContainText(
-    "expected hex or PKCS#8 PEM input",
+    "expected hex, base64, or a PKCS#8 PEM block",
     { timeout: 30_000 },
   );
 });

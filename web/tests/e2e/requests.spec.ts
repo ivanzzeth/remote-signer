@@ -29,9 +29,15 @@ test("changing the status filter reissues the list query", async ({
       r.url().includes("status=rejected"),
   );
   await authedPage.selectOption("select:near(:text('Status'))", "rejected");
-  await filteredReq;
+  const req = await filteredReq;
 
-  await expect(authedPage.locator("text=No matching requests")).toBeVisible();
+  // ⚠️ Asserts the query was reissued with the filter, which is what this test
+  // is named for — not that the result is empty. The suite shares one daemon
+  // serially and the blocklist specs create genuinely rejected requests, so
+  // "No matching requests" holds only when this spec runs before them. What
+  // the filter does is issue a new query; whether rows come back is the
+  // daemon's business.
+  expect(req.url()).toContain("status=rejected");
 });
 
 test("switching to 'pending' filter narrows the list query", async ({

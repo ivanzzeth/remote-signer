@@ -44,6 +44,14 @@ test("blocklist rule rejects matching transaction", async () => {
             value: "0x0",
             data: "0x",
             from: signer.address,
+            // ⛔ nonce is set explicitly. Without it the adapter auto-fetches
+            // the account's transaction count from the RPC gateway, which this
+            // harness reaches over the public internet — six specs failed with
+            // "sign request failed", whose server-side cause was
+            // "failed to auto-fetch nonce: context deadline exceeded". The
+            // blocklist specs passed throughout because a rejected request
+            // never reaches the signing step.
+            nonce: 0,
             gas: 21000,
             gasPrice: "0",
             txType: "legacy",
@@ -96,6 +104,7 @@ test("whitelist rule auto-approves matching transaction", async () => {
             value: "0x0",
             data: "0x",
             from: signer.address,
+            nonce: 0,
             gas: 21000,
             txType: "legacy",
             gasPrice: "0",
@@ -140,6 +149,7 @@ test("no matching rule falls to manual approval (pending status)", async () => {
             data: "0x",
             from: signer.address,
             txType: "legacy",
+            nonce: 0,
             gas: 21000,
             gasPrice: "0",
           },
@@ -204,6 +214,7 @@ test("budget under cap allows the transaction to pass", async () => {
             data: "0x",
             txType: "legacy",
             from: signer.address,
+            nonce: 0,
             gas: 21000,
             gasPrice: "0",
           },
@@ -270,6 +281,7 @@ test("budget over cap prevents auto-approval", async () => {
             txType: "legacy",
             data: "0x",
             from: signer.address,
+            nonce: 0,
             gas: 21000,
             gasPrice: "0",
           },
@@ -330,6 +342,7 @@ test("disabled rule does not match", async () => {
               to: allowedAddr,
               value: "0x0",
               data: "0x",
+              nonce: 0,
               gas: 21000,
               gasPrice: "0",
               txType: "legacy",
@@ -359,6 +372,7 @@ test("disabled rule does not match", async () => {
               to: allowedAddr,
               value: "0x0",
               data: "0x",
+              nonce: 0,
               gas: 21000,
               gasPrice: "0",
               txType: "legacy",
@@ -456,6 +470,7 @@ test("delegate_to chain passes outer and inner rules", async () => {
             value: "0x0",
             data: "0x",
             from: signer.address,
+            nonce: 0,
             gas: 21000,
             gasPrice: "0",
           },

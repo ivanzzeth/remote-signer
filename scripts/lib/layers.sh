@@ -45,6 +45,19 @@ LAYERS=(
     "web-e2e|@cmd|cd web && npm run test:e2e"
 )
 
+# ⛔ 哪些层可以并行,哪些不行。
+#
+# 可以:check / unit / http / cli —— 纯计算或纯内存,互不干扰。
+#
+# ⛔ 不行:e2e 与 web-e2e。两者都**构建同一个二进制**(web-e2e 的
+#    pretest:e2e 会跑 make build-embed)并各自起 daemon。并行跑时它们互相
+#    覆盖构建产物,结果是一堆看不懂的失败 —— 实测一次并行跑出 137 个失败,
+#    而串行跑同一份代码是 0。⚠️ 那 137 个里没有一个提到"构建"或"端口"。
+#
+#    要并行只有先统一构建一次、再让两层共用产物;但它们仍各自起 daemon,
+#    所以更稳的做法是串行。
+SLOW_SERIAL_LAYERS="e2e web-e2e"
+
 layer_tag()   { local l; for l in "${LAYERS[@]}"; do [ "${l%%|*}" = "$1" ] && { local r=${l#*|}; echo "${r%%|*}"; return; }; done; return 1; }
 layer_names() { local l; for l in "${LAYERS[@]}"; do echo "${l%%|*}"; done; }
 layer_raw()   { local l; for l in "${LAYERS[@]}"; do [ "${l%%|*}" = "$1" ] && { echo "${l##*|}"; return; }; done; return 1; }

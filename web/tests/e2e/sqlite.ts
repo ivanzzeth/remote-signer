@@ -21,20 +21,29 @@ export function sqliteExec(dbPath: string, stmts: string[]): void {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
+      // ⛔ stderr must be "pipe", not "inherit". With "inherit" the sqlite3
+      // error text goes straight to the terminal and never reaches `err`, so
+      // String(err) is only "Command failed: sqlite3 <path>" — which matches
+      // none of the lock patterns below. The retry loop then re-threw on the
+      // first attempt and the whole retry was dead code, while the failure
+      // message named the helper rather than the lock.
       execFileSync("sqlite3", [dbPath], {
         input: script,
-        stdio: ["pipe", "ignore", "inherit"],
+        stdio: ["pipe", "ignore", "pipe"],
       });
       return;
     } catch (err) {
       lastErr = err;
-      const msg = String(err);
+      const e = err as { stderr?: Buffer | string; message?: string };
+      const msg = `${e.message ?? ""} ${e.stderr?.toString() ?? ""}`;
       if (
         !msg.includes("database is locked") &&
         !msg.includes("locked (5)") &&
         !msg.includes("SQLITE_BUSY")
       ) {
-        throw err;
+        // ⚠️ Re-thrown with the actual sqlite3 output attached. Without it the
+        // test reports "Command failed: sqlite3 /tmp/…" and nothing else.
+        throw new Error(`sqlite3 failed: ${msg.trim()}`);
       }
       sleepMs(500 + attempt * 200);
     }

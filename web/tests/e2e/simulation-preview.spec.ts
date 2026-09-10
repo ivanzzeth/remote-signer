@@ -74,7 +74,10 @@ test.describe("SimulationPreview on RequestDetail", () => {
     await expect(authedPage.getByText(/Balance changes/i)).toBeVisible();
     await expect(authedPage.getByText(/Decoded calldata/i)).toBeVisible();
     await expect(authedPage.getByText(/Contracts touched/i)).toBeVisible();
-    await expect(authedPage.getByText("0xabc")).toBeVisible();
+    // ⚠️ .first(): the seeded row names 0xabc twice — once as the event's
+    // emitting address and once in "contracts touched" — and the panel renders
+    // both, so the bare locator fails on ambiguity rather than on absence.
+    await expect(authedPage.getByText("0xabc").first()).toBeVisible();
 
     // 4. Sanity: the auto-refresh indicator names a fresh fetch.
     await expect(authedPage.getByText(/auto-refresh/i)).toBeVisible();

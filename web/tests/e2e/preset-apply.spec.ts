@@ -28,10 +28,16 @@ test("agent preset apply creates rules visible in Rules list", async ({
       // The expanded detail panel shows the rule ID in a monospace font.
       // Use the SDK to get the name, then locate in the table.
       const rule = await c.evm.rules.get(id);
+      // ⚠️ .first(), not the bare locator. The suite shares one daemon and one
+      // database serially, so applying the same preset in an earlier spec
+      // leaves a rule with the identical name behind — the bare locator then
+      // resolves to two rows and Playwright's strict mode fails on the
+      // ambiguity rather than on anything being wrong. What this asserts is
+      // "a row for this rule is on screen", and one is enough.
       await expect(
-        authedPage.locator("tr", {
-          has: authedPage.locator(`text=${rule.name}`),
-        }),
+        authedPage
+          .locator("tr", { has: authedPage.locator(`text=${rule.name}`) })
+          .first(),
       ).toBeVisible();
     }
   } finally {

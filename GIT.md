@@ -73,9 +73,17 @@ daemon and nothing happened, oh it's waiting for input" UX is gone.
 
 ```bash
 # from a clean main checkout
+./scripts/preflight-release.sh        # ⛔ 必须先过这一关
 git tag -a v0.4.0 -m "Release v0.4.0"
 git push origin v0.4.0
 ```
+
+⛔ **不要跳过 preflight。** 它问的不是「你本机绿不绿」,而是「**远端对这个提交那次
+跑绿没绿**」,并且逐个点名 `e2e` 和 `web-e2e` —— 这两层不在 `make test LAYER=all`
+里,所以本机跑全量也看不见它们。
+
+2026-09-10 有人跳过了:本机全绿,而持续验证已经连红四十多轮,标签指向的版本在验证
+机器上从未绿过一次。原委见 [`docs/incidents.md`](docs/incidents.md)。
 
 Pushing the tag triggers `.github/workflows/release.yml`, which produces
 and publishes:

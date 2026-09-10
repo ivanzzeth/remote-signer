@@ -37,6 +37,14 @@ test("transaction sign_type is auto-approved by whitelist rule", async () => {
           to: "0x0000000000000000000000000000000000000001",
           value: "0x0",
           data: "0x",
+            // ⛔ nonce is set explicitly. Without it the adapter auto-fetches
+            // the account's transaction count from the RPC gateway, which this
+            // harness reaches over the public internet — six specs failed with
+            // "sign request failed", whose server-side cause was
+            // "failed to auto-fetch nonce: context deadline exceeded". The
+            // blocklist specs passed throughout because a rejected request
+            // never reaches the signing step.
+            nonce: 0,
           gas: 21000,
           gasPrice: "0",
             txType: "legacy",

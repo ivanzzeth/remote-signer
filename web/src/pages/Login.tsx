@@ -333,31 +333,11 @@ function OnboardForm({
   return (
     <div className="flex h-full items-center justify-center bg-ink-50">
       <div className="w-full max-w-md rounded-lg border border-ink-200 bg-white p-6 shadow-sm">
-        {/* ⚠️ This screen is only reached when the daemon already has an
-            admin key — App.tsx routes a daemon with none to Bootstrap. The
-            heading used to read "Import API key" and the text described
-            pasting key material, which reads like first-run setup; an operator
-            took it to mean the daemon had no admin yet and pasted the wrong
-            key under the admin ID. The words now say what this screen is:
-            signing in with a key the daemon already knows. */}
-        <h1 className="text-lg font-semibold text-ink-900">
-          Sign in to this signer
-        </h1>
+        <h1 className="text-lg font-semibold text-ink-900">Import API key</h1>
         <p className="mt-1 text-sm text-ink-500">
-          This daemon is already set up. Sign in with a key it already knows —
-          the API key ID has to be the one that key was registered under.
-        </p>
-        <p className="mt-2 text-sm text-ink-500">
-          An operator-run daemon keeps its keys under its own{" "}
-          <code className="rounded bg-ink-100 px-1">apikeys/</code> directory
-          (by default{" "}
-          <code className="rounded bg-ink-100 px-1">
-            ~/.remote-signer/apikeys/
-          </code>
-          ): paste an encrypted keystore (<code>.json</code>, with its
-          password), or a private key as PEM, hex, or base64. It is re-encrypted
-          in this browser with the password you choose, so the next visit only
-          needs that password.
+          Paste an encrypted keystore (.json), an Ed25519 private key
+          (hex or base64), or a PKCS#8 PEM file. The key is encrypted locally with
+          your password so the next visit only needs the password.
         </p>
 
         {/* ⚠️ Shown before the operator types anything. Encrypting the key
