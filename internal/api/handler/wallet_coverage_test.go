@@ -23,6 +23,22 @@ import (
 
 // ---------------------------------------------------------------------------
 // Wallet error-path tests using in-memory SQLite
+//
+// ⚠️ Everything left in this file calls an *unexported* method of WalletHandler
+// (createWallet, listWallets, updateWallet, deleteWallet, listMembers,
+// addMember, removeMember) with the arguments the dispatcher would have parsed
+// out of the path. They were never route tests: they bypass the mux and
+// ServeWalletHTTP's own path splitting alike, which is exactly how they reach an
+// error branch that a request cannot reach on its own (a closed database, an
+// already-resolved *types.Wallet). Routing them through a mux is not something
+// that could be done to them, so step S2 did not: only unexported access keeps
+// them able to test what they test, and unexported access is what
+// `package handler` is.
+//
+// The ten tests that did go through ServeHTTP / ServeWalletHTTP moved to
+// wallet_route_coverage_test.go, in `package handler_test`, where they reach the
+// handler through the production route registration. See wallet_routes_test.go
+// for why the package boundary is where it is.
 // ---------------------------------------------------------------------------
 
 func setupWalletErrorHandlerTestDB(t *testing.T) *gorm.DB {
@@ -340,75 +356,6 @@ func TestWallet_removeMember_RepoError(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "failed to remove member")
 }
 
-func TestWallet_ServeWalletHTTP_WalletNotFound(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/nonexistent", nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	assert.Contains(t, w.Body.String(), "wallet not found")
-}
-
-func TestWallet_ServeWalletHTTP_RepoError(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	sqlDB.Close()
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/some-id", nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-}
-
-func TestWallet_ServeWalletHTTP_NonAdminCannotAccessOthers(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	wallet := &types.Wallet{Name: "User A Wallet", OwnerID: "user-a"}
-	require.NoError(t, collRepo.Create(context.Background(), wallet))
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	// User B (non-admin) tries to access User A's wallet
-	apiKey := &types.APIKey{ID: "user-b", Role: types.RoleDev, Enabled: true}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/"+wallet.ID, nil)
-	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, apiKey))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
 func TestWallet_createWallet_InvalidJSON(t *testing.T) {
 	db := setupWalletErrorHandlerTestDB(t)
 
@@ -519,160 +466,4 @@ func TestWallet_updateWallet_EmptyName(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "name cannot be empty")
-}
-
-func TestWallet_ServeHTTP_MethodNotAllowed(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/wallets", nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
-func TestWallet_ServeWalletHTTP_NoID(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/", nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "wallet ID required")
-}
-
-func TestWallet_ServeWalletHTTP_UnauthorizedNoKey(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/some-id", nil)
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestWallet_ServeWalletHTTP_InvalidMemberMethod(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	wallet := &types.Wallet{Name: "Test", OwnerID: "admin"}
-	require.NoError(t, collRepo.Create(context.Background(), wallet))
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	// PATCH on /members should be method not allowed (default case)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/wallets/"+wallet.ID+"/members", nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
-func TestWallet_ServeWalletHTTP_InvalidMemberSignerMethod(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	wallet := &types.Wallet{Name: "Test", OwnerID: "admin"}
-	require.NoError(t, collRepo.Create(context.Background(), wallet))
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	// POST on /members/{signer} should be method not allowed
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/"+wallet.ID+"/members/0xdead", nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
-
-func TestWallet_ServeWalletHTTP_InvalidPath(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	wallet := &types.Wallet{Name: "Test", OwnerID: "admin"}
-	require.NoError(t, collRepo.Create(context.Background(), wallet))
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	// Unknown path after wallet ID
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/wallets/"+wallet.ID+"/unknown", nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
-func TestWallet_ServeWalletHTTP_WalletMethodNotAllowed(t *testing.T) {
-	db := setupWalletErrorHandlerTestDB(t)
-
-	collRepo, err := storage.NewGormWalletRepository(db)
-	require.NoError(t, err)
-	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	require.NoError(t, err)
-	accessRepo, err := storage.NewGormSignerAccessRepository(db)
-	require.NoError(t, err)
-
-	wallet := &types.Wallet{Name: "Test", OwnerID: "admin"}
-	require.NoError(t, collRepo.Create(context.Background(), wallet))
-
-	handler, err := NewWalletHandler(collRepo, ownershipRepo, accessRepo, slog.Default())
-	require.NoError(t, err)
-
-	// POST on single wallet (without /members) should be not allowed
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/"+wallet.ID, nil)
-	req = req.WithContext(walletAdminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeWalletHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }

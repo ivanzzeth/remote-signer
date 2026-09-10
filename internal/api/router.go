@@ -618,14 +618,17 @@ func (r *Router) setupRoutes() error {
 		r.handle("/api/v1/api-keys/", Permitted(middleware.PermManageAPIKeys), http.HandlerFunc(apiKeyHandler.ServeKeyHTTP))
 	}
 
-	// Wallet routes (all authenticated users can manage their own wallets)
+	// Wallet routes (all authenticated users can manage their own wallets).
+	// ⚠️ The patterns and their permission live in module_wallets.go now, and
+	// they are byte-for-byte the two that were here. The move is what lets the
+	// wallet handler tests route through the production registration instead of
+	// a copy of it; see the comment on walletsModule.
 	if r.config.WalletRepo != nil {
-		walletHandler, collErr := handler.NewWalletHandler(r.config.WalletRepo, r.config.SignerOwnershipRepo, r.config.SignerAccessRepo, r.logger)
+		walletsMod, collErr := NewWalletsModule(r.config.WalletRepo, r.config.SignerOwnershipRepo, r.config.SignerAccessRepo, r.logger)
 		if collErr != nil {
 			return fmt.Errorf("failed to create wallet handler: %w", collErr)
 		}
-		r.handle("/api/v1/wallets", Permitted(middleware.PermManageWallets), walletHandler)
-		r.handle("/api/v1/wallets/", Permitted(middleware.PermManageWallets), http.HandlerFunc(walletHandler.ServeWalletHTTP))
+		r.mountModules(walletsMod)
 	}
 
 	// ACLs read-only routes (admin only): IP whitelist config
