@@ -244,21 +244,46 @@ rules:
   # Used by TestRule_TransactionToBurnAddressBlocked
   - name: "Block known malicious addresses"
     id: "e2e-block-burn"
-    type: "evm_solidity_expression"
+    # ⛔ evm_js, not evm_solidity_expression. A blocklist rule whose engine is
+    # unavailable is fail-closed by design — the daemon refuses every request
+    # rather than skipping a rule meant to block things. Solidity needs forge,
+    # CI does not install it, and so this one rule blocked every signature in
+    # the whole e2e suite: eleven tests failed on "timeout waiting for
+    # approval", none of them about Solidity or about blocklists.
+    #
+    # ⚠️ The rule reads `input.transaction` directly rather than going through
+    # rs.tx.require, which rejects a payload with no calldata — a plain value
+    # transfer to the burn address is exactly what this must catch.
+    type: "evm_js"
     mode: "blocklist"
     enabled: true
     config:
-      expression: |
-        require(to != 0x000000000000000000000000000000000000dEaD, "blocked: burn address");
+      script: |
+        function validate(input) {
+          var tx = input.transaction;
+          if (!tx || !tx.to) { return ok(); }
+          if (tx.to.toLowerCase() === "0x000000000000000000000000000000000000dead") {
+            return fail("blocked: burn address");
+          }
+          return ok();
+        }
       description: "Block transfers to burn address for e2e testing"
       test_cases:
         - name: "should pass for normal address"
           input:
-            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            sign_type: "transaction"
+            signer: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            transaction:
+              to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value: "0"
           expect_pass: true
         - name: "should block burn address"
           input:
-            to: "0x000000000000000000000000000000000000dEaD"
+            sign_type: "transaction"
+            signer: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            transaction:
+              to: "0x000000000000000000000000000000000000dEaD"
+              value: "0"
           expect_pass: false
           expect_reason: "blocked: burn address"
 
