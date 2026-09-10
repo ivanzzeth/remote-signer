@@ -3,6 +3,7 @@
 #   - go-test          : unit suite (`go test ./...`)
 #   - go-test-integration : unit + internal integration tests
 #   - integration      : black-box CLI/HTTP harness behind the `integration` tag
+#   - web-unit         : Vitest over web/src (no browser, no daemon, no Go build)
 #   - web-e2e          : Playwright drives the embedded React UI against a real
 #                        daemon spawned by globalSetup
 #
@@ -120,6 +121,37 @@ jobs:
           name: remote-signer-extension
           path: extension/dist/remote-signer-extension.zip
           retention-days: 7
+
+  # Vitest over web/src. Split out from web-e2e on purpose: this job needs
+  # neither the Go toolchain, nor a daemon binary, nor a Playwright browser,
+  # so it reports in ~1 min and a broken unit test can no longer hide behind
+  # the long e2e job. `npm test` was red for every one of its 47 files until
+  # 2026-09-10 (Vitest collecting the Playwright specs) precisely because no
+  # job ran it — see scripts/lib/layers.sh, layer `web-unit`.
+  web-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            pkg/js-client/package-lock.json
+            web/package-lock.json
+
+      # web depends on the SDK via file:../pkg/js-client. src/lib only
+      # `import type`s it (stripped before execution), but building it keeps
+      # this job honest the day a unit test imports a value from the SDK.
+      - name: Build SDK
+        run: |
+          cd pkg/js-client
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # `make web-deps` installs web/node_modules (npm ci, lockfile-stamped).
+      - name: make test LAYER=web-unit
+        run: make test LAYER=web-unit
 
   web-e2e:
     runs-on: ubuntu-latest

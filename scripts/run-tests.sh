@@ -3,7 +3,7 @@
 #
 #   ./scripts/run-tests.sh              默认层全跑(unit http cli)
 #   ./scripts/run-tests.sh unit         只跑一层
-#   ./scripts/run-tests.sh all          含 integration / blackbox / e2e
+#   ./scripts/run-tests.sh all          含 integration / blackbox / e2e / web-unit
 #   RUN=TestFoo ./scripts/run-tests.sh unit    再按用例名收窄
 #
 # ⚠️ integration / blackbox / e2e **不进默认** —— 它们要真二进制 / 真 daemon,
@@ -19,12 +19,20 @@ SLOW_LAYERS="integration blackbox e2e"
 # 机器上会红在环境而不是代码 —— 所以 `all` 不含它,必须显式 LAYER=web-e2e。
 # ⛔ 但它**必须**留在 layers.sh 里:不在那张表里的 tier,红了没人看得见。
 OPT_IN_LAYERS="web-e2e"
+# ⭐ 只要 node 的层 —— 进 `all`,不进默认。
+#
+# 不进默认:`make test` 是「改一行 Go 代码想知道对不对」的循环,不该为此付
+# node 的启动代价;go-test 那个 CI job 也没有 setup-node。
+# 进 `all`:它不要浏览器、不起 daemon、不构建二进制,冷跑 ≈18s,而 `make build`
+# 默认就走 vite —— 所以「有 node」本来就是本仓库的既有前提,不是新增门槛。
+# 依赖缺失由层命令里的 `make web-deps` 兜住,不会红在 "vitest: not found"。
+NODE_LAYERS="web-unit"
 
 want=${1:-}
 case "$want" in
     "")    layers=$DEFAULT_LAYERS ;;
-    all)   layers="$DEFAULT_LAYERS $SLOW_LAYERS" ;;
-    everything) layers="$DEFAULT_LAYERS $SLOW_LAYERS $OPT_IN_LAYERS" ;;
+    all)   layers="$DEFAULT_LAYERS $SLOW_LAYERS $NODE_LAYERS" ;;
+    everything) layers="$DEFAULT_LAYERS $SLOW_LAYERS $NODE_LAYERS $OPT_IN_LAYERS" ;;
     *)
         if ! layer_raw "$want" >/dev/null 2>&1; then
             echo "FAIL: 没有 LAYER=$want" >&2

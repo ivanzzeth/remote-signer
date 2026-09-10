@@ -77,9 +77,21 @@ make test LAYER=cli               # CLI / TUI / SDK
 make test LAYER=integration       # -tags integration ./internal/...   (real SQLite lives here)
 make test LAYER=blackbox          # -tags integration ./tests/integration/...
 make test LAYER=e2e               # -tags e2e ./e2e/...
-make test LAYER=all               # everything
+make test LAYER=web-unit          # Vitest over web/src (node only, no browser)
+make test LAYER=web-e2e           # Playwright over the embedded UI (needs a browser)
+make test LAYER=all               # everything except web-e2e
+make test LAYER=everything        # ...web-e2e included
 make test LAYER=unit RUN=TestFoo  # narrow by test name
 ```
+
+The two `web-*` layers are `@cmd` layers — npm, not `go test` — and they are split
+on what they need, not on speed alone: `web-unit` needs only node, so it is in
+`all`; `web-e2e` needs a Playwright browser and a built daemon, so it stays opt-in
+and a machine that cannot install browsers goes red on its environment rather than
+on the code. ⛔ `npm test` in `web/` was red for **every one of its 47 files** until
+2026-09-10 — Vitest had no `test.exclude`, so it collected the 42 Playwright specs
+and each one died with "Playwright Test did not expect test() to be called here".
+Nothing ran it: `make check` is Go-only and `layers.sh` knew only about `web-e2e`.
 
 Cold timings: `unit` 5.3s · `http` 2.5s · `cli` 7.8s. The whole default set beats
 the old single `go test -tags integration ./internal/...` pass by more than 10×.

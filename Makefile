@@ -11,7 +11,7 @@
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help check build build-embed build-cli web test test-unit test-integration integration clean tidy desktop-dev desktop-dist
+.PHONY: help check build build-embed build-cli web web-deps test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -39,8 +39,8 @@ help:
 	@echo "  build-cli     Go-only binary, no embedded UI (placeholder page; fast backend dev)"
 	@echo "  check         Fast feedback gates (fmt/vet/staticcheck/test-structure/arch) — parallel, seconds"
 	@echo "  test          Default layers: unit http cli"
-	@echo "  test LAYER=x  One layer: unit|http|cli|integration|blackbox|e2e"
-	@echo "  test LAYER=all         Every layer, slow ones included"
+	@echo "  test LAYER=x  One layer: unit|http|cli|integration|blackbox|e2e|web-unit|web-e2e"
+	@echo "  test LAYER=all         Every layer, slow ones + web-unit included (web-e2e needs LAYER=everything)"
 	@echo "  test LAYER=unit RUN=TestFoo   Narrow by test name"
 	@echo "  test-unit     Alias for test LAYER=unit"
 	@echo "  test-integration  Alias for test LAYER=integration"
@@ -69,6 +69,15 @@ js-client:
 web: js-client
 	$(call npm_install,web)
 	cd web && $(NPM) run build
+
+## web-deps — 只装 web 的依赖,不构建。`make test LAYER=web-unit` 用它。
+##
+## ⚠️ 为什么单独有这个目标:web-unit 层跑的是 vitest,不需要 bundle,也不需要
+## js-client 的 dist(src/lib 只 `import type` 它,transform 阶段就被剥掉)。
+## 走 `web` 会白白付一次 vite 构建。⛔ 但也不能什么都不做 —— 那样一台干净的机器
+## 上 `make test LAYER=all` 会红在 "vitest: not found",即红在环境而不是代码。
+web-deps:
+	$(call npm_install,web)
 
 build: build-embed
 

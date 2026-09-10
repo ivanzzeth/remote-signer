@@ -43,6 +43,22 @@ LAYERS=(
     # ⚠️ 它要 node + playwright 浏览器,比 e2e 还慢,所以不进 all —— 见
     # run-tests.sh 的 SLOW_LAYERS / OPT_IN_LAYERS。
     "web-e2e|@cmd|cd web && npm run test:e2e"
+    # ⭐ web 的单元层(Vitest,src/lib/*.test.ts)。与 web-e2e 同为 `@cmd`,但
+    # 它**只要 node**:不起 daemon、不构建二进制、不装浏览器,冷跑 ≈18s
+    # (其中 16s 是 keystore 的 scrypt N=2^18,那是真实的生产参数)。
+    #
+    # 为什么必须登记:2026-09-10 发现 `npm test` **一直是红的** —— vite.config.ts
+    # 没给 Vitest 设 exclude,42 个 Playwright spec 被 Vitest 收进来,每个都炸在
+    # "Playwright Test did not expect test() to be called here"。而没人发现,
+    # 因为**没有任何东西跑它**:make check 是纯 Go 的,layers.sh 里只有 web-e2e。
+    # 这与 e2e/ 46 个文件从没被 make 跑过、web-e2e 在 CI 红着而本地全绿,
+    # 是同一个形状 —— ⛔ 一个不在这张表里的 tier,它的红没人看得见。
+    #
+    # ⚠️ 与 web-e2e 不同,它**进 `all`**(run-tests.sh 的 NODE_LAYERS):
+    # 判据是「装不上的机器上会不会红在环境」—— web-e2e 要 playwright 浏览器,
+    # 会;这一层只要 node + npm,而 `make build` 默认就走 vite,同一条前提。
+    # 依赖由 `make web-deps` 保证(锁文件哈希做标记,没变就跳过)。
+    "web-unit|@cmd|make web-deps && cd web && npm test"
 )
 
 # ⛔ 哪些层可以并行,哪些不行。
