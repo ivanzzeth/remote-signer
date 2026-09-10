@@ -53,8 +53,17 @@
 # ⭐ 这正是后面 S4–S8 估工作量时最容易估错的地方:基线少一行 ≠ 少一个端点。
 # 那 8 个端点现在是 internal/api/module_wallets.go 里 8 条 method+wildcard
 # pattern,handler 侧读的是 r.PathValue —— 全仓第一次真正用上它。
+#
+# 2026-09-10 · 提案 S4（hd-wallets 拆解):**19 → 18 条,16 → 15 个文件**。
+# 删掉的是 `internal/api/handler/evm.HDWalletHandler.ServeHTTP` —— 一条,
+# 背后是 4 个端点(list / create-import / derive / derived)。
+# ⚠️ 注册侧是 **4 条 pattern → 4 条 pattern**,数字一动不动,而其中两条原本是
+# 通配前缀(`/api/v1/evm/hd-wallets` 不限方法、`/api/v1/evm/hd-wallets/` 任意深度),
+# 另两条虽然写着 `{address}` 却从没被读过 —— handler 照样 TrimPrefix/SplitN 自己切。
+# ⭐ 也就是说「按注册侧数」在这一步会显示**零进展**,而实际上一个吞掉整棵子树的
+# 前缀消失了,`{address}` 第一次真的经 PathValue 送到 handler。这正是本判据
+# 盯 handler 侧而不是注册侧的理由,在 S4 上比在 S3 上更明显。
 internal/api/handler.ACLHandler.ServeHTTP
-internal/api/handler.APIKeyHandler.ServeKeyHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
 internal/api/handler.PresetHandler.ServeHTTP
 internal/api/handler.SettingsHandler.ServeHTTP
@@ -62,7 +71,6 @@ internal/api/handler.TemplateHandler.ServeHTTP
 internal/api/handler.TemplateHandler.ServeInstanceHTTP
 internal/api/handler/evm.ApprovalHandler.ServeHTTP
 internal/api/handler/evm.BudgetItemHandler.ServeHTTP
-internal/api/handler/evm.HDWalletHandler.ServeHTTP
 internal/api/handler/evm.PreviewRuleHandler.ServeHTTP
 internal/api/handler/evm.RPCProxyHandler.ServeHTTP
 internal/api/handler/evm.RequestHandler.ServeHTTP

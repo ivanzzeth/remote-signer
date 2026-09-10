@@ -72,7 +72,7 @@ func newStrictAccessService(t *testing.T, ownerships map[string]*types.SignerOwn
 // --- Tests for newSignerResponse ---
 
 func TestNewSignerResponse_NonHDWallet(t *testing.T) {
-	mgr := &mockSignerManager{hdWalletMgrErr: types.ErrHDWalletNotConfigured}
+	mgr := &MockSignerManager{HDWalletMgrErr: types.ErrHDWalletNotConfigured}
 	accessSvc := newStrictAccessService(t, nil)
 	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
@@ -93,14 +93,14 @@ func TestNewSignerResponse_NonHDWallet(t *testing.T) {
 func TestNewSignerResponse_HDWallet_PrimaryUnlocked(t *testing.T) {
 	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: false},
 				}
 			},
-			listDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) {
+			ListDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) {
 				return nil, nil
 			},
 		},
@@ -135,9 +135,9 @@ func TestNewSignerResponse_HDWallet_PrimaryUnlocked(t *testing.T) {
 func TestNewSignerResponse_HDWallet_PrimaryLocked(t *testing.T) {
 	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: true},
 				}
@@ -162,14 +162,14 @@ func TestNewSignerResponse_HDWallet_DerivedInheritsOwnership(t *testing.T) {
 	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	derivedAddr := "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: false},
 				}
 			},
-			listDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
+			ListDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
 				if strings.EqualFold(primary, primaryAddr) {
 					return []types.SignerInfo{
 						{Address: derivedAddr, Type: string(types.SignerTypeHDWallet), Enabled: true},
@@ -211,9 +211,9 @@ func TestNewSignerResponse_HDWallet_DerivedLocked(t *testing.T) {
 	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	derivedAddr := "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: true},
 				}
@@ -240,14 +240,14 @@ func TestNewSignerResponse_HDWallet_DerivedWithOwnOwnership(t *testing.T) {
 	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	derivedAddr := "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: false},
 				}
 			},
-			listDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
+			ListDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
 				if strings.EqualFold(primary, primaryAddr) {
 					return []types.SignerInfo{
 						{Address: derivedAddr, Type: string(types.SignerTypeHDWallet), Enabled: true},
@@ -292,15 +292,15 @@ func TestNewSignerResponse_HDWallet_MultipleWallets(t *testing.T) {
 	primary2 := "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
 	derived2 := "0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primary1, Locked: true},
 					{PrimaryAddress: primary2, Locked: false},
 				}
 			},
-			listDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
+			ListDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
 				if strings.EqualFold(primary, primary2) {
 					return []types.SignerInfo{
 						{Address: derived2, Type: string(types.SignerTypeHDWallet), Enabled: true},
@@ -344,7 +344,7 @@ func TestNewSignerResponse_HDWallet_MultipleWallets(t *testing.T) {
 }
 
 func TestNewSignerResponse_HDWallet_ManagerError(t *testing.T) {
-	mgr := &mockSignerManager{hdWalletMgrErr: types.ErrHDWalletNotConfigured}
+	mgr := &MockSignerManager{HDWalletMgrErr: types.ErrHDWalletNotConfigured}
 	accessSvc := newStrictAccessService(t, nil)
 
 	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
@@ -361,20 +361,20 @@ func TestNewSignerResponse_HDWallet_ManagerError(t *testing.T) {
 
 func TestNewSignerResponse_HDWallet_CaseInsensitive(t *testing.T) {
 	// HDWalletManager stores uppercase, SignerInfo has lowercase → should still match
-	hdMgr := &mockHDWalletManager{
-		listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	hdMgr := &MockHDWalletManager{
+		ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 			return []evmchain.HDWalletInfo{
 				{PrimaryAddress: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", Locked: false},
 			}
 		},
-		listDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) {
+		ListDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) {
 			return []types.SignerInfo{
 				{Address: "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"},
 			}, nil
 		},
 	}
 
-	mgr := &mockSignerManager{hdWalletMgr: hdMgr}
+	mgr := &MockSignerManager{HDWalletMgr: hdMgr}
 	accessSvc := newStrictAccessService(t, map[string]*types.SignerOwnership{
 		"0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": {
 			SignerAddress: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -411,14 +411,14 @@ func TestNewSignerResponse_HDWallet_DerivedHierarchyUsesCanonicalAddressKey(t *t
 	derivedLower := "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	derivedKey := common.HexToAddress(derivedLower).Hex()
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: false},
 				}
 			},
-			listDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) {
+			ListDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) {
 				return []types.SignerInfo{
 					{Address: derivedLower, Type: string(types.SignerTypeHDWallet), Enabled: true},
 				}, nil
@@ -463,14 +463,14 @@ func TestNewSignerResponse_HDWallet_DerivedHierarchyUsesCanonicalAddressKey(t *t
 func TestNewSignerResponse_HDWallet_PrimaryUnlocked_StaleDBRecordIgnored(t *testing.T) {
 	primaryAddr := "0x21f409aA1a060B22B3ce647d2bDb1C0a9457A0B8"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: false}, // live state: unlocked
 				}
 			},
-			listDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) { return nil, nil },
+			ListDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) { return nil, nil },
 		},
 	}
 	accessSvc := newStrictAccessService(t, nil)
@@ -508,14 +508,14 @@ func TestNewSignerResponse_HDWallet_DerivedUnlocked_StaleDBRecordIgnored(t *test
 	primaryAddr := "0x21f409aA1a060B22B3ce647d2bDb1C0a9457A0B8"
 	derivedAddr := "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 
-	mgr := &mockSignerManager{
-		hdWalletMgr: &mockHDWalletManager{
-			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+	mgr := &MockSignerManager{
+		HDWalletMgr: &MockHDWalletManager{
+			ListHDWalletsFn: func() []evmchain.HDWalletInfo {
 				return []evmchain.HDWalletInfo{
 					{PrimaryAddress: primaryAddr, Locked: false},
 				}
 			},
-			listDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
+			ListDerivedAddrsFn: func(primary string) ([]types.SignerInfo, error) {
 				if strings.EqualFold(primary, primaryAddr) {
 					return []types.SignerInfo{
 						{Address: derivedAddr, Type: string(types.SignerTypeHDWallet), Enabled: true},

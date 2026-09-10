@@ -363,3 +363,102 @@ func TestAPIFallback_RulesPrefixStillAnswersItsOwn400(t *testing.T) {
 		t.Fatalf("GET /api/v1/evm/rules answered %d %q, want 200", list.Code, list.Body.String())
 	}
 }
+
+// TestAPIFallback_HDWalletAndAPIKeyStrandedPaths is the S4 twin of
+// TestAPIFallback_WalletDeepPathAndWrongMethod, and it is where the
+// behaviour-change tables on hdWalletsModule.Routes and apiKeysModule.Routes are
+// *measured* rather than reasoned about.
+//
+// ⚠️ The handler-package tests for these two modules run against a bare mux with
+// no fallback, so they see the mux's own 404 and 405. This one runs the real
+// registerAPIFallback next to the real modules, which is the only place the
+// daemon's answer is visible: "/api/v1/" matches every method and every depth,
+// so a stranded path lands there — 401 without a credential, and a JSON 404 with
+// one. ⛔ What must never happen is that it lands on the SPA and comes back
+// text/html to a client parsing JSON.
+func TestAPIFallback_HDWalletAndAPIKeyStrandedPaths(t *testing.T) {
+	hdMod, err := NewHDWalletsModule(maximalHDWalletHandler(t))
+	if err != nil {
+		t.Fatalf("building the hd-wallets module: %v", err)
+	}
+	apiKeysMod, err := NewAPIKeysModule(maximalAPIKeyHandler(t))
+	if err != nil {
+		t.Fatalf("building the api-keys module: %v", err)
+	}
+
+	// Collect the real patterns so the "still reaches its own route" rows are
+	// generated rather than restated.
+	var patterns []string
+	collect := patternCollector(func(pattern string, _ RouteAuth) { patterns = append(patterns, pattern) })
+	hdMod.Routes(collect)
+	apiKeysMod.Routes(collect)
+	if len(patterns) != 10 {
+		t.Fatalf("the two modules registered %d patterns, want 10 — the rows below would pass for the wrong reason", len(patterns))
+	}
+
+	r := newChainedTestRouter()
+	r.mountModules(hdMod, apiKeysMod)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<!doctype html><html>spa</html>"))
+	r.registerAPIFallback()
+
+	const addr = "0x1111111111111111111111111111111111111111"
+
+	for _, pattern := range patterns {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("pattern %q has no method — the rows below assume method+path patterns", pattern)
+		}
+		target := strings.NewReplacer("{address}", addr, "{id}", "k-1").Replace(path)
+		if strings.Contains(target, "{") {
+			t.Fatalf("pattern %q has a wildcard this test does not know how to fill: %q", pattern, target)
+		}
+		if _, got := r.mux.Handler(httptest.NewRequest(method, target, nil)); got != pattern {
+			t.Errorf("%s %s dispatches to %q, want its own route %q", method, target, got, pattern)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+	}{
+		// ---- hd-wallets: what the two wildcard prefixes used to swallow ----
+		{"hd list with a trailing slash, which served the list before", http.MethodGet, "/api/v1/evm/hd-wallets/"},
+		{"hd create with a trailing slash, which created before", http.MethodPost, "/api/v1/evm/hd-wallets/"},
+		{"derive with a trailing slash, which derived before", http.MethodPost, "/api/v1/evm/hd-wallets/" + addr + "/derive/"},
+		{"derived with a trailing slash, which listed before", http.MethodGet, "/api/v1/evm/hd-wallets/" + addr + "/derived/"},
+		// ⛔ This row is the one worth reading twice: the prefix matched every
+		// method, so a GET reached deriveAddresses — a write behind a read verb.
+		{"GET on derive, which used to run a derivation", http.MethodGet, "/api/v1/evm/hd-wallets/" + addr + "/derive"},
+		{"an hd wallet with no action, which answered 404 unknown action", http.MethodGet, "/api/v1/evm/hd-wallets/" + addr},
+		{"an unknown hd action", http.MethodGet, "/api/v1/evm/hd-wallets/" + addr + "/unknown"},
+		{"a non-address, which answered 400 invalid path or address", http.MethodGet, "/api/v1/evm/hd-wallets/not-an-address"},
+		{"a method no hd-wallet route serves", http.MethodPut, "/api/v1/evm/hd-wallets"},
+		// ---- api-keys: what the two method-less prefixes used to swallow ----
+		{"the bare api-keys prefix, which answered 400 ID is required", http.MethodGet, "/api/v1/api-keys/"},
+		{"an api key with a trailing slash", http.MethodGet, "/api/v1/api-keys/k-1/"},
+		{"an api-key deep path", http.MethodGet, "/api/v1/api-keys/a/b"},
+		{"a method no api-key item route serves", http.MethodPatch, "/api/v1/api-keys/k-1"},
+		{"a method no api-key collection route serves", http.MethodPut, "/api/v1/api-keys"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pattern := r.mux.Handler(httptest.NewRequest(tc.method, tc.target, nil))
+			if pattern != "/api/v1/" {
+				t.Fatalf("%s %s dispatches to %q, want the /api/v1/ fallback — "+
+					"a pattern is still claiming more than one endpoint's worth of paths",
+					tc.method, tc.target, pattern)
+			}
+
+			rec := httptest.NewRecorder()
+			r.Handler().ServeHTTP(rec, httptest.NewRequest(tc.method, tc.target, nil))
+			if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+				t.Fatalf("%s %s answered HTML (%d, content-type %q) — a JSON client would break on it",
+					tc.method, tc.target, rec.Code, rec.Header().Get("Content-Type"))
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s answered %d, want 401: the request carries no credential and the fallback is "+
+					"AuthenticatedOnly, so the chain must refuse before the 404 body", tc.method, tc.target, rec.Code)
+			}
+		})
+	}
+}

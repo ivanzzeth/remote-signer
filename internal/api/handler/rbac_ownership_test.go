@@ -28,7 +28,7 @@ func TestDetermineRuleOwnership_AdminNoAppliedTo(t *testing.T) {
 
 func TestDetermineRuleOwnership_AdminWithAppliedTo(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin", Role: types.RoleAdmin}
-	repo := newMockAPIKeyRepo()
+	repo := NewMockAPIKeyRepo()
 	repo.keys["agent"] = &types.APIKey{ID: "agent", Role: types.RoleAgent}
 	result, err := DetermineRuleOwnership(context.Background(), apiKey, []string{"agent"}, types.RuleModeWhitelist, false, repo)
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func TestDetermineRuleOwnership_AdminWithAppliedTo(t *testing.T) {
 
 func TestDetermineRuleOwnership_AdminAppliedToNotFound(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin", Role: types.RoleAdmin}
-	repo := newMockAPIKeyRepo()
+	repo := NewMockAPIKeyRepo()
 	_, err := DetermineRuleOwnership(context.Background(), apiKey, []string{"no-such-key"}, types.RuleModeWhitelist, false, repo)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "applied_to key ID not found")
@@ -47,7 +47,7 @@ func TestDetermineRuleOwnership_AdminAppliedToNotFound(t *testing.T) {
 
 func TestDetermineRuleOwnership_AdminAppliedToInvalidFormat(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin", Role: types.RoleAdmin}
-	repo := newMockAPIKeyRepo()
+	repo := NewMockAPIKeyRepo()
 	_, err := DetermineRuleOwnership(context.Background(), apiKey, []string{"invalid key!!"}, types.RuleModeWhitelist, false, repo)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid applied_to key ID format")
@@ -55,7 +55,7 @@ func TestDetermineRuleOwnership_AdminAppliedToInvalidFormat(t *testing.T) {
 
 func TestDetermineRuleOwnership_AdminWildcardSkipsValidation(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin", Role: types.RoleAdmin}
-	repo := newMockAPIKeyRepo()
+	repo := NewMockAPIKeyRepo()
 	result, err := DetermineRuleOwnership(context.Background(), apiKey, []string{"*"}, types.RuleModeWhitelist, false, repo)
 	require.NoError(t, err)
 	assert.Equal(t, pq.StringArray{"*"}, result.AppliedTo)

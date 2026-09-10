@@ -35,13 +35,13 @@ func (e *errorSettingsStore) Put(_ context.Context, _ settings.Group, _, _ strin
 // ---------------------------------------------------------------------------
 
 func TestCoverage_ListAPIKeys_ValidOffset(t *testing.T) {
-	mock := newMockAPIKeyRepo()
-	mock.seed(makeTestAPIKey("k1", "Key 1", types.APIKeySourceAPI, true))
-	mock.seed(makeTestAPIKey("k2", "Key 2", types.APIKeySourceAPI, true))
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock := NewMockAPIKeyRepo()
+	mock.Seed(MakeTestAPIKey("k1", "Key 1", types.APIKeySourceAPI, true))
+	mock.Seed(MakeTestAPIKey("k2", "Key 2", types.APIKeySourceAPI, true))
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys?offset=5", nil).WithContext(
-		context.WithValue(context.Background(), middleware.APIKeyContextKey, apikeyAdminKey()))
+		context.WithValue(context.Background(), middleware.APIKeyContextKey, ApikeyAdminKey()))
 	w := httptest.NewRecorder()
 	h.listAPIKeys(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -52,14 +52,14 @@ func TestCoverage_ListAPIKeys_ValidOffset(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCoverage_CreateAPIKey_EmptyRole(t *testing.T) {
-	mock := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock := NewMockAPIKeyRepo()
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
 
 	body := strings.NewReader(`{"id":"create-empty-role","name":"No Role","public_key":"0xabc","role":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", body)
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, apikeyAdminKey()))
+	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, ApikeyAdminKey()))
 	w := httptest.NewRecorder()
 	h.createAPIKey(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -67,14 +67,14 @@ func TestCoverage_CreateAPIKey_EmptyRole(t *testing.T) {
 }
 
 func TestCoverage_CreateAPIKey_InvalidRole(t *testing.T) {
-	mock := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock := NewMockAPIKeyRepo()
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
 
 	body := strings.NewReader(`{"id":"create-bad-role","name":"Bad Role","public_key":"0xabc","role":"invalid_role"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", body)
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, apikeyAdminKey()))
+	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, ApikeyAdminKey()))
 	w := httptest.NewRecorder()
 	h.createAPIKey(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -82,17 +82,17 @@ func TestCoverage_CreateAPIKey_InvalidRole(t *testing.T) {
 }
 
 func TestCoverage_CreateAPIKey_WithAuditLogger(t *testing.T) {
-	mock := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock := NewMockAPIKeyRepo()
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
-	auditLogger, aErr := audit.NewAuditLogger(newMockAuditRepo(), apikeyLogger())
+	auditLogger, aErr := audit.NewAuditLogger(newMockAuditRepo(), ApikeyLogger())
 	require.NoError(t, aErr)
 	h.SetAuditLogger(auditLogger)
 
 	body := strings.NewReader(`{"id":"create-audit","name":"Audit Create","public_key":"0xabc","role":"strategy"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", body)
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, apikeyAdminKey()))
+	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, ApikeyAdminKey()))
 	w := httptest.NewRecorder()
 	h.createAPIKey(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code)
@@ -103,15 +103,15 @@ func TestCoverage_CreateAPIKey_WithAuditLogger(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCoverage_UpdateAPIKey_InvalidRole(t *testing.T) {
-	mock := newMockAPIKeyRepo()
-	mock.seed(makeTestAPIKey("update-invalid-role", "Update Invalid Role", types.APIKeySourceAPI, true))
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock := NewMockAPIKeyRepo()
+	mock.Seed(MakeTestAPIKey("update-invalid-role", "Update Invalid Role", types.APIKeySourceAPI, true))
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
 
 	body := strings.NewReader(`{"role":"bad_role"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/api-keys/update-invalid-role", body)
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, apikeyAdminKey()))
+	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, ApikeyAdminKey()))
 	w := httptest.NewRecorder()
 	h.updateAPIKey(w, req, "update-invalid-role")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -119,14 +119,14 @@ func TestCoverage_UpdateAPIKey_InvalidRole(t *testing.T) {
 }
 
 func TestCoverage_UpdateAPIKey_SelfRoleChange(t *testing.T) {
-	mock := newMockAPIKeyRepo()
+	mock := NewMockAPIKeyRepo()
 	adminKey := &types.APIKey{
 		ID: "self-role-change", Name: "Self Role", Enabled: true, Role: types.RoleAdmin,
 		PublicKeyHex: "0xabc", Source: types.APIKeySourceAPI,
 		RateLimit: 100,
 	}
-	mock.seed(adminKey)
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock.Seed(adminKey)
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
 
 	body := strings.NewReader(`{"role":"dev"}`)
@@ -141,18 +141,18 @@ func TestCoverage_UpdateAPIKey_SelfRoleChange(t *testing.T) {
 }
 
 func TestCoverage_UpdateAPIKey_WithAuditLogger(t *testing.T) {
-	mock := newMockAPIKeyRepo()
-	mock.seed(makeTestAPIKey("update-audit", "Update Audit", types.APIKeySourceAPI, true))
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock := NewMockAPIKeyRepo()
+	mock.Seed(MakeTestAPIKey("update-audit", "Update Audit", types.APIKeySourceAPI, true))
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
-	auditLogger, aErr := audit.NewAuditLogger(newMockAuditRepo(), apikeyLogger())
+	auditLogger, aErr := audit.NewAuditLogger(newMockAuditRepo(), ApikeyLogger())
 	require.NoError(t, aErr)
 	h.SetAuditLogger(auditLogger)
 
 	body := strings.NewReader(`{"name":"Updated Name"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/api-keys/update-audit", body)
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, apikeyAdminKey()))
+	req = req.WithContext(context.WithValue(context.Background(), middleware.APIKeyContextKey, ApikeyAdminKey()))
 	w := httptest.NewRecorder()
 	h.updateAPIKey(w, req, "update-audit")
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -163,41 +163,41 @@ func TestCoverage_UpdateAPIKey_WithAuditLogger(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCoverage_DeleteAPIKey_SelfDelete(t *testing.T) {
-	mock := newMockAPIKeyRepo()
+	mock := NewMockAPIKeyRepo()
 	selfKey := &types.APIKey{
 		ID: "delete-self", Name: "Delete Self", Enabled: true, Role: types.RoleAdmin,
 		PublicKeyHex: "0xabc", Source: types.APIKeySourceAPI, RateLimit: 100,
 	}
-	mock.seed(selfKey)
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	mock.Seed(selfKey)
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
 
 	callerKey := &types.APIKey{ID: "delete-self", Name: "Delete Self", Enabled: true, Role: types.RoleAdmin}
-	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/delete-self", nil, callerKey)
+	rr := doAPIKeyEndpoint(t, h.DeleteAPIKey, http.MethodDelete, "/api/v1/api-keys/delete-self", "delete-self", callerKey)
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	assert.Contains(t, rr.Body.String(), "cannot delete your own API key")
 }
 
 func TestCoverage_DeleteAPIKey_WithAuditLogger(t *testing.T) {
-	mock := newMockAPIKeyRepo()
+	mock := NewMockAPIKeyRepo()
 	delKey := &types.APIKey{
 		ID: "delete-audit", Name: "Delete Audit", Enabled: true, Role: types.RoleStrategy,
 		PublicKeyHex: "0xabc", Source: types.APIKeySourceAPI, RateLimit: 100,
 	}
-	mock.seed(delKey)
+	mock.Seed(delKey)
 	adminKey := &types.APIKey{
 		ID: "other-admin", Name: "Other Admin", Enabled: true, Role: types.RoleAdmin,
 		PublicKeyHex: "0xabc", Source: types.APIKeySourceAPI, RateLimit: 100,
 	}
-	mock.seed(adminKey)
+	mock.Seed(adminKey)
 
-	h, err := NewAPIKeyHandler(mock, apikeyLogger(), nil)
+	h, err := NewAPIKeyHandler(mock, ApikeyLogger(), nil)
 	require.NoError(t, err)
-	auditLogger, aErr := audit.NewAuditLogger(newMockAuditRepo(), apikeyLogger())
+	auditLogger, aErr := audit.NewAuditLogger(newMockAuditRepo(), ApikeyLogger())
 	require.NoError(t, aErr)
 	h.SetAuditLogger(auditLogger)
 
-	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/delete-audit", nil, apikeyAdminKey())
+	rr := doAPIKeyEndpoint(t, h.DeleteAPIKey, http.MethodDelete, "/api/v1/api-keys/delete-audit", "delete-audit", ApikeyAdminKey())
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 }
 
@@ -286,7 +286,7 @@ func TestCoverage_Settings_Put_Error(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCoverage_Bootstrap_NilLogger(t *testing.T) {
-	h := NewBootstrapHandler(newMockAPIKeyRepo(), nil, nil)
+	h := NewBootstrapHandler(NewMockAPIKeyRepo(), nil, nil)
 	assert.NotNil(t, h)
 }
 

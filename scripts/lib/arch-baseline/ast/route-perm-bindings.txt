@@ -4,7 +4,7 @@
 #
 # 别的基线是**债务清单**:每一行是一处该被修掉的东西,行数只许往下走,
 # 减到零是目标。这一张不是。这一张是**当前事实的记录** —— 它正确的大小
-# 就是「每一条带权限的路由一行」,今天 46 行。
+# 就是「每一条带权限的路由一行」,今天 49 行。
 #
 #   ⛔ 不要「清理」它,不要试图让它变短。
 #   ⛔ 一行消失**不是**修好了,是那条路由的权限动了 —— 门禁会为此报红,
@@ -64,9 +64,21 @@
 #
 # ---------- 清单 ----------
 
+# ---------- 棘轮记事 ----------
+#
+# 2026-09-10 · 提案 S4(api-keys 拆解):**46 → 49 行**。⛔ 没有任何一条路由的权限
+# 变了。落空的两行是 `/api/v1/api-keys` 与 `/api/v1/api-keys/` —— 两条**不带
+# method** 的前缀,背后藏着 5 个端点;新增的五行就是那 5 个端点,逐条仍然是
+# `manage_api_keys`,与两条前缀声明的一模一样。
+# ⭐ 这正是这张表在拆解期的用处:5 行新的名字必须逐条被人看一眼,而 diff 里
+# 「permission 那一列全是 manage_api_keys」是这次拆解没顺手改权限的证据。
+# ⚠️ `GET /api/v1/api-keys/names` 不在这张表里,它没有权限 ——
+# 见 route-auth-exemptions.txt,那一行 S4 一个字都没动。
+#
+# 2026-09-10 · 提案 S4(hd-wallets 拆解):**这张表一行都没动**。四条 HD 钱包
+# 路由一个权限都不挂,拆解前后都在 route-auth-exemptions.txt 里。
+
 /api/v1/admin/settings/ manage_settings
-/api/v1/api-keys manage_api_keys
-/api/v1/api-keys/ manage_api_keys
 /api/v1/evm/guard/resume resume_guard
 /api/v1/evm/requests list_own_requests
 /api/v1/evm/rules list_rules
@@ -76,10 +88,13 @@
 /api/v1/presets read_presets
 /api/v1/templates read_templates
 /api/v1/templates/ read_templates
+DELETE /api/v1/api-keys/{id} manage_api_keys
 DELETE /api/v1/evm/budgets/ manage_budgets
 DELETE /api/v1/wallets/{id} manage_wallets
 DELETE /api/v1/wallets/{id}/members/{signerAddress} manage_wallets
 GET /api/v1/acls/ip-whitelist read_acls
+GET /api/v1/api-keys manage_api_keys
+GET /api/v1/api-keys/{id} manage_api_keys
 GET /api/v1/audit read_audit
 GET /api/v1/audit/requests/ read_audit
 GET /api/v1/evm/budgets read_budgets
@@ -92,6 +107,7 @@ GET /api/v1/wallets/{id} manage_wallets
 GET /api/v1/wallets/{id}/members manage_wallets
 PATCH /api/v1/evm/budgets/ manage_budgets
 PATCH /api/v1/wallets/{id} manage_wallets
+POST /api/v1/api-keys manage_api_keys
 POST /api/v1/evm/broadcast sign_request
 POST /api/v1/evm/budgets manage_budgets
 POST /api/v1/evm/budgets/ manage_budgets
@@ -110,3 +126,4 @@ POST /api/v1/presets/ apply_preset
 POST /api/v1/registry/refresh apply_preset
 POST /api/v1/wallets manage_wallets
 POST /api/v1/wallets/{id}/members manage_wallets
+PUT /api/v1/api-keys/{id} manage_api_keys

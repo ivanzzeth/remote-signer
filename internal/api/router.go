@@ -480,27 +480,17 @@ func (r *Router) setupRoutes() error {
 
 	// HD wallet management routes
 	//
-	// ⛔ KNOWN GAP — all four. middleware.PermReadHDWallets and
-	// middleware.PermCreateHDWallet are declared (middleware/rbac.go:53-55) and
-	// granted (admin+dev+agent read, admin create), and no route references
-	// either one. Every authenticated key, including a `strategy` key that holds
-	// no HD-wallet permission at all, reaches list/create/derive here.
-	//
-	// ⚠️ They are exempted rather than fixed **in this change on purpose**:
-	// picking the permission is a per-route security decision, and the failure
-	// direction is asymmetric — too strict shows up in e2e, too loose ships
-	// silently. What this exemption buys is that the gap is now a named line in
-	// the exemption baseline that goes red the day someone edits these routes,
-	// instead of four calls that look exactly like a deliberate choice.
-	const hdWalletGap = "⛔ KNOWN GAP, not a decision: PermReadHDWallets/PermCreateHDWallet exist and are granted by role, " +
-		"but no HD-wallet route references them, so any authenticated key reaches this surface. " +
-		"Left as-is here because assigning the permission is a security decision that has to be made per route, " +
-		"and a too-loose guess would ship silently while a too-strict one would fail e2e."
-	r.handle("/api/v1/evm/hd-wallets", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
-	// derive is POST-only, derived is GET-only; the prefix keeps serving the rest.
-	r.handle("POST /api/v1/evm/hd-wallets/{address}/derive", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
-	r.handle("GET /api/v1/evm/hd-wallets/{address}/derived", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
-	r.handle("/api/v1/evm/hd-wallets/", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
+	// ⚠️ The four patterns, their AuthenticatedOnly exemption and the written
+	// reason behind it live in module_hdwallets.go now, and the reason is
+	// byte-for-byte the one that stood here. What changed is that the two
+	// wildcard patterns became the four endpoints they were hiding; the known
+	// RBAC gap they declare is unchanged and deliberately still open — see
+	// hdWalletGap.
+	hdWalletsMod, hdModErr := NewHDWalletsModule(hdWalletHandler)
+	if hdModErr != nil {
+		return fmt.Errorf("failed to create hd wallet module: %w", hdModErr)
+	}
+	r.mountModules(hdWalletsMod)
 
 	// Simulation routes (optional, requires simulation engine)
 	if r.config.Simulator != nil {
@@ -600,22 +590,15 @@ func (r *Router) setupRoutes() error {
 		if accessService != nil {
 			apiKeyHandler.SetAccessService(accessService)
 		}
-		// /names is the lightweight read-only projection any
-		// authenticated key may pull (id + name + role + enabled). Must
-		// land BEFORE the /api/v1/api-keys/ prefix so the standard mux's
-		// longest-match wins and we don't accidentally route through
-		// ServeKeyHTTP (which would treat "names" as an id and 404).
-		r.handle("GET /api/v1/api-keys/names", AuthenticatedOnly(
-			"deliberately weaker than the PermManageAPIKeys surface it sits inside, and the callers are known: "+
-				"the Web UI resolves its own key's role through it (web/src/lib/rbac.ts:8-11) and the extension "+
-				"fills the grant-access and signer-filter dropdowns (extension/background.js:2680-2692) — both from "+
-				"keys that are not the caller's. The projection is id+name+role+enabled over enabled keys only "+
-				"(handler/apikey.go:231-254) — no public key, no material, no ability to mutate. "+
-				"⚠️ It does disclose the roster of key names and roles to any authenticated key; that is the "+
-				"trade this route was created to make, and it is the one to revisit first if it turns out to be wrong."),
-			http.HandlerFunc(apiKeyHandler.ListAPIKeyNames))
-		r.handle("/api/v1/api-keys", Permitted(middleware.PermManageAPIKeys), apiKeyHandler)
-		r.handle("/api/v1/api-keys/", Permitted(middleware.PermManageAPIKeys), http.HandlerFunc(apiKeyHandler.ServeKeyHTTP))
+		// ⚠️ The six patterns, their permissions and the /names exemption's
+		// written reason live in module_apikeys.go now, and the reason is
+		// byte-for-byte the one that stood here. What changed is that the two
+		// method-less prefixes became the five endpoints they were hiding.
+		apiKeysMod, akModErr := NewAPIKeysModule(apiKeyHandler)
+		if akModErr != nil {
+			return fmt.Errorf("failed to create api key module: %w", akModErr)
+		}
+		r.mountModules(apiKeysMod)
 	}
 
 	// Wallet routes (all authenticated users can manage their own wallets).

@@ -68,8 +68,13 @@ authenticated-only /api/v1/evm/requests/
 # 任何 HD wallet 权限的 strategy key)都能走到这片。
 # ⚠️ 没有就地补权限:选哪个权限是逐条的安全决定,而失败方向是不对称的 ——
 # **过严会在 e2e 里显形,过松不会**。
-authenticated-only /api/v1/evm/hd-wallets
-authenticated-only /api/v1/evm/hd-wallets/
+# ⚠️ 2026-09-10 · 提案 S4:这四行里的**前两行换了名字,缺口一个字没变**。
+# 拆解前是 `/api/v1/evm/hd-wallets`(不限方法)+ `/api/v1/evm/hd-wallets/`(前缀,
+# 任意深度);拆解后是 GET 与 POST 两条各自具名的路由,理由字符串逐字照抄
+# (internal/api/module_hdwallets.go 的 hdWalletGap)。⛔ 四条仍然一个权限都不挂 ——
+# 补权限是**另一个 PR** 的事,不许顺手在拆解里做。
+authenticated-only GET /api/v1/evm/hd-wallets
+authenticated-only POST /api/v1/evm/hd-wallets
 authenticated-only GET /api/v1/evm/hd-wallets/{address}/derived
 authenticated-only POST /api/v1/evm/hd-wallets/{address}/derive
 

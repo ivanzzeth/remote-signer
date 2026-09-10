@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
@@ -265,7 +266,7 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 		{"RPCProvider", "POST /api/v1/evm/broadcast"},
 		{"RPCProvider (rpc proxy)", "POST /api/v1/evm/rpc/"},
 		{"RuleEngine + signer access service", "POST /api/v1/evm/sign/batch"},
-		{"APIKeyRepo", "/api/v1/api-keys"},
+		{"APIKeyRepo", "GET /api/v1/api-keys/names"},
 		{"IPWhitelistConfigForRead", "GET /api/v1/acls/ip-whitelist"},
 		{"SettingsManager", "/api/v1/admin/settings/"},
 		{"SettingsManager (SPA catch-all)", "/"},
@@ -301,6 +302,64 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 				"registered less than walletsModule.Routes() says it serves", pattern)
 		}
 	}))
+
+	// ⛔ Same for the two modules S4 created, and for the same reason. The
+	// APIKeyRepo row above used to be the literal "/api/v1/api-keys" — one
+	// method-less prefix that stood for five endpoints. It is now
+	// "GET /api/v1/api-keys/names", which is enough to prove the branch fired,
+	// and the module below proves that *all six* of its patterns reached the mux.
+	// ⚠️ hd-wallets is not gated by a config field at all, so it has no row
+	// above; it is checked here because a module's routes are exactly the thing
+	// this test can check without copying them.
+	apiKeysMod, err := NewAPIKeysModule(maximalAPIKeyHandler(t))
+	if err != nil {
+		t.Fatalf("building the api-keys module: %v", err)
+	}
+	apiKeysMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("api-key pattern %q is absent from the router, so the branch gated by APIKeyRepo "+
+				"registered less than apiKeysModule.Routes() says it serves", pattern)
+		}
+	}))
+
+	hdMod, err := NewHDWalletsModule(maximalHDWalletHandler(t))
+	if err != nil {
+		t.Fatalf("building the hd-wallets module: %v", err)
+	}
+	hdMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("hd-wallet pattern %q is absent from the router, so setupRoutes registered less "+
+				"than hdWalletsModule.Routes() says it serves", pattern)
+		}
+	}))
+}
+
+// maximalAPIKeyHandler builds the handler the api-keys module wraps. ⚠️ Only its
+// route patterns are read here, never its behaviour, so the stub repository is
+// enough.
+func maximalAPIKeyHandler(t *testing.T) *handler.APIKeyHandler {
+	t.Helper()
+	h, err := handler.NewAPIKeyHandler(&stubAPIKeyRepo{}, testLogger(), nil)
+	if err != nil {
+		t.Fatalf("building the api-key handler: %v", err)
+	}
+	return h
+}
+
+// maximalHDWalletHandler builds the handler the hd-wallets module wraps, with
+// the same caveat.
+func maximalHDWalletHandler(t *testing.T) *evmhandler.HDWalletHandler {
+	t.Helper()
+	accessSvc, err := service.NewSignerAccessService(
+		&stubSignerOwnershipRepo{}, &stubSignerAccessRepo{}, &stubAPIKeyRepo{}, nil, testLogger())
+	if err != nil {
+		t.Fatalf("building the signer access service: %v", err)
+	}
+	h, err := evmhandler.NewHDWalletHandler(&stubSignerManager{}, accessSvc, testLogger(), nil)
+	if err != nil {
+		t.Fatalf("building the hd wallet handler: %v", err)
+	}
+	return h
 }
 
 // patternCollector is a RouteRegistrar that only reports what it was asked to

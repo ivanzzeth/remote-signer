@@ -221,7 +221,7 @@ func TestCoverage_WriteSettingsJSON_WriteError(t *testing.T) {
 }
 
 func TestCoverage_ListAPIKeyNames_Success(t *testing.T) {
-	mock := newMockAPIKeyRepo()
+	mock := NewMockAPIKeyRepo()
 	h, err := NewAPIKeyHandler(mock, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/names", nil).WithContext(adminCtx(t))
@@ -231,8 +231,8 @@ func TestCoverage_ListAPIKeyNames_Success(t *testing.T) {
 }
 
 func TestCoverage_ListAPIKeyNames_RepoError(t *testing.T) {
-	mock := newMockAPIKeyRepo()
-	mock.listFn = func(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
+	mock := NewMockAPIKeyRepo()
+	mock.ListFn = func(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
 		return nil, fmt.Errorf("list failed")
 	}
 	h, err := NewAPIKeyHandler(mock, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)

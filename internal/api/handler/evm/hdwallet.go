@@ -59,8 +59,21 @@ func NewHDWalletHandler(signerManager evmchain.SignerManager, accessService *ser
 }
 
 // --- Request/Response types ---
+//
+// ⚠️ Exported, and the reason is not style — it is the same one wallet.go
+// records for its seven (proposal §1.4, §3.3). These are the HD-wallet API's
+// wire contract, and the plan they belong to turns each into a schema name in a
+// generated OpenAPI document and from there into a type name in the generated Go
+// and TypeScript SDKs. A generator has nothing to call an unexported type: it
+// invents an unreadable name or inlines an anonymous schema, and either way the
+// SDK stops matching the handler by name.
+//
+// ⛔ The JSON tags are the actual contract and not one of them changed here. A
+// field name a client parses lives in the tag, not in the Go identifier — so
+// this rename is invisible on the wire.
 
-type createHDWalletRequest struct {
+// CreateHDWalletRequest is the body of POST /api/v1/evm/hd-wallets.
+type CreateHDWalletRequest struct {
 	Action   string `json:"action"` // "create" or "import"
 	Password string `json:"password"`
 
@@ -72,17 +85,19 @@ type createHDWalletRequest struct {
 	EntropyBits int `json:"entropy_bits,omitempty"`
 }
 
-type hdWalletResponse struct {
+// HDWalletResponse is one HD wallet as the API returns it.
+type HDWalletResponse struct {
 	PrimaryAddress string               `json:"primary_address"`
 	BasePath       string               `json:"base_path"`
 	DerivedCount   int                  `json:"derived_count"`
-	Derived        []signerInfoResponse `json:"derived,omitempty"`
+	Derived        []SignerInfoResponse `json:"derived,omitempty"`
 	Locked         bool                 `json:"locked"`
 	DisplayName    string               `json:"display_name,omitempty"`
 	Tags           []string             `json:"tags,omitempty"`
 }
 
-type signerInfoResponse struct {
+// SignerInfoResponse is one derived signer as the HD-wallet endpoints return it.
+type SignerInfoResponse struct {
 	Address string `json:"address"`
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
@@ -97,87 +112,142 @@ type signerInfoResponse struct {
 	HDDerivationIndex *uint32 `json:"hd_derivation_index,omitempty"`
 }
 
-type deriveRequest struct {
+// DeriveRequest is the body of POST /api/v1/evm/hd-wallets/{address}/derive:
+// either Index alone, or Start plus Count.
+type DeriveRequest struct {
 	Index *uint32 `json:"index,omitempty"`
 	Start *uint32 `json:"start,omitempty"`
 	Count *uint32 `json:"count,omitempty"`
 }
 
-type listHDWalletsResponse struct {
-	Wallets []hdWalletResponse `json:"wallets"`
+// ListHDWalletsResponse is the body of GET /api/v1/evm/hd-wallets.
+type ListHDWalletsResponse struct {
+	Wallets []HDWalletResponse `json:"wallets"`
 }
 
-type listDerivedResponse struct {
-	Derived []signerInfoResponse `json:"derived"`
+// ListDerivedResponse is the body of GET /api/v1/evm/hd-wallets/{address}/derived.
+type ListDerivedResponse struct {
+	Derived []SignerInfoResponse `json:"derived"`
 }
 
-type deriveResponse struct {
-	Derived []signerInfoResponse `json:"derived"`
+// DeriveResponse is the body of POST /api/v1/evm/hd-wallets/{address}/derive.
+type DeriveResponse struct {
+	Derived []SignerInfoResponse `json:"derived"`
 }
 
-// --- Handlers ---
+// --- Handler entry points ---
+//
+// # One exported function per endpoint (proposal S4, copying S3's shape)
+//
+// These four replace ServeHTTP, which took r.URL.Path apart with
+// TrimPrefix/TrimSuffix/SplitN and fanned out into them. The registration that
+// used to hide them behind two prefix patterns plus two method-scoped ones is
+// internal/api/module_hdwallets.go, and it now names each one.
+//
+// ⭐ Why both halves had to move at once (proposal §1.3): two of these four
+// patterns already carried an {address} wildcard, and the handler still ignored
+// it and cut the path itself — so the wildcard was decorative and the same
+// function stayed reachable from the prefix pattern. The address is read through
+// r.PathValue here, which only a matching pattern can populate.
+//
+// ⛔ HDWalletHandler is deliberately no longer an http.Handler. It has no
+// ServeHTTP, so there is no way to hand the whole HD-wallet surface to one
+// pattern again by accident.
+//
+// ⚠️ Every guard ServeHTTP ran before dispatching is still run, in the same
+// order and with the same words and status codes — see requireAPIKey and
+// resolveAccessibleWallet. Only the dispatch left.
 
-// ServeHTTP handles /api/v1/evm/hd-wallets
-func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// ListWallets serves GET /api/v1/evm/hd-wallets.
+func (h *HDWalletHandler) ListWallets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAPIKey(w, r); !ok {
+		return
+	}
+	h.listWallets(w, r)
+}
+
+// CreateOrImport serves POST /api/v1/evm/hd-wallets.
+//
+// ⛔ The admin check is the one ServeHTTP made for POST and it stays in the
+// handler rather than moving to the route. The route carries no permission at
+// all (internal/api/module_hdwallets.go records why), so removing this check
+// would open creation to every authenticated key — which is a strictly larger
+// hole than the one already recorded there.
+func (h *HDWalletHandler) CreateOrImport(w http.ResponseWriter, r *http.Request) {
+	apiKey, ok := h.requireAPIKey(w, r)
+	if !ok {
+		return
+	}
+	if !apiKey.IsAdmin() {
+		respond.Error(w, "admin access required", http.StatusForbidden, h.logger)
+		return
+	}
+	h.createOrImport(w, r)
+}
+
+// Derive serves POST /api/v1/evm/hd-wallets/{address}/derive.
+func (h *HDWalletHandler) Derive(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.resolveAccessibleWallet(w, r)
+	if !ok {
+		return
+	}
+	h.deriveAddresses(w, r, address)
+}
+
+// ListDerived serves GET /api/v1/evm/hd-wallets/{address}/derived.
+func (h *HDWalletHandler) ListDerived(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.resolveAccessibleWallet(w, r)
+	if !ok {
+		return
+	}
+	h.listDerived(w, r, address)
+}
+
+// requireAPIKey is the 401 ServeHTTP answered at its top, before it looked at
+// the path at all. ⚠️ It is not redundant with the middleware chain: these
+// routes are AuthenticatedOnly, so a request reaching them has a key — but the
+// handler is also called directly by tests, and listWallets dereferences the key
+// without checking it.
+func (h *HDWalletHandler) requireAPIKey(w http.ResponseWriter, r *http.Request) (*types.APIKey, bool) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
-		return
+		return nil, false
+	}
+	return apiKey, true
+}
+
+// resolveAccessibleWallet is the block ServeHTTP ran for every path with an
+// address in it, called by each of the two {address} routes instead.
+//
+// ⛔ Its four answers are copied verbatim and their order matters, because each
+// one is what a caller learns: no API key is 401; a first segment that is not an
+// EVM address is 400 "invalid path or address"; a failing access lookup is 500;
+// and a wallet this key may not touch is 403 "not authorized for this HD
+// wallet". ⚠️ Reordering the access check, or turning the 403 into a 404, is a
+// security change wearing a refactor's clothes.
+func (h *HDWalletHandler) resolveAccessibleWallet(w http.ResponseWriter, r *http.Request) (string, bool) {
+	apiKey, ok := h.requireAPIKey(w, r)
+	if !ok {
+		return "", false
 	}
 
-	// Strip prefix to get the rest of the path
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/hd-wallets")
-	path = strings.TrimSuffix(path, "/")
-
-	switch {
-	case path == "" || path == "/":
-		switch r.Method {
-		case http.MethodPost:
-			// Create/import requires admin
-			if !apiKey.IsAdmin() {
-				respond.Error(w, "admin access required", http.StatusForbidden, h.logger)
-				return
-			}
-			h.createOrImport(w, r)
-		case http.MethodGet:
-			h.listWallets(w, r)
-		default:
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		}
-	default:
-		// Parse: /{address}/derive or /{address}/derived
-		parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 2)
-		if len(parts) < 1 || !validate.IsValidEthereumAddress(parts[0]) {
-			respond.Error(w, "invalid path or address", http.StatusBadRequest, h.logger)
-			return
-		}
-		address := parts[0]
-
-		// Per-wallet actions: check ownership/access
-		allowed, accessErr := h.accessService.CheckAccess(r.Context(), apiKey.ID, address)
-		if accessErr != nil {
-			respond.Error(w, "failed to check access", http.StatusInternalServerError, h.logger)
-			return
-		}
-		if !allowed {
-			respond.Error(w, "not authorized for this HD wallet", http.StatusForbidden, h.logger)
-			return
-		}
-
-		action := ""
-		if len(parts) == 2 {
-			action = parts[1]
-		}
-
-		switch action {
-		case "derive":
-			h.deriveAddresses(w, r, address)
-		case "derived":
-			h.listDerived(w, r, address)
-		default:
-			respond.Error(w, "unknown action", http.StatusNotFound, h.logger)
-		}
+	address := r.PathValue("address")
+	if !validate.IsValidEthereumAddress(address) {
+		respond.Error(w, "invalid path or address", http.StatusBadRequest, h.logger)
+		return "", false
 	}
+
+	allowed, accessErr := h.accessService.CheckAccess(r.Context(), apiKey.ID, address)
+	if accessErr != nil {
+		respond.Error(w, "failed to check access", http.StatusInternalServerError, h.logger)
+		return "", false
+	}
+	if !allowed {
+		respond.Error(w, "not authorized for this HD wallet", http.StatusForbidden, h.logger)
+		return "", false
+	}
+	return address, true
 }
 
 func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +280,7 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req createHDWalletRequest
+	var req CreateHDWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
@@ -330,8 +400,8 @@ func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := listHDWalletsResponse{
-		Wallets: make([]hdWalletResponse, len(filtered)),
+	resp := ListHDWalletsResponse{
+		Wallets: make([]HDWalletResponse, len(filtered)),
 	}
 	for i := range filtered {
 		resp.Wallets[i] = h.hdWalletResponse(r.Context(), &filtered[i])
@@ -352,7 +422,7 @@ func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var req deriveRequest
+	var req DeriveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
@@ -409,7 +479,7 @@ func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request
 		h.auditLogger.LogHDWalletDerived(r.Context(), keyID, r.RemoteAddr, primaryAddr, len(derived))
 	}
 
-	resp := deriveResponse{
+	resp := DeriveResponse{
 		Derived: toSignerInfoResponseList(derived),
 	}
 	respond.JSON(w, resp, http.StatusOK, h.logger)
@@ -439,7 +509,7 @@ func (h *HDWalletHandler) listDerived(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 
-	resp := listDerivedResponse{
+	resp := ListDerivedResponse{
 		Derived: toSignerInfoResponseList(derived),
 	}
 	respond.JSON(w, resp, http.StatusOK, h.logger)
@@ -447,8 +517,8 @@ func (h *HDWalletHandler) listDerived(w http.ResponseWriter, r *http.Request, pr
 
 // --- Helpers ---
 
-func (h *HDWalletHandler) hdWalletResponse(ctx context.Context, info *evmchain.HDWalletInfo) hdWalletResponse {
-	out := hdWalletResponse{
+func (h *HDWalletHandler) hdWalletResponse(ctx context.Context, info *evmchain.HDWalletInfo) HDWalletResponse {
+	out := HDWalletResponse{
 		PrimaryAddress: info.PrimaryAddress,
 		BasePath:       info.BasePath,
 		DerivedCount:   info.DerivedCount,
@@ -462,10 +532,10 @@ func (h *HDWalletHandler) hdWalletResponse(ctx context.Context, info *evmchain.H
 	return out
 }
 
-func toSignerInfoResponseList(infos []types.SignerInfo) []signerInfoResponse {
-	result := make([]signerInfoResponse, len(infos))
+func toSignerInfoResponseList(infos []types.SignerInfo) []SignerInfoResponse {
+	result := make([]SignerInfoResponse, len(infos))
 	for i, info := range infos {
-		result[i] = signerInfoResponse{
+		result[i] = SignerInfoResponse{
 			Address:           info.Address,
 			Type:              info.Type,
 			Enabled:           info.Enabled,

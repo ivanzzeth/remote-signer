@@ -63,7 +63,7 @@ func TestSignerHandler_ReadOnly_ListAllowed(t *testing.T) {
 func TestHDWalletHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	sm := newMockSignerManagerForHD()
 
-	accessSvc := newTestAccessService(t)
+	accessSvc := NewTestAccessService(t)
 	h, err := NewHDWalletHandler(sm, accessSvc, slog.Default(), func() bool { return true })
 	require.NoError(t, err)
 
@@ -72,7 +72,11 @@ func TestHDWalletHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	// ⚠️ Calls the endpoint function, not a mux. This test is about the
+	// read-only guard, not about which path reaches it — the routed shape of
+	// these endpoints is pinned in hdwallet_routes_test.go. S4 deleted
+	// ServeHTTP, so what used to be "the handler" is now this one function.
+	h.CreateOrImport(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "signers_api_readonly")
@@ -89,16 +93,21 @@ func TestHDWalletHandler_ReadOnly_DeriveBlocked(t *testing.T) {
 			Status:        types.SignerOwnershipActive,
 		},
 	}
-	accessSvc := newTestAccessServiceWithOwnerships(t, ownerships)
+	accessSvc := NewTestAccessServiceWithOwnerships(t, ownerships)
 	h, err := NewHDWalletHandler(sm, accessSvc, slog.Default(), func() bool { return true })
 	require.NoError(t, err)
 
 	body := `{"index":1}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/hd-wallets/0x0000000000000000000000000000000000000001/derive", bytes.NewBufferString(body))
 	req = req.WithContext(adminCtx())
+	// ⚠️ SetPathValue is what the mux would have done for the {address}
+	// wildcard. It is here because this test calls the endpoint function
+	// directly (see the note in ReadOnly_CreateBlocked); ⛔ it is not the
+	// pattern for route tests — those go through the production registration.
+	req.SetPathValue("address", "0x0000000000000000000000000000000000000001")
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.Derive(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "signers_api_readonly")

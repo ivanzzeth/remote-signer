@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/respond"
@@ -120,37 +119,49 @@ func (h *APIKeyHandler) SetAccessService(svc AccessServiceForKeyDelete) {
 	h.accessService = svc
 }
 
-// ServeHTTP handles /api/v1/api-keys (GET list, POST create).
-func (h *APIKeyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		h.listAPIKeys(w, r)
-	case http.MethodPost:
-		h.createAPIKey(w, r)
-	default:
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-	}
+// --- Handler entry points ---
+//
+// # One exported function per endpoint (proposal S4, copying S3's shape)
+//
+// These five replace two: ServeHTTP, which switched on r.Method for
+// /api/v1/api-keys, and ServeKeyHTTP, which cut the id out of r.URL.Path with
+// TrimPrefix and then switched on the method again. The registration that used
+// to hide them behind two method-less prefix patterns is
+// internal/api/module_apikeys.go, and it now names each one.
+//
+// ⭐ Why both halves had to move at once (proposal §1.3): registering
+// `GET /api/v1/api-keys/{id}` while the handler still read r.URL.Path would
+// leave the wildcard decorative — the handler would keep working when reached by
+// some other pattern, and the handler-path-dispatch gate would not move. The id
+// is read through r.PathValue here, which only a matching pattern can populate.
+//
+// ⛔ APIKeyHandler is deliberately no longer an http.Handler. It has no
+// ServeHTTP, so there is no way to hand the whole API-key surface to one pattern
+// again by accident.
+
+// ListAPIKeys serves GET /api/v1/api-keys.
+func (h *APIKeyHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
+	h.listAPIKeys(w, r)
 }
 
-// ServeKeyHTTP handles /api/v1/api-keys/{id} (GET, PUT, DELETE).
-func (h *APIKeyHandler) ServeKeyHTTP(w http.ResponseWriter, r *http.Request) {
-	// Extract key ID from path: /api/v1/api-keys/{id}
-	id := strings.TrimPrefix(r.URL.Path, "/api/v1/api-keys/")
-	if id == "" {
-		respond.Error(w, "API key ID is required", http.StatusBadRequest, h.logger)
-		return
-	}
+// CreateAPIKey serves POST /api/v1/api-keys.
+func (h *APIKeyHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	h.createAPIKey(w, r)
+}
 
-	switch r.Method {
-	case http.MethodGet:
-		h.getAPIKey(w, r, id)
-	case http.MethodPut:
-		h.updateAPIKey(w, r, id)
-	case http.MethodDelete:
-		h.deleteAPIKey(w, r, id)
-	default:
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-	}
+// GetAPIKey serves GET /api/v1/api-keys/{id}.
+func (h *APIKeyHandler) GetAPIKey(w http.ResponseWriter, r *http.Request) {
+	h.getAPIKey(w, r, r.PathValue("id"))
+}
+
+// UpdateAPIKey serves PUT /api/v1/api-keys/{id}.
+func (h *APIKeyHandler) UpdateAPIKey(w http.ResponseWriter, r *http.Request) {
+	h.updateAPIKey(w, r, r.PathValue("id"))
+}
+
+// DeleteAPIKey serves DELETE /api/v1/api-keys/{id}.
+func (h *APIKeyHandler) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
+	h.deleteAPIKey(w, r, r.PathValue("id"))
 }
 
 // listAPIKeys handles GET /api/v1/api-keys.

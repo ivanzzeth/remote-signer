@@ -217,7 +217,7 @@ func TestWithPresetRequireApproval(t *testing.T) {
 
 func TestWithPresetAPIKeyRepo(t *testing.T) {
 	h := &PresetHandler{}
-	mockRepo := newMockAPIKeyRepo()
+	mockRepo := NewMockAPIKeyRepo()
 	WithPresetAPIKeyRepo(mockRepo)(h)
 	assert.Same(t, mockRepo, h.apiKeyRepo)
 }
@@ -253,7 +253,7 @@ func TestWithTemplateRequireApproval(t *testing.T) {
 
 func TestWithTemplateAPIKeyRepo(t *testing.T) {
 	h := &TemplateHandler{}
-	mockRepo := newMockAPIKeyRepo()
+	mockRepo := NewMockAPIKeyRepo()
 	WithTemplateAPIKeyRepo(mockRepo)(h)
 	assert.Same(t, mockRepo, h.apiKeyRepo)
 }

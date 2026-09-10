@@ -262,7 +262,7 @@ func TestResolveInstances_RBACErrorOnInvalidAppliedTo(t *testing.T) {
 	seedResolveTemplate(t, env, "evm/t1", "T1")
 
 	// Wire apiKeyRepo so that applied_to validation runs
-	mockKeyRepo := newMockAPIKeyRepo()
+	mockKeyRepo := NewMockAPIKeyRepo()
 	env.handler.apiKeyRepo = mockKeyRepo
 
 	preset := &types.RulePreset{ID: "evm/p", Name: "P"}
