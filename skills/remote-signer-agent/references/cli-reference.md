@@ -18,13 +18,41 @@ Every remote API command shares these persistent flags (also configurable via en
 | `--url` | `REMOTE_SIGNER_URL` | Server URL (default: `https://localhost:8548`) |
 | `--api-key-id` | `REMOTE_SIGNER_API_KEY_ID` | API key ID (required) |
 | `--api-key-file` | `REMOTE_SIGNER_API_KEY_FILE` | Path to Ed25519 private key PEM |
-| `--api-key-keystore` | `REMOTE_SIGNER_API_KEY_KEYSTORE` | Path to encrypted keystore (mutually exclusive with `--api-key-file`) |
+| `--api-key-keystore` | `REMOTE_SIGNER_API_KEY_KEYSTORE` | Path to encrypted keystore |
+| `--api-key-base64` | `REMOTE_SIGNER_API_KEY_BASE64` | Private key as base64 — for deployments where mounting a file is awkward |
 | `--output` / `-o` | — | Output format: `table` (default), `json`, `yaml` |
 | `--json` | — | Shorthand for `-o json` |
 
-Auth auto-discovery: when neither `--api-key-file` nor `--api-key-keystore` is set, the CLI auto-discovers:
+The three credential flags are **mutually exclusive** — pass exactly one, or none
+and let auto-discovery run. Passing two is an error naming both, rather than one
+silently winning.
+
+Auth auto-discovery: when no credential flag is set, the CLI auto-discovers:
 - For `--api-key-id admin`: looks for `admin.keystore.json` in `~/.remote-signer/apikeys/`
 - For other IDs: looks for `<id>.key.priv` PEM in `~/.remote-signer/apikeys/`
+
+### Passing the key as base64
+
+For a container or CI job where there is no file to mount, `--api-key-base64`
+accepts any of three shapes and refuses anything else:
+
+| Shape | Where you get it |
+|---|---|
+| A PEM file's body (PKCS#8 DER) | `grep -v -- ----- agent.key.priv \| tr -d '\n'` |
+| A raw 32-byte seed | Whatever produced the key |
+| A raw 64-byte private key | Whatever produced the key |
+
+```bash
+export REMOTE_SIGNER_API_KEY_BASE64=$(grep -v -- ----- ~/.remote-signer/apikeys/agent.key.priv | tr -d '\n')
+./remote-signer --url http://127.0.0.1:8548 --api-key-id agent evm rule list
+```
+
+⚠️ **Prefer the environment variable.** A key passed as a flag lands in shell
+history and in `ps` output for every user on the machine.
+
+⛔ A base64 blob the CLI cannot identify is an error naming what it saw, never a
+guess. Guessing here produces a valid-looking key that signs things nobody can
+verify, and the only symptom is authentication failing for no stated reason.
 
 **Local HTTP daemon (TLS off):** add `--url http://127.0.0.1:8548 --tls-skip-verify`. Do **not** pass `--config` on API commands — `--config` is only for `server start` and offline `config`/`preset` subcommands.
 

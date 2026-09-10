@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ivanzzeth/ethsig/keystore"
 	"github.com/ivanzzeth/remote-signer/internal/homepath"
@@ -20,6 +21,7 @@ var (
 	flagAPIKeyID          string
 	flagAPIKeyFile        string
 	flagAPIKeyKeystore    string
+	flagAPIKeyBase64      string
 	flagAPIKeyPasswordEnv string
 	flagTLSCA             string
 	flagTLSCert           string
@@ -52,6 +54,10 @@ func registerAuthFlags(rootCmd *cobra.Command) {
 	pf.StringVar(&flagAPIKeyID, "api-key-id", os.Getenv("REMOTE_SIGNER_API_KEY_ID"), "API key ID for authentication (env: REMOTE_SIGNER_API_KEY_ID)")
 	pf.StringVar(&flagAPIKeyFile, "api-key-file", resolveAPIKeyFileDefault(), "Path to Ed25519 private key PEM file (env: REMOTE_SIGNER_API_KEY_FILE)")
 	pf.StringVar(&flagAPIKeyKeystore, "api-key-keystore", os.Getenv("REMOTE_SIGNER_API_KEY_KEYSTORE"), "Path to Ed25519 encrypted keystore file (mutually exclusive with --api-key-file) (env: REMOTE_SIGNER_API_KEY_KEYSTORE)")
+	// ⚠️ A key passed as a flag lands in shell history and in `ps` output for
+	// every user on the box. The environment variable is the path to prefer,
+	// and the one a container or CI job would use anyway.
+	pf.StringVar(&flagAPIKeyBase64, "api-key-base64", os.Getenv("REMOTE_SIGNER_API_KEY_BASE64"), "Ed25519 private key as base64 — a PEM file's body, a 32-byte seed, or a 64-byte key. Prefer the env var: a flag lands in shell history (env: REMOTE_SIGNER_API_KEY_BASE64)")
 	pf.StringVar(&flagAPIKeyPasswordEnv, "api-key-password-env", "", "Environment variable name containing the keystore password (for CI; default: interactive prompt)")
 	pf.StringVar(&flagTLSCA, "tls-ca", os.Getenv("REMOTE_SIGNER_TLS_CA"), "CA certificate for TLS verification (env: REMOTE_SIGNER_TLS_CA)")
 	pf.StringVar(&flagTLSCert, "tls-cert", os.Getenv("REMOTE_SIGNER_TLS_CERT"), "Client certificate for mTLS (env: REMOTE_SIGNER_TLS_CERT)")
@@ -79,8 +85,24 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 	if flagAPIKeyID == "" {
 		return nil, fmt.Errorf("--api-key-id is required")
 	}
-	if flagAPIKeyFile != "" && flagAPIKeyKeystore != "" {
-		return nil, fmt.Errorf("--api-key-file and --api-key-keystore are mutually exclusive")
+	// ⛔ At most one credential source. Silently preferring one over another
+	// means an operator who set the env var and then passed a flag gets
+	// authenticated as whichever the code happened to check first.
+	var given []string
+	for _, c := range []struct {
+		name  string
+		value string
+	}{
+		{"--api-key-file", flagAPIKeyFile},
+		{"--api-key-keystore", flagAPIKeyKeystore},
+		{"--api-key-base64", flagAPIKeyBase64},
+	} {
+		if c.value != "" {
+			given = append(given, c.name)
+		}
+	}
+	if len(given) > 1 {
+		return nil, fmt.Errorf("%s are mutually exclusive — pass exactly one", strings.Join(given, ", "))
 	}
 
 	keystorePath := flagAPIKeyKeystore
@@ -93,7 +115,7 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 	// legacy <id>.key.priv PEM. This is the "just works" path the operator
 	// wants — `--api-key-id admin` is enough on a daemon home set up by
 	// the post-cleanup binary.
-	if keystorePath == "" && pemPath == "" {
+	if keystorePath == "" && pemPath == "" && flagAPIKeyBase64 == "" {
 		discovered, discErr := discoverDefaultCredential(flagAPIKeyID)
 		if discErr != nil {
 			return nil, discErr
@@ -111,13 +133,17 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 	}
 
 	var privKey ed25519.PrivateKey
-	if keystorePath != "" {
+	switch {
+	case flagAPIKeyBase64 != "":
+		// Handed straight to the client, which accepts a PEM body (PKCS#8 DER),
+		// a raw seed or a raw key, and refuses anything it cannot identify.
+	case keystorePath != "":
 		key, err := loadEd25519FromKeystore(cmd, keystorePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load key from keystore %s: %w", keystorePath, err)
 		}
 		privKey = key
-	} else {
+	default:
 		key, err := loadEd25519PrivateKey(pemPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load private key from %s: %w", pemPath, err)
@@ -126,13 +152,15 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 	}
 
 	cfg := client.Config{
-		BaseURL:       flagURL,
-		APIKeyID:      flagAPIKeyID,
-		PrivateKey:    privKey,
-		TLSCAFile:     flagTLSCA,
-		TLSCertFile:   flagTLSCert,
-		TLSKeyFile:    flagTLSKey,
-		TLSSkipVerify: flagTLSSkipVerify,
+		BaseURL:    flagURL,
+		APIKeyID:   flagAPIKeyID,
+		PrivateKey: privKey,
+		// Empty unless --api-key-base64 was given; the client parses it.
+		PrivateKeyBase64: flagAPIKeyBase64,
+		TLSCAFile:        flagTLSCA,
+		TLSCertFile:      flagTLSCert,
+		TLSKeyFile:       flagTLSKey,
+		TLSSkipVerify:    flagTLSSkipVerify,
 	}
 
 	return client.NewClient(cfg)

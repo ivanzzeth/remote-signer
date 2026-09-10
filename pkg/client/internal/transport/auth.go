@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -53,16 +54,7 @@ func ParsePrivateKey(raw ed25519.PrivateKey, hexKey, base64Key string) (ed25519.
 	}
 
 	if base64Key != "" {
-		derBytes, err := base64.StdEncoding.DecodeString(base64Key)
-		if err != nil {
-			return nil, fmt.Errorf("invalid PrivateKeyBase64: %w", err)
-		}
-		if len(derBytes) < ed25519.SeedSize {
-			return nil, fmt.Errorf("invalid base64 private key length: got %d bytes, need at least %d",
-				len(derBytes), ed25519.SeedSize)
-		}
-		seed := derBytes[len(derBytes)-ed25519.SeedSize:]
-		return ed25519.NewKeyFromSeed(seed), nil
+		return parseBase64PrivateKey(base64Key)
 	}
 
 	return nil, fmt.Errorf("either PrivateKey, PrivateKeyHex, or PrivateKeyBase64 is required")
@@ -76,4 +68,52 @@ func GenerateNonce() string {
 		return fmt.Sprintf("%x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// parseBase64PrivateKey decodes a base64 Ed25519 private key in any of the three
+// forms an operator actually has on hand: the body of a PEM file (PKCS#8 DER),
+// a raw 32-byte seed, or a raw 64-byte private key.
+//
+// ⛔ It refuses anything it cannot identify rather than guessing. The previous
+// implementation took the *last* 32 bytes as the seed, which is right for
+// PKCS#8 and for a bare seed, and silently wrong for a raw 64-byte key — those
+// last 32 bytes are the public half, so it produced a completely different,
+// valid-looking key. The symptom was authentication failing with an error that
+// said nothing about the key having been misread.
+func parseBase64PrivateKey(base64Key string) (ed25519.PrivateKey, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(base64Key))
+	if err != nil {
+		return nil, fmt.Errorf("invalid PrivateKeyBase64: not valid base64: %w", err)
+	}
+
+	switch len(raw) {
+	case ed25519.SeedSize: // 32: raw seed
+		return ed25519.NewKeyFromSeed(raw), nil
+
+	case ed25519.PrivateKeySize: // 64: seed || public key
+		// ⚠️ Derive the public half from the seed and compare. ⛔ Not
+		// key.Public() — Go returns a copy of priv[32:] rather than
+		// recomputing, so comparing that against priv[32:] is a tautology that
+		// accepts any 64 bytes. (Caught by the test below, which feeds it 64
+		// zero bytes.)
+		derived := ed25519.NewKeyFromSeed(raw[:ed25519.SeedSize])
+		if !ed25519.PublicKey(raw[ed25519.SeedSize:]).Equal(derived.Public()) {
+			return nil, fmt.Errorf("invalid PrivateKeyBase64: 64-byte key whose public half does not match its seed")
+		}
+		return derived, nil
+	}
+
+	// Anything else: the body of a PEM file. Parse it as PKCS#8 rather than
+	// slicing bytes off the end and hoping.
+	parsed, err := x509.ParsePKCS8PrivateKey(raw)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"invalid PrivateKeyBase64: %d bytes is neither a %d-byte seed, a %d-byte key, nor PKCS#8 DER (%w)",
+			len(raw), ed25519.SeedSize, ed25519.PrivateKeySize, err)
+	}
+	key, ok := parsed.(ed25519.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("invalid PrivateKeyBase64: PKCS#8 key is %T, want ed25519", parsed)
+	}
+	return key, nil
 }
