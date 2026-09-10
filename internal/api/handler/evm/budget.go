@@ -278,7 +278,19 @@ func (h *BudgetListHandler) handleCreate(w http.ResponseWriter, r *http.Request,
 // annotate enriches a budget row with rule/simulation metadata and
 // performs per-key authorization. Returns (entry, true) when the caller
 // is allowed to see the row, (zero, false) otherwise.
-func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, b *types.RuleBudget, siblingUnits []string) (BudgetEntry, bool) {
+// annotateBudget turns a budget row into a response entry and decides whether
+// the caller may see it at all.
+//
+// ⚠️ This lived twice — once per handler — including the ownership check at the
+// end. Two copies of "who may see this row" is the kind of pair that drifts
+// into one handler leaking what the other hides, and the two had already
+// drifted cosmetically: one formatted timestamps with time.RFC3339 and the
+// other with the same layout spelled out by hand.
+//
+// siblingUnits differs by caller: the list handler computes it once for the
+// whole page, the item handler per row. That is the only thing that differed
+// in behaviour.
+func annotateBudget(ctx context.Context, ruleRepo storage.RuleRepository, apiKey *types.APIKey, b *types.RuleBudget, siblingUnits []string) (BudgetEntry, bool) {
 	entry := BudgetEntry{
 		ID:         b.ID,
 		RuleID:     string(b.RuleID),
@@ -290,8 +302,8 @@ func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		MaxTxCount: b.MaxTxCount,
 		AlertPct:   b.AlertPct,
 		AlertSent:  b.AlertSent,
-		CreatedAt:  b.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:  b.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:  b.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:  b.UpdatedAt.Format(time.RFC3339),
 	}
 
 	// Synthetic simulation budget. The rule_id has the form
@@ -312,7 +324,7 @@ func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 	// Real rule. Look up so we can show the human name + enforce
 	// ownership for agents.
 	entry.Kind = BudgetKindRule
-	rule, err := h.ruleRepo.Get(ctx, b.RuleID)
+	rule, err := ruleRepo.Get(ctx, b.RuleID)
 	if err != nil {
 		// Orphaned budget (rule deleted, row left behind) — still show
 		// to admin/dev so they can clean it up; hide from others.
@@ -336,6 +348,10 @@ func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		return entry, true
 	}
 	return BudgetEntry{}, false
+}
+
+func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, b *types.RuleBudget, siblingUnits []string) (BudgetEntry, bool) {
+	return annotateBudget(ctx, h.ruleRepo, apiKey, b, siblingUnits)
 }
 
 // annotateFromRule is a fast-path used by handleCreate where we already
@@ -673,51 +689,7 @@ func (h *BudgetItemHandler) loadBudget(w http.ResponseWriter, r *http.Request, i
 // authorization logic is identical so callers see consistent visibility
 // across list and detail.
 func (h *BudgetItemHandler) annotate(ctx context.Context, apiKey *types.APIKey, b *types.RuleBudget) (BudgetEntry, bool) {
-	entry := BudgetEntry{
-		ID:         b.ID,
-		RuleID:     string(b.RuleID),
-		Unit:       b.Unit,
-		MaxTotal:   b.MaxTotal,
-		MaxPerTx:   b.MaxPerTx,
-		Spent:      b.Spent,
-		TxCount:    b.TxCount,
-		MaxTxCount: b.MaxTxCount,
-		AlertPct:   b.AlertPct,
-		AlertSent:  b.AlertSent,
-		CreatedAt:  b.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:  b.UpdatedAt.Format(time.RFC3339),
-	}
-	siblingUnits := h.siblingUnits(ctx, b.RuleID)
-	if strings.HasPrefix(string(b.RuleID), "sim:") {
-		entry.Kind = BudgetKindSimulation
-		entry.SignerAddress = strings.TrimPrefix(string(b.RuleID), "sim:")
-		if !apiKey.IsAdmin() && !apiKey.IsDev() {
-			return BudgetEntry{}, false
-		}
-		applyBudgetUX(&entry, nil, b, siblingUnits)
-		return entry, true
-	}
-	entry.Kind = BudgetKindRule
-	rule, err := h.ruleRepo.Get(ctx, b.RuleID)
-	if err != nil {
-		if !apiKey.IsAdmin() && !apiKey.IsDev() {
-			return BudgetEntry{}, false
-		}
-		applyBudgetUX(&entry, nil, b, siblingUnits)
-		return entry, true
-	}
-	entry.RuleName = rule.Name
-	entry.RuleType = string(rule.Type)
-	entry.RuleMode = string(rule.Mode)
-	entry.RuleOwner = rule.Owner
-	applyBudgetUX(&entry, rule, b, siblingUnits)
-	if apiKey.IsAdmin() || apiKey.IsDev() {
-		return entry, true
-	}
-	if rule.Owner == apiKey.ID {
-		return entry, true
-	}
-	return BudgetEntry{}, false
+	return annotateBudget(ctx, h.ruleRepo, apiKey, b, h.siblingUnits(ctx, b.RuleID))
 }
 
 func (h *BudgetItemHandler) siblingUnits(ctx context.Context, ruleID types.RuleID) []string {
