@@ -8,6 +8,34 @@
 
 ---
 
+## 0. 落地状态与订正（2026-09-10）
+
+⛔ **§1 是写作当时的快照，现在有几处已经不成立** —— 保留原文是为了让后来的人看得出判断是怎么下的，但**别拿 §1 的数字当基线**，照下表重新推导。
+
+| 步 | 状态 | 提交 |
+|---|---|---|
+| S0 门禁 A（handler-path-dispatch） | ✅ 已落地 | `cb1a6d0` |
+| （插入）路由鉴权三件套 | ✅ 已落地 | `5e07343` |
+| （插入）构建产物门禁 + CI 真正执行门禁 | ✅ 已落地 | `f1ac7ba` |
+| S1① 循环展成 4 条字面量 | ✅ 已落地 | `c17665b` |
+| S1② `/api/v1/` JSON 404 兜底 | ✅ 已落地 | `c17665b` `97e4a29` |
+| S1③ maximal-config 冲突测试 | ✅ 已落地 | `8175a6b` |
+| S2 起 | ⬜ 未开始 | |
+
+### 实测订正 —— 以下几条是**量过的**，不是重读原文得出的
+
+1. ⛔ **`e2e/test_server.go` 不设的是 14 个字段，不是 8 个**（§1.5 / §2.2 / §4.1 都写着 8）。29 个字段里设了 15 个，留零的 14 个是：`AlertService`、`AuditRetentionDays`、`IPWhitelistConfig`、`IPWhitelistConfigForRead`、`Modules`、`PresetRegistry`、`RPCProvider`、`RequestRepo`、`RequestSimulationRepo`、`RuleEngine`、`SimulationRule`、`SolidityValidator`、`TemplateRegistry`、`TransactionService`。也就是说 rpc-proxy、broadcast、batch-sign、ACL、registry-refresh、request-simulation、module 这些分支在 e2e 里**一条都不注册**。缺口差不多是记录值的两倍。行号是 `639-656`，不是 `640-655`。
+
+2. ⛔ **那个 4 次循环并不是「谁都读不到」**（§5 的门禁 B 备注这么写）。`route-mutating-perm` 早就把它记成了**一行**不可解析的 `POST /api/v1/evm/signers/{address}/*` —— archcheck 的 `resolveString` 把循环变量渲染成 `*`。所以展开的真正收益不是「从看不见到看得见」，而是**从一行糊掉的记录变成四个各有其名的条目**：以后单独改其中任何一条都会各自变红。⚠️ 展开时基线会**双向变红**（新增 4 条 + 旧键失效），这是预期行为，不是出错。
+
+3. ⚠️ **`handlePerm` 已经不存在**，§1.1 那张「5 种形状」的表整体作废：现在所有注册都走唯一入口 `(*Router).handle(pattern, RouteAuth, h)`（见 `internal/api/route_auth.go`），而且**绕过它是门禁禁止的**。§1.1 的行号（`436-439`、`695-698` 等）全部失效。
+
+4. ⚠️ **「55 条 mux pattern」需要重新推导**。maximal config 下实际注册 51 条（50 真实 + 1 条测试探针），S1② 之后 `r.handle(` 是 51 处。门禁 C 的分母别直接用 55。
+
+5. ⚠️ **§2.3 的「405 语义不变」在 S1② 之后有一处例外**：method 不匹配的请求会落到 `/api/v1/` 拿到 404 而不是 405。⭐ 但只在**没有 `SettingsManager` 的 Router** 上可见 —— 有 Web UI 的部署里 `/` 早就把这类请求接走并回 HTML 200 了，本来就没有 405 可丢。
+
+---
+
 ## 1. 现状核对
 
 ### 1.1 路由注册的 5 种形状
@@ -89,7 +117,7 @@ $ grep -rn "PathValue" internal/ --include="*.go" | wc -l
 |---|---|---|
 | `http` 层（`scripts/lib/layers.sh:27`） | **76 个测试文件** | ⛔ **全部直接调 `h.ServeHTTP(rec, req)`**（`handler/evm/rule_crud_test.go:38-44`），不经过 mux |
 | `internal/api` 包级 | `route_permissions_test.go:41-45` | ⛔ **诱饵**：构造 `&Router{routePerms: ...}` 字面量塞 2 行，从不调 `setupRoutes` |
-| `e2e` 层 | 49 个文件 | ⛔ `e2e/test_server.go:640-655` 的 `RouterConfig` **不设** 8 个字段，这些条件路由一条都没跑到 |
+| `e2e` 层 | 49 个文件 | ⛔ `e2e/test_server.go:639-656` 的 `RouterConfig` **不设** 14 个字段（原文写 8，实测 14 —— 见 §0 订正 1），这些条件路由一条都没跑到 |
 
 ⭐ **`h.ServeHTTP` 直调既是最大的迁移成本，也是最好的施力点**：改成经真 mux 路由，1200+ 个既有 handler 测试**一次性变成路由测试**。见 §2.4。
 
@@ -119,16 +147,16 @@ $ grep -rn "PathValue" internal/ --include="*.go" | wc -l
 
 ⛔ **这是本提案最危险的一处**：冲突 panic 发生在 `NewRouter`（`router.go:168`），即**进程起不来**；而 `setupRoutes` 有 13 处 `if` 条件注册，所以**一个冲突可能只在某种配置下出现**。
 
-⭐ 对策（§6 的 S1，必须在任何拆解之前落地）：把 `RouterConfig` **每一个字段**都填非 nil 的桩，调 `NewRouter`，断言不 panic。今天既没有这个测试，`e2e/test_server.go:640-655` 也不覆盖。
+⭐ 对策（§6 的 S1，必须在任何拆解之前落地）：把 `RouterConfig` **每一个字段**都填非 nil 的桩，调 `NewRouter`，断言不 panic。✅ 已落地（`8175a6b`，`internal/api/router_maximal_config_test.go`），并用反射钉住「新加字段没填桩就红」——手写字面量只在没人加字段之前是 maximal 的。`e2e/test_server.go:639-656` 仍不覆盖（留零 14 个字段，见 §0 订正 1）。
 
 ### 2.3 ⚠️ 两个会被拆解改掉的对外行为
 
 | # | 现状 | 拆解后 | 处置 |
 |---|---|---|---|
-| 1 | `/api/v1/evm/rules/` 前缀吞掉 `/rules/a/b/c/d`，回 **400 JSON**（`rule.go:271-273`） | 不匹配多段 → 落到 `router.go:663` 的 SPA catch-all → **返回 HTML** | ⛔ 客户端可见回归。**S1 里补 `/api/v1/` 的 JSON 404 兜底** |
+| 1 | `/api/v1/evm/rules/` 前缀吞掉 `/rules/a/b/c/d`，回 **400 JSON**（`rule.go:271-273`） | 不匹配多段 → 落到 `router.go:663` 的 SPA catch-all → **返回 HTML** | ⛔ 客户端可见回归。**S1 里补 `/api/v1/` 的 JSON 404 兜底** —— ✅ 已落地 `c17665b`（`AuthenticatedOnly`，理由写在注册处）|
 | 2 | `%2F`：preset id 含 `/`，handler 用 `EscapedPath()` 手工解（`template.go:105`） | Go mux 按段解转义，`PathValue("id")` 直接得到 `evm/weth` | ⭐ 净收益。但 ⚠️ `rule.go:212` 的 `!strings.Contains(ruleID, "/")` 守卫语义会变 |
 
-⚠️ 405 语义**不变**。
+⚠️ 405 语义**基本不变**，但 S1② 之后有一处例外：method 不匹配的请求会落到 `/api/v1/` 兜底拿到 404 而不是 405。⭐ 只在**没有 `SettingsManager` 的 Router** 上可见 —— 有 Web UI 的部署里 `/` 早就把这类请求接走并回 HTML 200，本来就没有 405 可丢。见 §0 订正 5。
 
 ### 2.4 ⭐ 关键增量：先改测试辅助函数，不改 handler
 
@@ -231,7 +259,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 |---|---|
 | `NewRouter` 要 5 个依赖 | `router.go:145-153` |
 | 依赖来自组装根、要 DB | `internal/cli/server/run_router.go:132` |
-| 即使全桩掉，结果也是**某一次部署**而不是 API | 13 处 `if`；`e2e/test_server.go` 就少配 8 个字段 |
+| 即使全桩掉，结果也是**某一次部署**而不是 API | 13 处 `if`；`e2e/test_server.go` 就少配 **14** 个字段（见 §0 订正 1） |
 
 ⭐ **spec 必须来自注解（静态）。子命令的职责只是「把已生成的 spec 吐出来」，不是「生成它」。**
 
@@ -320,7 +348,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 | 项 | 内容 |
 |---|---|
 | 断言 | 每条注册的 mux pattern，存在对应的 `@Router <path> [<method>]` |
-| ⛔ 前置 | `router.go:436-439` 的循环拼接**读不到**，必须先展成 4 条字面量 |
+| ⛔ 前置 | 循环拼接的 pattern 静态读不到（⚠️ 但 `route-mutating-perm` 把它记成了一行糊掉的 `…/{address}/*` —— 见 §0 订正 2），必须先展成 4 条字面量。✅ 已落地 `c17665b` |
 | Hint | 「⛔ 别把它加进基线了事——基线里的每一行都是一个 SDK 生成不出来的端点。」 |
 | **预期初始基线** | **55 条**，单调递减到 0 |
 
