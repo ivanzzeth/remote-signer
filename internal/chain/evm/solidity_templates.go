@@ -51,7 +51,7 @@ contract RuleEvaluator is Script {
         to; value; selector; data; chainId; signer;
 
         // User-defined validation logic
-        {{.Expression}}
+        {{.Body}}
 
         // If we reach here, all require() passed
         return true;
@@ -105,7 +105,7 @@ contract RuleContract {
         revert("function not whitelisted");
     }
 
-    {{.Functions}}
+    {{.Body}}
 }
 
 contract RuleEvaluatorTest is Test {
@@ -184,7 +184,7 @@ contract RuleEvaluator {
         _eip712_primaryType; _eip712_domainName; _eip712_domainVersion;
 
         // User-defined validation logic
-        {{.Expression}}
+        {{.Body}}
 
         // If we reach here, all require() passed
         return true;
@@ -229,7 +229,7 @@ contract RuleEvaluator {
     }
 
     // User-defined structs and validation functions
-    {{.Functions}}
+    {{.Body}}
 
     function run() public returns (bool) {
         // Call the validate function with decoded message

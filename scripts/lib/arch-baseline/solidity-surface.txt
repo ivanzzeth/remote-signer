@@ -1,5 +1,21 @@
 # solidity 规则引擎的规模。⛔ 只许往下改 —— 变小也红,那一刻正是把数字改小的时候。
 #
+# ✅ 2026-09-10:引擎行数 4162 → 4084,文件数 11 → 12。
+#
+#    ⚠️ 文件数**涨了一个**,而这是唯一一次该放行的涨法:抽出了
+#    solidity_script.go,把「in() 重写 → 绑定 → 渲染 → 执行」这条四个 shape
+#    共用的流水线收成一份。原先 8 个函数各写一遍,只差一个模板名和一个结构体
+#    字段名;两个 typed_data 生成器还各自抄了同样 7 个 EIP-712 域绑定 ——
+#    那七个字段描述的正是「用户到底在签什么」,两份不一致意味着一个 shape 会
+#    校验另一个 shape 没校验的域。
+#
+#    ⛔ 数规模的是**行数**那把尺,它降了 78 行。文件数惩罚「把 1496 行的文件
+#    拆开」,而那通常是改进 —— 所以这里放行的是抽取,不是增长。真长回去时
+#    行数会先响。
+#
+#    验证:go test -tags integration ./internal/chain/evm/ 全绿,105 秒 ——
+#    那是 forge 在真编译生成出来的 Solidity,不是字符串断言。
+#
 # ✅ 2026-09-10:rules/ 里的 solidity 规则声明 **73 → 0**。
 #    九个模板(polymarket_* / predict_* / opinion_safe)和四个顶层规则文件已删除 ——
 #    它们没有任何 preset 引用,而 solidity 自 2026-09-09 起默认关闭,所以那些文件
@@ -18,7 +34,7 @@
 # ⛔ rules_declarations 保持 0:再往 rules/ 里加一条 solidity 规则,就是让出厂
 #    配置重新依赖一个默认关着的引擎。
 
-solidity_lines         4162   # arch_prod_files internal | grep solidity 的总行数
-solidity_files           11   # 同上的文件数
+solidity_lines         4084   # arch_prod_files internal | grep solidity 的总行数
+solidity_files           12   # 同上的文件数
 rules_declarations        0   # rules/ 下 `type: evm_solidity_expression` 的声明数
 presets_needing_forge     0   # 引用了带 solidity 模板、因而默认配置下装不上的出厂 preset

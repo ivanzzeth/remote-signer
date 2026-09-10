@@ -68,7 +68,7 @@ func TestIntegration_SolidityRuleEvaluator_ValueLimit(t *testing.T) {
 				Value: &tt.value,
 			}
 
-			passed, reason, err := evaluator.evaluateExpression(context.Background(), expression, req, parsed, nil)
+			passed, reason, err := evaluator.run(context.Background(), expressionScript(expression, nil), buildRequestEnv(req, parsed))
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed, "pass/fail mismatch")
 
@@ -117,7 +117,7 @@ func TestIntegration_SolidityRuleEvaluator_AddressCheck(t *testing.T) {
 				Recipient: &tt.to,
 			}
 
-			passed, _, err := evaluator.evaluateExpression(context.Background(), expression, req, parsed, nil)
+			passed, _, err := evaluator.run(context.Background(), expressionScript(expression, nil), buildRequestEnv(req, parsed))
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed)
 		})
@@ -165,7 +165,7 @@ func TestIntegration_SolidityRuleEvaluator_SelectorCheck(t *testing.T) {
 				MethodSig: &tt.selector,
 			}
 
-			passed, _, err := evaluator.evaluateExpression(context.Background(), expression, req, parsed, nil)
+			passed, _, err := evaluator.run(context.Background(), expressionScript(expression, nil), buildRequestEnv(req, parsed))
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed)
 		})
@@ -489,7 +489,7 @@ func TestIntegration_FunctionMode_ERC20Transfer(t *testing.T) {
 				RawData: tt.data,
 			}
 
-			passed, reason, err := evaluator.evaluateFunctions(context.Background(), functions, req, parsed, nil)
+			passed, reason, err := evaluator.run(context.Background(), functionsScript(functions, nil), buildRequestEnv(req, parsed))
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed, "pass/fail mismatch")
 
@@ -572,7 +572,7 @@ func TestIntegration_FunctionMode_MultipleSelectors(t *testing.T) {
 				RawData: tt.data,
 			}
 
-			passed, _, err := evaluator.evaluateFunctions(context.Background(), functions, req, parsed, nil)
+			passed, _, err := evaluator.run(context.Background(), functionsScript(functions, nil), buildRequestEnv(req, parsed))
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed, "pass/fail mismatch")
 		})
@@ -609,7 +609,7 @@ func TestIntegration_FunctionMode_AccessTxContext(t *testing.T) {
 		Value:   &value,
 	}
 
-	passed, _, err := evaluator.evaluateFunctions(context.Background(), functions, req, parsed, nil)
+	passed, _, err := evaluator.run(context.Background(), functionsScript(functions, nil), buildRequestEnv(req, parsed))
 	require.NoError(t, err)
 	assert.True(t, passed, "should pass when txValue is 0")
 }
@@ -799,7 +799,7 @@ func TestIntegration_TypedDataExpression_PermitValidation(t *testing.T) {
 				SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
 			}
 
-			passed, reason, err := evaluator.evaluateTypedDataExpression(context.Background(), expression, req, typedData, nil, nil)
+			passed, reason, err := runTypedDataExpression(evaluator, context.Background(), expression, req, typedData, nil, nil)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed, "pass/fail mismatch")
 
@@ -882,7 +882,7 @@ func TestIntegration_TypedDataExpression_DomainValidation(t *testing.T) {
 				SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
 			}
 
-			passed, reason, err := evaluator.evaluateTypedDataExpression(context.Background(), expression, req, typedData, nil, nil)
+			passed, reason, err := runTypedDataExpression(evaluator, context.Background(), expression, req, typedData, nil, nil)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed, "pass/fail mismatch")
 

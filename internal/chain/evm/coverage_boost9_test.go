@@ -76,7 +76,7 @@ func TestExecuteScript_All(t *testing.T) {
 
 	t.Run("Expression_Pass", func(t *testing.T) {
 		s.cleanScripts(t)
-		script, err := e.generateExpressionScript("require(true);", nil)
+		script, err := expressionScript("require(true);", nil).render()
 		require.NoError(t, err)
 		passed, reason, err := e.executeScript(bgCtx, script, defaultRequestEnv())
 		require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestExecuteScript_All(t *testing.T) {
 
 	t.Run("Expression_Revert", func(t *testing.T) {
 		s.cleanScripts(t)
-		script, err := e.generateExpressionScript(`require(false, "test fail");`, nil)
+		script, err := expressionScript(`require(false, "test fail");`, nil).render()
 		require.NoError(t, err)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -101,7 +101,7 @@ func TestExecuteScript_All(t *testing.T) {
 
 	t.Run("Expression_WithRequestEnv", func(t *testing.T) {
 		s.cleanScripts(t)
-		script, err := e.generateExpressionScript("require(tx_to != address(0));", nil)
+		script, err := expressionScript("require(tx_to != address(0));", nil).render()
 		require.NoError(t, err)
 		env := []string{
 			"RULE_TX_TO=0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
@@ -119,7 +119,7 @@ func TestExecuteScript_All(t *testing.T) {
 
 	t.Run("WithFilePathHint", func(t *testing.T) {
 		s.cleanScripts(t)
-		script, err := e.generateExpressionScript("require(true);", nil)
+		script, err := expressionScript("require(true);", nil).render()
 		require.NoError(t, err)
 		passed, reason, err := e.executeScript(bgCtx, script, defaultRequestEnv(), "my_group")
 		require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestExecuteScript_All(t *testing.T) {
 
 	t.Run("Caching", func(t *testing.T) {
 		s.cleanScripts(t)
-		script, err := e.generateExpressionScript("require(true);", nil)
+		script, err := expressionScript("require(true);", nil).render()
 		require.NoError(t, err)
 		passed1, reason1, err1 := e.executeScript(bgCtx, script, defaultRequestEnv())
 		require.NoError(t, err1)
@@ -161,7 +161,7 @@ func TestEvaluateExpression_All(t *testing.T) {
 
 	t.Run("Pass", func(t *testing.T) {
 		s.cleanScripts(t)
-		passed, reason, err := e.evaluateExpression(bgCtx, "require(true);", req, parsed, nil)
+		passed, reason, err := e.run(bgCtx, expressionScript("require(true);", nil), buildRequestEnv(req, parsed))
 		require.NoError(t, err)
 		assert.True(t, passed)
 		assert.Empty(t, reason)
@@ -169,7 +169,7 @@ func TestEvaluateExpression_All(t *testing.T) {
 
 	t.Run("Revert", func(t *testing.T) {
 		s.cleanScripts(t)
-		passed, reason, err := e.evaluateExpression(bgCtx, `require(false, "nope");`, req, parsed, nil)
+		passed, reason, err := e.run(bgCtx, expressionScript(`require(false, "nope");`, nil), buildRequestEnv(req, parsed))
 		require.NoError(t, err)
 		assert.False(t, passed)
 		assert.Contains(t, reason, "nope")
@@ -191,7 +191,7 @@ func TestEvaluateFunctions_All(t *testing.T) {
 			Recipient: strPtr("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"),
 			RawData:   transferCalldata(),
 		}
-		passed, reason, err := e.evaluateFunctions(bgCtx, `function transfer(address, uint256) external { require(true); }`, req, parsed, nil)
+		passed, reason, err := e.run(bgCtx, functionsScript(`function transfer(address, uint256) external { require(true); }`, nil), buildRequestEnv(req, parsed))
 		require.NoError(t, err)
 		assert.True(t, passed)
 		assert.Empty(t, reason)
@@ -203,7 +203,7 @@ func TestEvaluateFunctions_All(t *testing.T) {
 			Recipient: strPtr("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"),
 			RawData:   transferCalldata(),
 		}
-		passed, reason, err := e.evaluateFunctions(bgCtx, `function transfer(address, uint256) external { require(false, "func fail"); }`, req, parsed, nil)
+		passed, reason, err := e.run(bgCtx, functionsScript(`function transfer(address, uint256) external { require(false, "func fail"); }`, nil), buildRequestEnv(req, parsed))
 		require.NoError(t, err)
 		assert.False(t, passed)
 		assert.Contains(t, reason, "func fail")

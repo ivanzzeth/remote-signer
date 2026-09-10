@@ -6,175 +6,62 @@
 package evm
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"strings"
-	"text/template"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// evaluateTypedDataExpression evaluates a Solidity expression with EIP-712 typed data context
-// If structDef is provided, it's used for field declarations instead of inferring from request
-func (e *SolidityRuleEvaluator) evaluateTypedDataExpression(
-	ctx context.Context,
-	expression string,
-	req *types.SignRequest,
-	typedData *TypedDataPayload,
-	structDef *StructDefinition,
-	inMappingArrays map[string][]string,
-) (bool, string, error) {
-	// Generate script with typed data context
-	script, err := e.generateTypedDataExpressionScript(expression, req, typedData, structDef, inMappingArrays)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to generate typed data expression script: %w", err)
-	}
-
-	passed, reason, err := e.executeScript(ctx, script, nil)
-	if err != nil {
-		return false, "", fmt.Errorf("script execution failed: %w", err)
-	}
-	return passed, reason, nil
-}
-
-// evaluateTypedDataFunctions evaluates user-defined functions with EIP-712 typed data context
-func (e *SolidityRuleEvaluator) evaluateTypedDataFunctions(
-	ctx context.Context,
-	functions string,
-	req *types.SignRequest,
-	typedData *TypedDataPayload,
-	inMappingArrays map[string][]string,
-) (bool, string, error) {
-	// Generate script with typed data context and user functions
-	script, err := e.generateTypedDataFunctionsScript(functions, req, typedData, inMappingArrays)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to generate typed data functions script: %w", err)
-	}
-
-	passed, reason, err := e.executeScript(ctx, script, nil)
-	if err != nil {
-		return false, "", fmt.Errorf("script execution failed: %w", err)
-	}
-	return passed, reason, nil
-}
-
 // generateTypedDataExpressionScript generates a Solidity script for TypedDataExpression mode
 // If structDef is provided, it generates a struct definition and instance variable
 // accessible via structName.field syntax (e.g., order.taker)
-func (e *SolidityRuleEvaluator) generateTypedDataExpressionScript(
+// typedDataExpressionScript builds the script for an expression checked against
+// EIP-712 typed data.
+func (e *SolidityRuleEvaluator) typedDataExpressionScript(
 	expression string,
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
 	structDef *StructDefinition,
 	inMappingArrays map[string][]string,
-) (string, error) {
-	ir := processInOperatorToMappings(expression, inMappingArrays)
-	expression = preprocessInOperator(ir.Modified)
-	var structDefinition string
-	var structInstance string
-
+) (solidityScript, error) {
+	bind := typedDataBindings(req, typedData)
 	if structDef != nil {
-		// Generate struct definition and instance
-		structDefinition = generateStructDefinition(structDef)
-		structInstance = generateStructInstance(structDef, typedData.Message)
+		// A declared struct gives the operator `order.taker` field access.
+		bind["StructDefinition"] = generateStructDefinition(structDef)
+		bind["StructInstance"] = generateStructInstance(structDef, typedData.Message)
 	} else {
-		// Fall back to generating individual field declarations (legacy behavior)
-		// No struct definition needed
-		structDefinition = ""
-		structInstance = generateMessageFieldDeclarations(typedData)
+		// Legacy shape: no struct, each message field declared on its own.
+		bind["StructDefinition"] = ""
+		bind["StructInstance"] = generateMessageFieldDeclarations(typedData)
 	}
-
-	data := struct {
-		PrimaryType              string
-		DomainName               string
-		DomainVersion            string
-		DomainChainId            string
-		DomainContract           string
-		Signer                   string
-		ChainID                  string
-		StructDefinition         string
-		StructInstance           string
-		Expression               string
-		InMappingDeclarations    string
-		InMappingConstructorInit string
-	}{
-		PrimaryType:              formatString(typedData.PrimaryType),
-		DomainName:               formatString(typedData.Domain.Name),
-		DomainVersion:            formatString(typedData.Domain.Version),
-		DomainChainId:            formatDomainChainId(typedData.Domain.ChainId),
-		DomainContract:           formatDomainContract(typedData.Domain.VerifyingContract),
-		Signer:                   formatAddress(&req.SignerAddress),
-		ChainID:                  formatChainID(req.ChainID),
-		StructDefinition:         structDefinition,
-		StructInstance:           structInstance,
-		Expression:               expression,
-		InMappingDeclarations:    ir.Declarations,
-		InMappingConstructorInit: ir.ConstructorInit,
-	}
-
-	tmpl, err := template.New("typedDataExpression").Parse(solidityTypedDataExpressionTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
-	}
-
-	return buf.String(), nil
+	return solidityScript{
+		mode:     "typedDataExpression",
+		template: solidityTypedDataExpressionTemplate,
+		body:     expression,
+		inMaps:   inMappingArrays,
+		bind:     bind,
+	}, nil
 }
 
 // generateTypedDataFunctionsScript generates a Solidity script for TypedDataFunctions mode
-func (e *SolidityRuleEvaluator) generateTypedDataFunctionsScript(
+// typedDataFunctionsScript builds the script for functions checked against
+// EIP-712 typed data.
+func (e *SolidityRuleEvaluator) typedDataFunctionsScript(
 	functions string,
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
 	inMappingArrays map[string][]string,
-) (string, error) {
-	ir := processInOperatorToMappings(functions, inMappingArrays)
-	functions = preprocessInOperator(ir.Modified)
-	// Encode message data as bytes for struct decoding
-	messageData := encodeMessageData(typedData)
-
-	data := struct {
-		PrimaryType              string
-		DomainName               string
-		DomainVersion            string
-		DomainChainId            string
-		DomainContract           string
-		Signer                   string
-		ChainID                  string
-		MessageData              string
-		Functions                string
-		InMappingDeclarations    string
-		InMappingConstructorInit string
-	}{
-		PrimaryType:              formatString(typedData.PrimaryType),
-		DomainName:               formatString(typedData.Domain.Name),
-		DomainVersion:            formatString(typedData.Domain.Version),
-		DomainChainId:            formatDomainChainId(typedData.Domain.ChainId),
-		DomainContract:           formatDomainContract(typedData.Domain.VerifyingContract),
-		Signer:                   formatAddress(&req.SignerAddress),
-		ChainID:                  formatChainID(req.ChainID),
-		MessageData:              messageData,
-		Functions:                functions,
-		InMappingDeclarations:    ir.Declarations,
-		InMappingConstructorInit: ir.ConstructorInit,
-	}
-
-	tmpl, err := template.New("typedDataFunctions").Parse(solidityTypedDataFunctionsTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
-	}
-
-	return buf.String(), nil
+) (solidityScript, error) {
+	bind := typedDataBindings(req, typedData)
+	// Functions decode the message themselves, so it is passed as bytes.
+	bind["MessageData"] = encodeMessageData(typedData)
+	return solidityScript{
+		mode:     "typedDataFunctions",
+		template: solidityTypedDataFunctionsTemplate,
+		body:     functions,
+		inMaps:   inMappingArrays,
+		bind:     bind,
+	}, nil
 }
 
 // GenerateTypedDataExpressionSyntaxCheckScript generates a syntax check script for TypedDataExpression mode.

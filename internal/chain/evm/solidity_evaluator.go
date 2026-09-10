@@ -220,17 +220,24 @@ func (e *SolidityRuleEvaluator) Evaluate(
 			}
 		}
 
+		// ⛔ Typed-data scripts bake the signed payload into the source and get
+		// no env: the domain and message the rule checks must be the ones the
+		// script was compiled against, not values supplied at run time.
+		var script solidityScript
 		if config.TypedDataExpression != "" {
-			passed, reason, err = e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData, structDef, config.InMappingArrays)
+			script, err = e.typedDataExpressionScript(config.TypedDataExpression, req, typedData, structDef, config.InMappingArrays)
 		} else {
-			passed, reason, err = e.evaluateTypedDataFunctions(ctx, config.TypedDataFunctions, req, typedData, config.InMappingArrays)
+			script, err = e.typedDataFunctionsScript(config.TypedDataFunctions, req, typedData, config.InMappingArrays)
+		}
+		if err == nil {
+			passed, reason, err = e.run(ctx, script, nil)
 		}
 	} else if config.Functions != "" {
-		// Transaction validation with function mode
-		passed, reason, err = e.evaluateFunctions(ctx, config.Functions, req, parsed, config.InMappingArrays)
+		// Transaction shapes compile from the rule alone and read the request
+		// from env, so one rule compiles once rather than once per request.
+		passed, reason, err = e.run(ctx, functionsScript(config.Functions, config.InMappingArrays), buildRequestEnv(req, parsed))
 	} else {
-		// Transaction validation with expression mode
-		passed, reason, err = e.evaluateExpression(ctx, config.Expression, req, parsed, config.InMappingArrays)
+		passed, reason, err = e.run(ctx, expressionScript(config.Expression, config.InMappingArrays), buildRequestEnv(req, parsed))
 	}
 
 	if err != nil {
@@ -248,45 +255,5 @@ func (e *SolidityRuleEvaluator) Evaluate(
 		return !passed, reason, nil
 	}
 
-	return passed, reason, nil
-}
-
-// evaluateExpression evaluates a Solidity expression with the given context (Expression mode).
-// Script is generated from rule only (expression + inMapping); request data is passed at runtime via env (compile once per rule).
-func (e *SolidityRuleEvaluator) evaluateExpression(
-	ctx context.Context,
-	expression string,
-	req *types.SignRequest,
-	parsed *types.ParsedPayload,
-	inMappingArrays map[string][]string,
-) (bool, string, error) {
-	script, err := e.generateExpressionScript(expression, inMappingArrays)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to generate script: %w", err)
-	}
-	passed, reason, err := e.executeScript(ctx, script, buildRequestEnv(req, parsed))
-	if err != nil {
-		return false, "", fmt.Errorf("script execution failed: %w", err)
-	}
-	return passed, reason, nil
-}
-
-// evaluateFunctions evaluates user-defined functions (Functions mode).
-// Script is generated from rule only; request data is passed at runtime via env (compile once per rule).
-func (e *SolidityRuleEvaluator) evaluateFunctions(
-	ctx context.Context,
-	functions string,
-	req *types.SignRequest,
-	parsed *types.ParsedPayload,
-	inMappingArrays map[string][]string,
-) (bool, string, error) {
-	script, err := e.generateFunctionScript(functions, inMappingArrays)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to generate function script: %w", err)
-	}
-	passed, reason, err := e.executeScript(ctx, script, buildRequestEnv(req, parsed))
-	if err != nil {
-		return false, "", fmt.Errorf("script execution failed: %w", err)
-	}
 	return passed, reason, nil
 }

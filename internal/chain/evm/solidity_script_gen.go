@@ -3,11 +3,9 @@
 package evm
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
-	"text/template"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -155,68 +153,6 @@ func preprocessInOperator(expression string) string {
 		}
 		return "(" + strings.Join(clauses, " || ") + ")"
 	})
-}
-
-// generateExpressionScript generates a Solidity script for Expression mode.
-// Script content depends only on the rule (expression + inMapping); request data is passed at runtime via env.
-func (e *SolidityRuleEvaluator) generateExpressionScript(
-	expression string,
-	inMappingArrays map[string][]string,
-) (string, error) {
-	ir := processInOperatorToMappings(expression, inMappingArrays)
-	expression = preprocessInOperator(ir.Modified)
-	data := struct {
-		Expression               string
-		InMappingDeclarations    string
-		InMappingConstructorInit string
-	}{
-		Expression:               expression,
-		InMappingDeclarations:    ir.Declarations,
-		InMappingConstructorInit: ir.ConstructorInit,
-	}
-
-	tmpl, err := template.New("expression").Parse(solidityExpressionTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
-	}
-
-	return buf.String(), nil
-}
-
-// generateFunctionScript generates a Solidity script for Functions mode.
-// Script content depends only on the rule (functions + inMapping); request data is passed at runtime via env.
-func (e *SolidityRuleEvaluator) generateFunctionScript(
-	functions string,
-	inMappingArrays map[string][]string,
-) (string, error) {
-	ir := processInOperatorToMappings(functions, inMappingArrays)
-	functions = preprocessInOperator(ir.Modified)
-	data := struct {
-		Functions                string
-		InMappingDeclarations    string
-		InMappingConstructorInit string
-	}{
-		Functions:                functions,
-		InMappingDeclarations:    ir.Declarations,
-		InMappingConstructorInit: ir.ConstructorInit,
-	}
-
-	tmpl, err := template.New("functions").Parse(solidityFunctionTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
-	}
-
-	return buf.String(), nil
 }
 
 // GenerateSyntaxCheckScript generates a script for compilation checking (Expression mode)

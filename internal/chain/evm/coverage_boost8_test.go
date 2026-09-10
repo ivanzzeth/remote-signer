@@ -21,8 +21,7 @@ var bgCtx = context.Background()
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestGenerateExpressionScript(t *testing.T) {
-	e := newTestSolidityEvaluator(t)
-	script, err := e.generateExpressionScript("require(value <= 1 ether, \"exceeds\");", nil)
+	script, err := expressionScript("require(value <= 1 ether, \"exceeds\");", nil).render()
 	require.NoError(t, err)
 	assert.Contains(t, script, "pragma solidity")
 	assert.Contains(t, script, "RuleEvaluator is Script")
@@ -30,19 +29,17 @@ func TestGenerateExpressionScript(t *testing.T) {
 }
 
 func TestGenerateExpressionScript_WithMappingArrays(t *testing.T) {
-	e := newTestSolidityEvaluator(t)
 	// Expression must use in() to trigger mapping generation
-	script, err := e.generateExpressionScript("require(in(txTo, addrs), \"bad\");", map[string][]string{
+	script, err := expressionScript("require(in(txTo, addrs), \"bad\");", map[string][]string{
 		"addrs": {"0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"},
-	})
+	}).render()
 	require.NoError(t, err)
 	assert.Contains(t, script, "addrs_mapping")
 	assert.Contains(t, script, "mapping(address => bool)")
 }
 
 func TestGenerateFunctionScript(t *testing.T) {
-	e := newTestSolidityEvaluator(t)
-	script, err := e.generateFunctionScript("function transfer(address,uint256) external { require(true); }", nil)
+	script, err := functionsScript("function transfer(address,uint256) external { require(true); }", nil).render()
 	require.NoError(t, err)
 	assert.Contains(t, script, "RuleContract")
 	assert.Contains(t, script, "RuleEvaluatorTest is Test")
@@ -50,11 +47,10 @@ func TestGenerateFunctionScript(t *testing.T) {
 }
 
 func TestGenerateFunctionScript_WithMappingArrays(t *testing.T) {
-	e := newTestSolidityEvaluator(t)
 	// Functions must include in() to trigger mapping generation
-	script, err := e.generateFunctionScript("function check(address to) external { require(in(to, addrs), \"bad\"); }", map[string][]string{
+	script, err := functionsScript("function check(address to) external { require(in(to, addrs), \"bad\"); }", map[string][]string{
 		"addrs": {"0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"},
-	})
+	}).render()
 	require.NoError(t, err)
 	assert.Contains(t, script, "addrs_mapping")
 	assert.Contains(t, script, "mapping(address => bool)")
@@ -133,7 +129,7 @@ func TestGenerateTypedDataExpressionScript(t *testing.T) {
 		},
 	}
 
-	script, err := e.generateTypedDataExpressionScript(
+	script, err := renderTypedDataExpression(e,
 		"require(order.maker != address(0), \"no maker\");",
 		req, typedData, structDef, nil,
 	)
@@ -166,7 +162,7 @@ func TestGenerateTypedDataExpressionScript_NoStruct(t *testing.T) {
 		},
 	}
 
-	script, err := e.generateTypedDataExpressionScript(
+	script, err := renderTypedDataExpression(e,
 		"require(owner != address(0), \"no owner\");",
 		req, typedData, nil, nil,
 	)
@@ -192,7 +188,7 @@ func TestGenerateTypedDataExpressionScript_WithMappingArrays(t *testing.T) {
 	structDef := &StructDefinition{Name: "Order", Fields: []TypedDataField{{Name: "maker", Type: "address"}}}
 
 	// Expression must use in() to trigger mapping generation
-	script, err := e.generateTypedDataExpressionScript(
+	script, err := renderTypedDataExpression(e,
 		"require(in(order.maker, addrs), \"bad\");",
 		req, typedData, structDef,
 		map[string][]string{"addrs": {"0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"}},
@@ -216,7 +212,7 @@ func TestGenerateTypedDataFunctionsScript(t *testing.T) {
 		},
 	}
 
-	script, err := e.generateTypedDataFunctionsScript(
+	script, err := renderTypedDataFunctions(e,
 		"function _validateMessage() internal override {}",
 		req, typedData, nil,
 	)
