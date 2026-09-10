@@ -1,0 +1,41 @@
+# `make check` —— 结构与架构门禁,跑在**每一个分支的每一次 push** 上。
+#
+# ⛔ 为什么它不并进 ci.yml:ci.yml 是 `on: push: branches: [main, dev]`,
+# 也就是说 **feature 分支的 push 不触发它**。而 2026-09-10 那个 3.8 MB 的
+# 二进制,正是顺着一条 feature 分支进来的 —— 等到合进 main 才红,它已经在
+# 那条分支的历史里了,而进了历史就只能靠重写全历史来清。
+#
+# ⛔ 为什么它必须存在:在此之前 `make check` —— 14 条已负向验证的门禁的全部 ——
+# **只挂在 .githooks/pre-commit 上,而那个 hook 从来没生效过**
+# (`core.hooksPath` 没人设过,也没有任何东西检查它设没设)。
+# 也就是说那些门禁当时由**什么都没有**在执行,绿是因为有人手动跑,
+# 不是因为有东西拦着。一道只在本地生效的门禁,等于一道可以不生效的门禁。
+#
+# ⚠️ 这个 job 必须**保持在秒级**(现在 ≈13s + 装 staticcheck)。慢了人会想
+# 办法绕过 —— pre-commit 上一版跑 208 秒,结果是所有提交都在 `--no-verify`。
+# 慢层(integration / blackbox / e2e)归 ci.yml,别往这里加。
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # ⚠️ 门禁 ⑪ 读的是 index/工作树,不需要历史;但 fetch-depth: 0 也不贵,
+          # 而浅 clone 曾让别的门禁在 CI 上和本地给出不同结论。
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      # ⛔ 不能省:scripts/check-prereqs.sh 会断言它存在并直接失败 ——
+      # 那是有意的,因为 staticcheck 没装时 `staticcheck ./...` 的绿是假绿。
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      - name: make check
+        run: make check

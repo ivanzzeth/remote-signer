@@ -11,7 +11,7 @@
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help check build build-embed build-cli web web-deps test test-unit test-integration integration clean tidy desktop-dev desktop-dist
+.PHONY: help check hooks build build-embed build-cli web web-deps test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -38,6 +38,7 @@ help:
 	@echo "  build-embed   Same as build"
 	@echo "  build-cli     Go-only binary, no embedded UI (placeholder page; fast backend dev)"
 	@echo "  check         Fast feedback gates (fmt/vet/staticcheck/test-structure/arch) — parallel, seconds"
+	@echo "  hooks         Install .githooks as this clone's hooks (git config core.hooksPath)"
 	@echo "  test          Default layers: unit http cli"
 	@echo "  test LAYER=x  One layer: unit|http|cli|integration|blackbox|e2e|web-unit|web-e2e"
 	@echo "  test LAYER=all         Every layer, slow ones + web-unit included (web-e2e needs LAYER=everything)"
@@ -93,6 +94,22 @@ check:
 	@# ⛔ 先断言依赖再开跑 —— 缺工具时门禁的结论不可信,绿和红都不可信。
 	@# 新增门禁加在 scripts/run-checks.sh 的 STEPS 里,别加回这里(加回来就变串行)。
 	@bash scripts/run-checks.sh
+
+## hooks — 把 .githooks/ 装成这个 clone 的 hooks 目录。
+##
+## ⛔ 这个 target 存在的原因是一次真实事故:.githooks/pre-commit 里一直有
+## >1MB 大文件拦截,而 2026-09-10 一个 3.8 MB 的构建产物照样被提交了 ——
+## 因为 `core.hooksPath` 从来没人设过,那个 hook 一次都没跑过。
+## 「仓库里有个 hook 文件」和「hook 在跑」是两回事,而当时没有任何东西
+## 区分这两者。
+##
+## ⚠️ hook 是**本地快反馈**,不是保证 —— 它挡不住 `--no-verify`,也挡不住
+## 一个没跑过 `make hooks` 的新 clone。保证在 .github/workflows/check.yml:
+## 那里的 `make check` 跑在每一个分支的每一次 push 上,绕不过去。
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "ok: core.hooksPath = .githooks  (pre-commit / pre-push 已生效)"
+	@echo "    ⚠️ 这只是本地快反馈;真正的门禁在 CI 的 check workflow。"
 
 ## test — 验收。分层定义在 scripts/lib/layers.sh(**唯一事实来源**)。
 ##

@@ -3,8 +3,20 @@
 ## 安装
 
 ```bash
-git config core.hooksPath .githooks
+make hooks
 ```
+
+> ⛔ **装了才算数,而「装没装」以前没有任何东西在看。**
+>
+> 2026-09-10:一个 3.8 MB 的构建产物被提交进库,躺了 8 个版本 —— 而下面
+> 第 2 条「大文件检查」本来就该拦住它。没拦住的原因是 `core.hooksPath`
+> 从来没人设过,**这些 hook 一次都没跑过**。清理它的代价是重写两个仓库的
+> 全历史、force-push main 和 32 个 tag、改写父仓库 41 个 submodule 指针。
+>
+> ⚠️ 所以别把 hook 当保证:它挡不住 `--no-verify`,也挡不住一个没跑过
+> `make hooks` 的新 clone。**保证在 CI** —— `.github/workflows/check.yml`
+> 在每个分支的每次 push 上跑 `make check`,那里绕不过去。
+> hook 的价值是**快**:在提交前 20 秒内告诉你,而不是推上去等 CI。
 
 ## Hooks 说明
 
