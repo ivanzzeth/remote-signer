@@ -320,7 +320,7 @@ function OnboardForm({
         <h1 className="text-lg font-semibold text-ink-900">Import API key</h1>
         <p className="mt-1 text-sm text-ink-500">
           Paste an encrypted keystore (.json), an Ed25519 private key
-          (hex), or a PKCS#8 PEM file. The key is encrypted locally with
+          (hex or base64), or a PKCS#8 PEM file. The key is encrypted locally with
           your password so the next visit only needs the password.
         </p>
 
@@ -352,7 +352,7 @@ function OnboardForm({
               <span>
                 {isKeystore
                   ? "Encrypted keystore (detected)"
-                  : "Private key (hex or PEM)"}
+                  : "Private key (hex, base64, or PEM)"}
               </span>
               <label className="cursor-pointer text-accent-600 hover:text-accent-500">
                 <input
@@ -379,7 +379,7 @@ function OnboardForm({
               rows={5}
               spellCheck={false}
               autoComplete="off"
-              placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----&#10;&#10;or paste the contents of an encrypted keystore .json"
+              placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----&#10;&#10;or the base64 body on its own, or an encrypted keystore .json"
               className="block w-full rounded-md border border-ink-300 px-3 py-2 font-mono text-xs shadow-sm focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
             />
             {isKeystore && (

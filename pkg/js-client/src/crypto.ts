@@ -21,6 +21,13 @@ import { sha256 } from "@noble/hashes/sha256";
  *   - Uint8Array of length 32 (seed) or 64 (seed + pubkey)
  *   - hex string (with or without 0x), 64 or 128 chars
  *   - PKCS#8 PEM block (the format `remote-signer api-key keygen` emits)
+ *   - bare base64: a PEM's body (PKCS#8 DER), a 32-byte seed, or a 64-byte key
+ *
+ * The bare-base64 form is what an operator has on a deployed daemon, where
+ * there is no file to open — the same input `--api-key-base64` takes on the CLI.
+ * ⚠️ Until 2026-09-10 pasting it here failed with "expected hex or PKCS#8 PEM
+ * input", which does not hint that the thing you pasted is a supported format
+ * in the very next tool over.
  */
 export function parsePrivateKey(
   key: string | Uint8Array
@@ -62,25 +69,65 @@ export function parsePrivateKey(
     return der.slice(-32);
   }
 
-  // Hex string (optionally 0x-prefixed)
-  const hex = (trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed);
-  if (!/^[0-9a-fA-F]+$/.test(hex)) {
-    throw new Error("expected hex or PKCS#8 PEM input");
+  // Hex string (optionally 0x-prefixed).
+  //
+  // ⛔ Hex is tried before base64 and must stay that way: 64 hex characters are
+  // also 64 valid base64 characters, and 64 % 4 === 0, so a hex seed decodes
+  // cleanly as 48 bytes of base64. Checking base64 first would silently read
+  // every hex key as a different key.
+  const hex = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
+  if (/^[0-9a-fA-F]+$/.test(hex) && (hex.length === 64 || hex.length === 128)) {
+    const bytes = new Uint8Array(
+      hex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
+    );
+    // 64 bytes is seed || pubkey; the seed is the first half.
+    return bytes.length === 32 ? bytes : bytes.slice(0, 32);
   }
-  const bytes = new Uint8Array(
-    hex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
-  );
+
+  return parseBareBase64(trimmed);
+}
+
+/**
+ * Decodes a bare base64 private key: a PEM body (PKCS#8 DER), a 32-byte seed,
+ * or a 64-byte key.
+ *
+ * ⚠️ Unlike the Go client, this does not check that a 64-byte key's public half
+ * matches its seed — @noble/ed25519 v2 derives public keys asynchronously and
+ * this function is synchronous. A mismatched blob is therefore accepted here
+ * and fails at first use, when the server rejects the signature.
+ */
+function parseBareBase64(input: string): Uint8Array {
+  const compact = input.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact) || compact.length % 4 !== 0) {
+    throw new Error(
+      "expected hex, base64, or a PKCS#8 PEM block — got something that is none of those"
+    );
+  }
+
+  let bin: string;
+  try {
+    bin = atob(compact);
+  } catch {
+    throw new Error("invalid base64 private key");
+  }
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
 
   if (bytes.length === 32) {
     return bytes;
-  } else if (bytes.length === 64) {
-    // Full private key, extract seed
-    return bytes.slice(0, 32);
-  } else {
-    throw new Error(
-      `Invalid private key length: expected 32 or 64 bytes (hex), got ${bytes.length}`
-    );
   }
+  if (bytes.length === 64) {
+    return bytes.slice(0, 32);
+  }
+  // Anything longer is a PKCS#8 DER wrapper, whose last 32 bytes are the seed.
+  if (bytes.length > 32) {
+    return bytes.slice(-32);
+  }
+  throw new Error(
+    `invalid base64 private key: ${bytes.length} bytes is neither a 32-byte seed, a 64-byte key, nor PKCS#8 DER`
+  );
 }
 
 /**
