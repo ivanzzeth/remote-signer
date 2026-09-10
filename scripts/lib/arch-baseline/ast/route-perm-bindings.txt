@@ -4,7 +4,7 @@
 #
 # 别的基线是**债务清单**:每一行是一处该被修掉的东西,行数只许往下走,
 # 减到零是目标。这一张不是。这一张是**当前事实的记录** —— 它正确的大小
-# 就是「每一条带权限的路由一行」,今天 49 行。
+# 就是「每一条带权限的路由一行」,今天 53 行。
 #
 #   ⛔ 不要「清理」它,不要试图让它变短。
 #   ⛔ 一行消失**不是**修好了,是那条路由的权限动了 —— 门禁会为此报红,
@@ -83,13 +83,14 @@
 /api/v1/evm/requests list_own_requests
 /api/v1/evm/rules list_rules
 /api/v1/evm/rules/ list_rules
-/api/v1/evm/signers/ read_signers
 /api/v1/evm/simulations sign_request
 /api/v1/presets read_presets
 /api/v1/templates read_templates
 /api/v1/templates/ read_templates
 DELETE /api/v1/api-keys/{id} manage_api_keys
 DELETE /api/v1/evm/budgets/ manage_budgets
+DELETE /api/v1/evm/signers/{address} read_signers
+DELETE /api/v1/evm/signers/{address}/access/{keyID} read_signers
 DELETE /api/v1/wallets/{id} manage_wallets
 DELETE /api/v1/wallets/{id}/members/{signerAddress} manage_wallets
 GET /api/v1/acls/ip-whitelist read_acls
@@ -100,12 +101,14 @@ GET /api/v1/audit/requests/ read_audit
 GET /api/v1/evm/budgets read_budgets
 GET /api/v1/evm/budgets/ read_budgets
 GET /api/v1/evm/signers read_signers
+GET /api/v1/evm/signers/{address}/access read_signers
 GET /api/v1/evm/simulate/status sign_request
 GET /api/v1/presets/ read_presets
 GET /api/v1/wallets manage_wallets
 GET /api/v1/wallets/{id} manage_wallets
 GET /api/v1/wallets/{id}/members manage_wallets
 PATCH /api/v1/evm/budgets/ manage_budgets
+PATCH /api/v1/evm/signers/{address} read_signers
 PATCH /api/v1/wallets/{id} manage_wallets
 POST /api/v1/api-keys manage_api_keys
 POST /api/v1/evm/broadcast sign_request
@@ -116,6 +119,7 @@ POST /api/v1/evm/rules/{id}/budgets/reset manage_budgets
 POST /api/v1/evm/sign sign_request
 POST /api/v1/evm/sign/batch sign_request
 POST /api/v1/evm/signers create_signers
+POST /api/v1/evm/signers/{address}/access read_signers
 POST /api/v1/evm/signers/{address}/approve read_signers
 POST /api/v1/evm/signers/{address}/lock read_signers
 POST /api/v1/evm/signers/{address}/transfer read_signers

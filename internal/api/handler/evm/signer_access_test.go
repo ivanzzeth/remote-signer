@@ -70,12 +70,12 @@ func TestGrantAccess_HTTP_HDDerivedAddressResolvesParent(t *testing.T) {
 	// HandleSignerAction (the address-subpath handler), not the
 	// list/create dispatcher.
 	body := map[string]string{"api_key_id": granteeID}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost, "/api/v1/evm/signers/"+derived+"/access", body, ownerKey)
+	rec := doActionRequest(t, h.GrantAccess, http.MethodPost, "/api/v1/evm/signers/"+derived+"/access", body, ownerKey)
 	assert.Equal(t, http.StatusOK, rec.Code, "POST grant access on derived must succeed when parent owned, body=%s", rec.Body.String())
 
 	// GET /api/v1/evm/signers/{derived}/access — derived address must
 	// also resolve so the access list comes back to the same caller.
-	recList := doActionRequest(t, h.HandleSignerAction, http.MethodGet, "/api/v1/evm/signers/"+derived+"/access", nil, ownerKey)
+	recList := doActionRequest(t, h.ListAccess, http.MethodGet, "/api/v1/evm/signers/"+derived+"/access", nil, ownerKey)
 	require.Equal(t, http.StatusOK, recList.Code, "GET access list on derived must succeed: %s", recList.Body.String())
 	var grants []SignerAccessResponse
 	require.NoError(t, json.NewDecoder(recList.Body).Decode(&grants))
@@ -87,11 +87,11 @@ func TestGrantAccess_HTTP_HDDerivedAddressResolvesParent(t *testing.T) {
 	strangerID := "stranger-key"
 	mustCreateAPIKey(t, apiKeyRepo, strangerID, types.RoleAgent)
 	stranger := &types.APIKey{ID: strangerID, Name: "stranger", Role: types.RoleAgent, Enabled: true}
-	recForbid := doActionRequest(t, h.HandleSignerAction, http.MethodPost, "/api/v1/evm/signers/"+derived+"/access", body, stranger)
+	recForbid := doActionRequest(t, h.GrantAccess, http.MethodPost, "/api/v1/evm/signers/"+derived+"/access", body, stranger)
 	assert.Equal(t, http.StatusForbidden, recForbid.Code)
 
 	// DELETE round-trip closes the regression loop.
-	recRevoke := doActionRequest(t, h.HandleSignerAction, http.MethodDelete, "/api/v1/evm/signers/"+derived+"/access/"+granteeID, nil, ownerKey)
+	recRevoke := doActionRequest(t, h.RevokeAccess, http.MethodDelete, "/api/v1/evm/signers/"+derived+"/access/"+granteeID, nil, ownerKey)
 	assert.Equal(t, http.StatusOK, recRevoke.Code, "DELETE on derived must succeed: %s", recRevoke.Body.String())
 }
 

@@ -31,7 +31,11 @@ func TestSignerHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	// ⚠️ Calls the endpoint function, not a mux. This test is about the
+	// read-only guard, not about which path reaches it — the routed shape of
+	// these endpoints is pinned in signer_routes_test.go. ServeHTTP is gone, so
+	// what used to be "the handler" is now this one function.
+	h.CreateSigner(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "signers_api_readonly")
@@ -55,7 +59,7 @@ func TestSignerHandler_ReadOnly_ListAllowed(t *testing.T) {
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.ListSigners(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }

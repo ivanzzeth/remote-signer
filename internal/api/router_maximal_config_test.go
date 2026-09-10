@@ -332,6 +332,41 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 				"than hdWalletsModule.Routes() says it serves", pattern)
 		}
 	}))
+
+	// ⛔ And the module S4's last third created. Signers had no row in the table
+	// above either — it is not gated by a config field — and it is the module
+	// where "every pattern reached the mux" matters most: the eleven routes
+	// replace a method-less prefix that matched every verb, so a route lost to a
+	// conditional does not fail closed, it re-opens the hole 6d30ba1 fixed by
+	// leaving that path to the /api/v1/ fallback while the reader believes it is
+	// served.
+	signersMod, err := NewSignersModule(maximalSignerHandler(t))
+	if err != nil {
+		t.Fatalf("building the signers module: %v", err)
+	}
+	signersMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("signer pattern %q is absent from the router, so setupRoutes registered less "+
+				"than signersModule.Routes() says it serves", pattern)
+		}
+	}))
+}
+
+// maximalSignerHandler builds the handler the signers module wraps, with the
+// same caveat as the two above: only its route patterns are read, never its
+// behaviour.
+func maximalSignerHandler(t *testing.T) *evmhandler.SignerHandler {
+	t.Helper()
+	accessSvc, err := service.NewSignerAccessService(
+		&stubSignerOwnershipRepo{}, &stubSignerAccessRepo{}, &stubAPIKeyRepo{}, nil, testLogger())
+	if err != nil {
+		t.Fatalf("building the signer access service: %v", err)
+	}
+	h, err := evmhandler.NewSignerHandler(&stubSignerManager{}, accessSvc, testLogger(), nil)
+	if err != nil {
+		t.Fatalf("building the signer handler: %v", err)
+	}
+	return h
 }
 
 // maximalAPIKeyHandler builds the handler the api-keys module wraps. ⚠️ Only its

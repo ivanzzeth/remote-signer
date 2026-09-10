@@ -405,7 +405,7 @@ func TestHandleTransferOwnership_TransferToSelf(t *testing.T) {
 	require.NoError(t, err)
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", map[string]string{"new_owner_id": "owner-key"}, ownerKey)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -414,7 +414,7 @@ func TestHandleTransferOwnership_InvalidBody(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", "bad json", testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -428,7 +428,7 @@ func TestHandleDeleteSigner_NotFound(t *testing.T) {
 	mgr := &signerActionMock{}
 	h := newActionHandler(t, mgr, nil) // no owners
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOtherAPIKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -867,7 +867,7 @@ func TestCreateSigner_ResourceLimitExceeded(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	// Should succeed because CountByOwner returns 0 (stub) which is < 1
 	assert.Equal(t, http.StatusCreated, rec.Code)
 }
@@ -892,7 +892,7 @@ func TestCreateSigner_BothPrivateKeyAndKeystoreJSON(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "not both")
 }
@@ -976,7 +976,7 @@ func TestHandleApproveSigner_GetOwnershipError(t *testing.T) {
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
 	// No ownership record → 404
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.ApproveSigner, http.MethodPost,
 		"/api/v1/evm/signers/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", nil, adminKey)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -1075,7 +1075,7 @@ func TestHandlePatchSignerLabels_InfoListError(t *testing.T) {
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
 	body := map[string]interface{}{"display_name": "New Name"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPatch,
+	rec := doActionRequest(t, h.PatchSignerLabels, http.MethodPatch,
 		"/api/v1/evm/signers/"+testAddr, body, ownerKey)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1122,7 +1122,7 @@ func TestListSigners_FilterByTag(t *testing.T) {
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin}
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?tag=production", adminKey)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?tag=production", adminKey)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	resp := decodeSignerListResponse(t, rec)

@@ -192,7 +192,17 @@ func newSignerTestAccessServiceWithOwnerships(t *testing.T, ownerships []*types.
 
 // --- Test helpers ---
 
-func doSignerRequest(t *testing.T, handler http.Handler, method, path string, apiKey *types.APIKey) *httptest.ResponseRecorder {
+// doSignerRequest drives one signer endpoint function.
+//
+// ⚠️ It used to take an http.Handler and call ServeHTTP, because SignerHandler
+// was one. It is not any more — the decomposition gave each endpoint its own
+// exported function and its own route (internal/api/module_signers.go) — so the
+// endpoint is named at the call site. ⛔ The parameter is deliberately not a
+// path-to-function map: which handler a path reaches is the routes' business,
+// asserted in signer_routes_test.go against the production patterns, and a
+// second answer to that question here is exactly the drift those tests exist to
+// prevent.
+func doSignerRequest(t *testing.T, handler http.HandlerFunc, method, path string, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
 	if apiKey != nil {
@@ -283,7 +293,7 @@ func TestListSigners_NonAdmin_SeesOwned(t *testing.T) {
 		Enabled: true,
 	}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", apiKey)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", apiKey)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	resp := decodeSignerListResponse(t, rec)
@@ -313,7 +323,7 @@ func TestListSigners_Admin_SeesOwned(t *testing.T) {
 		Role: types.RoleAdmin,
 	}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	resp := decodeSignerListResponse(t, rec)
@@ -328,7 +338,7 @@ func TestListSigners_Unauthorized(t *testing.T) {
 	require.NoError(t, err)
 
 	// No API key in context
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", nil)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", nil)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
@@ -369,7 +379,7 @@ func TestListSigners_IncludesHDParentInJSON(t *testing.T) {
 		Role: types.RoleAdmin,
 	}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var resp ListSignersResponse
@@ -422,7 +432,7 @@ func TestListSigners_ExcludeHDDerived(t *testing.T) {
 		Role: types.RoleAdmin,
 	}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?exclude_hd_derived=true", adminAPIKey)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?exclude_hd_derived=true", adminAPIKey)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var resp ListSignersResponse
@@ -430,7 +440,7 @@ func TestListSigners_ExcludeHDDerived(t *testing.T) {
 	require.Len(t, resp.Signers, 1)
 	assert.Equal(t, primaryAddr, resp.Signers[0].Address)
 
-	recAll := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
+	recAll := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
 	require.Equal(t, http.StatusOK, recAll.Code)
 
 	var respAll ListSignersResponse
@@ -594,14 +604,14 @@ func TestListSigners_Filter_Locked(t *testing.T) {
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=true", admin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?locked=true", admin)
 	require.Equal(t, http.StatusOK, rec.Code)
 	resp := decodeSignerListResponse(t, rec)
 	assert.Equal(t, 1, resp.Total)
 	require.Len(t, resp.Signers, 1)
 	assert.Equal(t, filterAddrB, resp.Signers[0].Address)
 
-	rec = doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=false", admin)
+	rec = doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?locked=false", admin)
 	require.Equal(t, http.StatusOK, rec.Code)
 	resp = decodeSignerListResponse(t, rec)
 	// owner-1 sees A + C (locked=false among their owned set; B is locked, excluded)
@@ -613,7 +623,7 @@ func TestListSigners_Filter_Enabled(t *testing.T) {
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=false", admin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?enabled=false", admin)
 	require.Equal(t, http.StatusOK, rec.Code)
 	resp := decodeSignerListResponse(t, rec)
 	assert.Equal(t, 1, resp.Total)
@@ -627,7 +637,7 @@ func TestListSigners_Filter_Combined_LockedAndEnabled(t *testing.T) {
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
 	// Only A is enabled && unlocked among owner-1's set.
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=true&locked=false", admin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?enabled=true&locked=false", admin)
 	require.Equal(t, http.StatusOK, rec.Code)
 	resp := decodeSignerListResponse(t, rec)
 	require.Len(t, resp.Signers, 1)
@@ -639,7 +649,7 @@ func TestListSigners_Filter_LockedInvalid_400(t *testing.T) {
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=maybe", admin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?locked=maybe", admin)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -650,7 +660,7 @@ func TestListSigners_Filter_APIKeyID_AdminViewsOtherKey(t *testing.T) {
 
 	// Admin owner-1 asks "what does owner-2 see?". Should hit owner-2's
 	// owned+access set (active + pending signers owned by owner-2).
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-2", admin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-2", admin)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	resp := decodeSignerListResponse(t, rec)
 	require.Len(t, resp.Signers, 2)
@@ -666,7 +676,7 @@ func TestListSigners_Filter_APIKeyID_NonAdminCrossKey_403(t *testing.T) {
 	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleDev}
 
 	// Non-admin owner-1 attempts to peek at owner-2's signers.
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-2", nonAdmin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-2", nonAdmin)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -678,7 +688,7 @@ func TestListSigners_Filter_APIKeyID_NonAdminSelf_200(t *testing.T) {
 	// Non-admin pinning their own key is a no-op vs. default behavior,
 	// but must NOT 403 — otherwise a UI that always sends the filter
 	// would break for non-admin operators.
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-1", nonAdmin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-1", nonAdmin)
 	require.Equal(t, http.StatusOK, rec.Code)
 	resp := decodeSignerListResponse(t, rec)
 	// owner-1 sees A + B + C (their own three).
@@ -691,13 +701,13 @@ func TestListSigners_Filter_OwnershipStatus_PendingApproval_AdminGlobal(t *testi
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
 	// Default admin view (owner-1 scope) does not include owner-2's pending signer.
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", admin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", admin)
 	require.Equal(t, http.StatusOK, rec.Code)
 	resp := decodeSignerListResponse(t, rec)
 	assert.Equal(t, 3, resp.Total)
 
 	// Global pending queue surfaces cross-key signers without api_key_id guesswork.
-	rec = doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?ownership_status=pending_approval", admin)
+	rec = doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?ownership_status=pending_approval", admin)
 	require.Equal(t, http.StatusOK, rec.Code)
 	resp = decodeSignerListResponse(t, rec)
 	require.Len(t, resp.Signers, 1)
@@ -712,7 +722,7 @@ func TestListSigners_Filter_OwnershipStatus_PendingApproval_NonAdmin_403(t *test
 	require.NoError(t, err)
 	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleAgent}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?ownership_status=pending_approval", nonAdmin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?ownership_status=pending_approval", nonAdmin)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -721,6 +731,6 @@ func TestListSigners_Filter_OwnershipStatus_Invalid_400(t *testing.T) {
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?ownership_status=active", admin)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?ownership_status=active", admin)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

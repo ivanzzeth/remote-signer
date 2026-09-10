@@ -443,40 +443,19 @@ func (r *Router) setupRoutes() error {
 	r.handle("/api/v1/evm/guard/resume", Permitted(middleware.PermResumeGuard), http.HandlerFunc(r.handleGuardResume))
 
 	// Signer management routes
-	// GET: PermReadSigners (all roles); POST: PermCreateSigners checked in handler
-	// Method-scoped so creation is gated at the route. The handler used to be
-	// reached on the read permission and re-check PermCreateSigners itself.
-	r.handle("GET /api/v1/evm/signers", Permitted(middleware.PermReadSigners), signerHandler)
-	r.handle("POST /api/v1/evm/signers", Permitted(middleware.PermCreateSigners), signerHandler)
-	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock (admin only via PermUnlockSigner in handler)
-	// The four POST-only actions get their own method-scoped patterns so the mux
-	// rejects a GET rather than the handler doing it four times. The prefix
-	// registration stays for /signers/{address}/access, which legitimately
-	// serves GET, POST and DELETE on one path.
 	//
-	// ⚠️ Permission is unchanged (PermReadSigners) — unlock/lock/approve/transfer
-	// enforce ownership and role inside, against the signer being acted on,
-	// which is a resource-scoped decision the route cannot make. Same reason
-	// approval.go keeps its check; see the note in
-	// scripts/lib/arch-baseline/inline-permission-checks.txt.
-	//
-	// ⛔ Written out four times rather than as `for _, action := range …` with a
-	// concatenated pattern. The loop registered exactly these four routes, but
-	// the pattern string only existed at run time: anything reading the route
-	// table statically — the archcheck gates here today, an OpenAPI annotation
-	// extractor later — saw one unresolvable pattern (`…/{address}/*`) instead
-	// of four endpoints. A route table that is not readable without running the
-	// program cannot be gated on. Same registrations, same permission, same
-	// handler; only their visibility to a reader changes.
-	r.handle("POST /api/v1/evm/signers/{address}/unlock",
-		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
-	r.handle("POST /api/v1/evm/signers/{address}/lock",
-		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
-	r.handle("POST /api/v1/evm/signers/{address}/approve",
-		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
-	r.handle("POST /api/v1/evm/signers/{address}/transfer",
-		Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
-	r.handle("/api/v1/evm/signers/", Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
+	// ⚠️ The eleven patterns and their permissions live in module_signers.go
+	// now, and every permission is byte-for-byte the one that stood here. What
+	// changed is that the method-less `/api/v1/evm/signers/` prefix became the
+	// five endpoints it was hiding — item DELETE/PATCH, access list/grant/revoke
+	// — so a verb no endpoint serves is refused by the mux instead of being read
+	// out of the path by the handler and performed (6d30ba1). See
+	// signersModule.Routes for the measured before/after table.
+	signersMod, signersModErr := NewSignersModule(signerHandler)
+	if signersModErr != nil {
+		return fmt.Errorf("failed to create signers module: %w", signersModErr)
+	}
+	r.mountModules(signersMod)
 
 	// HD wallet management routes
 	//

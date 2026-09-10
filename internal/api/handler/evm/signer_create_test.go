@@ -30,7 +30,7 @@ func TestCreateSigner_ReadOnly(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "readonly")
@@ -47,7 +47,7 @@ func TestCreateSigner_Unauthorized(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	// No API key in context
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
@@ -68,7 +68,7 @@ func TestCreateSigner_InvalidBody(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -93,7 +93,7 @@ func TestCreateSigner_Success(t *testing.T) {
 	apiKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 
 	assert.Equal(t, http.StatusCreated, rec.Code)
 

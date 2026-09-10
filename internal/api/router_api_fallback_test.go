@@ -74,7 +74,11 @@ func TestAPIFallback_DoesNotShadowRegisteredRoutes(t *testing.T) {
 	r.handle("GET /api/v1/evm/signers", Public("test fixture"), okHandler("signers"))
 	r.handle("POST /api/v1/evm/signers/{address}/unlock", Public("test fixture"), okHandler("unlock"))
 	r.handle("POST /api/v1/evm/signers/{address}/transfer", Public("test fixture"), okHandler("transfer"))
-	r.handle("/api/v1/evm/signers/", Public("test fixture"), okHandler("signers-prefix"))
+	// ⚠️ This used to be `/api/v1/evm/signers/` — the method-less prefix that
+	// carried five endpoints and matched every verb. S4's last third replaced it
+	// with named routes; the access sub-tree is the shape worth keeping here,
+	// because it is the one that answers three different methods on one path.
+	r.handle("GET /api/v1/evm/signers/{address}/access", Public("test fixture"), okHandler("access-list"))
 	r.handle("GET /health", Public("test fixture"), okHandler("health"))
 	// ⛔ The two routes with the most to lose from being shadowed. They are the
 	// only Public patterns under /api/v1 (module_bootstrap.go), and they are what
@@ -104,7 +108,7 @@ func TestAPIFallback_DoesNotShadowRegisteredRoutes(t *testing.T) {
 		{"signer collection", http.MethodGet, "/api/v1/evm/signers", "GET /api/v1/evm/signers"},
 		{"signer action unlock", http.MethodPost, "/api/v1/evm/signers/0xabc/unlock", "POST /api/v1/evm/signers/{address}/unlock"},
 		{"signer action transfer", http.MethodPost, "/api/v1/evm/signers/0xabc/transfer", "POST /api/v1/evm/signers/{address}/transfer"},
-		{"signer prefix still serves the rest", http.MethodGet, "/api/v1/evm/signers/0xabc/access", "/api/v1/evm/signers/"},
+		{"signer access, now its own route", http.MethodGet, "/api/v1/evm/signers/0xabc/access", "GET /api/v1/evm/signers/{address}/access"},
 		{"non-API route is untouched", http.MethodGet, "/health", "GET /health"},
 		// ⛔ Unauthenticated bootstrap must keep reaching its own handler. These
 		// are the highest-consequence rows in the table: a caller doing first-run
@@ -296,6 +300,119 @@ func TestAPIFallback_WalletDeepPathAndWrongMethod(t *testing.T) {
 			if pattern != "/api/v1/" {
 				t.Fatalf("%s %s dispatches to %q, want the /api/v1/ fallback — "+
 					"a wallet pattern is still claiming more than one endpoint's worth of paths",
+					tc.method, tc.target, pattern)
+			}
+
+			rec := httptest.NewRecorder()
+			r.Handler().ServeHTTP(rec, httptest.NewRequest(tc.method, tc.target, nil))
+			if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+				t.Fatalf("%s %s answered HTML (%d, content-type %q) — a JSON client would break on it",
+					tc.method, tc.target, rec.Code, rec.Header().Get("Content-Type"))
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s answered %d, want 401: the request carries no credential and the fallback is "+
+					"AuthenticatedOnly, so the chain must refuse before the 404 body", tc.method, tc.target, rec.Code)
+			}
+		})
+	}
+}
+
+// TestAPIFallback_SignerStrandedPaths is where the behaviour-change table on
+// signersModule.Routes is *measured* rather than reasoned about, and it is the
+// highest-consequence one of the three: the pattern being removed,
+// "/api/v1/evm/signers/", was registered with no method, so it matched every
+// verb — and until 6d30ba1 that meant `GET .../{address}/unlock` unlocked a
+// signer and `DELETE .../{address}/approve` approved one.
+//
+// ⚠️ The handler-package tests for this module run against a bare mux with no
+// fallback, so they see the mux's own 404 and 405. Here the real
+// registerAPIFallback stands next to the real module, which is the only place
+// the daemon's answer is visible: "/api/v1/" matches every path and every
+// method, so ⛔ the daemon never answers 405 for these — every stranded shape,
+// wrong-verb ones included, lands on the JSON 404 fallback. What must never
+// happen is that it lands on the SPA and comes back text/html to a JSON client.
+func TestAPIFallback_SignerStrandedPaths(t *testing.T) {
+	signersMod, err := NewSignersModule(maximalSignerHandler(t))
+	if err != nil {
+		t.Fatalf("building the signers module: %v", err)
+	}
+
+	var patterns []string
+	signersMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		patterns = append(patterns, pattern)
+	}))
+	if len(patterns) != 11 {
+		t.Fatalf("signersModule registered %d patterns, want 11 — the rows below would pass for the wrong reason",
+			len(patterns))
+	}
+
+	r := newChainedTestRouter()
+	r.mountModules(signersMod)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<!doctype html><html>spa</html>"))
+	r.registerAPIFallback()
+
+	const addr = "0x1111111111111111111111111111111111111111"
+
+	// Each real endpoint still resolves to its own pattern: the fallback shadows
+	// none of them, and the decomposition left none of them behind.
+	for _, pattern := range patterns {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("signer pattern %q has no method — the rows below assume method+path patterns", pattern)
+		}
+		target := strings.NewReplacer("{address}", addr, "{keyID}", "k-1").Replace(path)
+		if strings.Contains(target, "{") {
+			t.Fatalf("signer pattern %q has a wildcard this test does not know how to fill: %q", pattern, target)
+		}
+		if _, got := r.mux.Handler(httptest.NewRequest(method, target, nil)); got != pattern {
+			t.Errorf("%s %s dispatches to %q, want its own route %q", method, target, got, pattern)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+	}{
+		// ⛔ The four rows this whole step exists for. Every one of them reached
+		// HandleSignerAction through the method-less prefix and performed the
+		// action — until 6d30ba1 put a guard inside the handler and made them
+		// answer 405 instead. There is now no handler for them to reach at all,
+		// which is the difference between a rule someone remembered to write and
+		// a rule the router cannot forget.
+		{"GET on unlock, which used to unlock the signer", http.MethodGet, "/api/v1/evm/signers/" + addr + "/unlock"},
+		{"GET on lock, which used to lock it", http.MethodGet, "/api/v1/evm/signers/" + addr + "/lock"},
+		{"DELETE on approve, which used to approve it", http.MethodDelete, "/api/v1/evm/signers/" + addr + "/approve"},
+		{"PATCH on transfer, which used to transfer ownership", http.MethodPatch, "/api/v1/evm/signers/" + addr + "/transfer"},
+		// ---- what else the prefix used to swallow (measured, see module_signers.go) ----
+		{"the bare prefix, which answered 400 invalid path", http.MethodGet, "/api/v1/evm/signers/"},
+		{"an unknown action, which answered 400 unknown action", http.MethodPost, "/api/v1/evm/signers/" + addr + "/foobar"},
+		{"a signer with no action, which answered 400 invalid path", http.MethodGet, "/api/v1/evm/signers/" + addr},
+		{"revoke with no key id, which answered 400 api_key_id is required", http.MethodDelete, "/api/v1/evm/signers/" + addr + "/access"},
+		// ⚠️ Not a 404 before: SplitN(path, "/", 3) put "k-1/extra" in the third
+		// part and handleAccess's GET branch ignored it, so a path two segments
+		// deeper than any endpoint returned the signer's access list, 200.
+		{"deeper than any endpoint, which returned the access list", http.MethodGet, "/api/v1/evm/signers/" + addr + "/access/k-1/extra"},
+		// ⚠️ Trailing slash. Unlike the HD wallet handler, signer.go never ran
+		// TrimSuffix(path, "/") — the empty last segment simply became an empty
+		// *action*, and the action-less branch runs for DELETE and PATCH. So these
+		// two rows are a real 204-and-deleted and 200-and-patched being withdrawn,
+		// not a forgiving alias.
+		{"a signer with a trailing slash, which DELETE used to honour", http.MethodDelete, "/api/v1/evm/signers/" + addr + "/"},
+		{"a signer with a trailing slash, which PATCH used to honour", http.MethodPatch, "/api/v1/evm/signers/" + addr + "/"},
+		// ⚠️ This one was a 301, not a 405: ServeMux redirects a path with no
+		// match to the subtree pattern one level up, and "/api/v1/evm/signers/"
+		// was such a pattern, so PUT on the collection was bounced into the prefix
+		// and answered 400 there. With the prefix gone there is nothing to
+		// redirect to, and proposal §0 correction 9 applies — "/api/v1/" matches
+		// every method, so it is a 404 rather than a 405.
+		{"a method the collection does not serve, which used to 301 into the prefix", http.MethodPut, "/api/v1/evm/signers"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pattern := r.mux.Handler(httptest.NewRequest(tc.method, tc.target, nil))
+			if pattern != "/api/v1/" {
+				t.Fatalf("%s %s dispatches to %q, want the /api/v1/ fallback — "+
+					"a signer pattern is still claiming more than one endpoint's worth of paths",
 					tc.method, tc.target, pattern)
 			}
 

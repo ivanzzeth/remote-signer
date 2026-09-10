@@ -34,3 +34,25 @@ POST /api/v1/evm/signers/{address}/approve
 POST /api/v1/evm/signers/{address}/lock
 POST /api/v1/evm/signers/{address}/transfer
 POST /api/v1/evm/signers/{address}/unlock
+
+# ⭐ 2026-09-10,提案 S4 最后三分之一:signers 拆解。这四行是**同一形状的第二批**
+# —— 上面四条是循环展开时第一次被看见的,这四条是**方法无关的前缀**
+# `/api/v1/evm/signers/` 拆成具名路由时第一次被看见的。
+#
+# ⛔ 它们不是这次改出来的债。那个前缀本来就注册着 PermReadSigners,而它背后
+# 藏着五个端点:DELETE/PATCH 一个 signer、授权、撤权(外加只读的列举授权)。
+# 「写操作挂只读权限」在拆解之前就已经是事实,只是门禁**逐条看不见它** ——
+# 前缀没有 method 前缀,这条判据一个字都说不出来(见上面「它看不见的那一半」)。
+# 拆解把它们从一条糊掉的记录变成四个各有其名的条目,和 S1① 对那四个 action
+# 做的事一模一样。
+#
+# ⚠️ 权限是**逐字照抄**的,一个字节都没动。真正的判断同样是资源域的:
+# handleDeleteSigner / handlePatchSignerLabels / accessService.GrantAccess /
+# RevokeAccess 都拿被操作的那个 signer 去查 owner(不是 owner 回 403,连
+# ownership 记录都没有回 404),路由做不了这个判断。
+# ⛔ 留在基线里不代表它是对的,代表**改它是一个安全决定**,不是重构 ——
+# 按提案 §2.5,失败方向不对称:过严会在 e2e 里显形,过松不会。单独走一个 PR。
+DELETE /api/v1/evm/signers/{address}
+DELETE /api/v1/evm/signers/{address}/access/{keyID}
+PATCH /api/v1/evm/signers/{address}
+POST /api/v1/evm/signers/{address}/access

@@ -18,6 +18,46 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
+// HandleWalletSigners handles GET /api/v1/evm/wallets/{wallet_id}/signers.
+//
+// ⛔ NO ROUTE REGISTERS IT. It is mux-facing code — it checks r.Method itself
+// and cuts r.URL.Path itself — reachable from nothing but its own tests
+// (evm_coverage_boost2_test.go, evm_coverage_boost3_test.go). Grepping the tree
+// for the path it claims to serve finds this function, its tests, and nothing
+// else: `/api/v1/evm/wallets/` is not a pattern any module or setupRoutes
+// registers, and pkg/client, web/src and e2e/ never request it.
+//
+// ⚠️ It is left in place, unchanged, by the route decomposition rather than
+// deleted, and that is a decision to be taken separately: deleting an exported
+// method with six tests is not an execution detail of "give each endpoint its
+// own route", and a reader who assumes it is dead should be the one to prove it
+// against the SDKs rather than have this step assume it. It is why the signer
+// family keeps one entry in the handler-path-dispatch baseline.
+//
+// ⚠️ It moved here from signer.go, which is a file move and nothing else — the
+// baseline keys on <pkg>.<Recv>.<FuncName> and does not move with it. The
+// reason it moved is that signer.go is now the routed surface, every function
+// in it reads r.PathValue, and leaving the one function that does not next to
+// them invites the next reader to copy the wrong one.
+func (h *SignerHandler) HandleWalletSigners(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
+		return
+	}
+
+	// Parse wallet_id from path: /api/v1/evm/wallets/{wallet_id}/signers
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/wallets/")
+	path = strings.TrimSuffix(path, "/signers")
+	walletID := strings.TrimSpace(path)
+
+	if walletID == "" {
+		respond.Error(w, "wallet_id is required", http.StatusBadRequest, h.logger)
+		return
+	}
+
+	h.listWalletSigners(w, r, walletID)
+}
+
 // listWalletSigners handles GET /api/v1/evm/wallets/{wallet_id}/signers
 func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request, walletID string) {
 	query := r.URL.Query()

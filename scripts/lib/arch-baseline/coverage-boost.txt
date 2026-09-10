@@ -24,6 +24,16 @@
 #   · 说不清的 → 才删
 #
 # ⚠️ 变小也红 —— 那一刻正是把基线改小的时候(一行编辑)。
+#
+# 2026-09-10 · 提案 S4(signers 拆解):**15677 → 15664 行**,文件数不变。
+# 少掉的 13 行是 `TestB3HandleRevokeAccess_NoKeyInPath`:它断言
+# `DELETE /api/v1/evm/signers/{addr}/access`(没有 key id)回 400
+# "api_key_id is required in path" —— 而那道守卫**只因为一条方法无关的前缀
+# 让「没有 key id」的请求进得了 handler 才存在**。拆解之后 `{keyID}` 通配段
+# 不匹配空段,请求根本到不了 handler,那句话再也产生不出来。
+# ⛔ 不是删掉了事:它按「说得清测的是什么行为的就改名搬走」那条路走的 ——
+# 现在是 signer_routes_test.go 里 TestSignerRoutes_UnclaimedPathsReachNoHandler
+# 的一行,断言的是同一个请求**到不了任何 handler**(经生产 pattern 判定)。
 
 files      13
-lines   15677
+lines   15664

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/respond"
 
@@ -71,163 +70,166 @@ func (h *SignerHandler) SetMaxKeystoresPerKey(max func() int) {
 	h.maxKeystoresPerKey = max
 }
 
-// ServeHTTP handles /api/v1/evm/signers
-func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	apiKey := middleware.GetAPIKey(r.Context())
-	if apiKey == nil {
+// --- Handler entry points ---
+//
+// # One exported function per endpoint (proposal S4, copying S3's and the
+// HD-wallet step's shape)
+//
+// These eleven replace ServeHTTP and HandleSignerAction, which took
+// r.URL.Path apart with TrimPrefix/SplitN and fanned out into them. The
+// registration that used to hide them behind one method-less prefix plus six
+// method-scoped patterns is internal/api/module_signers.go, and it now names
+// each one.
+//
+// ⛔ SignerHandler is deliberately no longer an http.Handler, and there is no
+// HandleSignerAction any more. Both were ways of handing the whole signer
+// surface to one pattern, and that is the property being removed:
+//
+//	`/api/v1/evm/signers/` was registered with no method, so it matched every
+//	verb. Go's ServeMux answers 405 only when a pattern matches the path and
+//	*no* pattern matches the method — with a method-less prefix in the table
+//	there is always a match, so `GET .../{address}/unlock` and
+//	`DELETE .../{address}/approve` reached HandleSignerAction, which read the
+//	action out of the path and performed it. That was fixed in 6d30ba1 by an
+//	explicit signerActionMethods guard inside the handler; the guard is gone
+//	from here because the routes now state the same rule where the mux can
+//	enforce it. TestSignerRoutes_StateChangeRequiresPost asserts it through the
+//	production patterns, and asserts the manager was never called — refusing
+//	after mutating is not refusing.
+//
+// ⚠️ Every guard the two dispatchers ran before fanning out is still run, in
+// the same order and with the same words and status codes — see requireAPIKey
+// and signerAddress. Only the dispatch left.
+
+// requireAPIKey is the 401 both dispatchers answered at their top, before they
+// looked at the path at all. ⚠️ It is not redundant with the middleware chain:
+// a request that reaches a registered route has a key, but these functions are
+// also called directly by tests, and several of the callees dereference the key
+// without checking it.
+func (h *SignerHandler) requireAPIKey(w http.ResponseWriter, r *http.Request) bool {
+	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
-		return
+		return false
 	}
-
-	switch r.Method {
-	case http.MethodGet:
-		h.listSigners(w, r)
-	case http.MethodPost:
-		h.createSigner(w, r)
-	default:
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-	}
+	return true
 }
 
-// HandleSignerAction handles /api/v1/evm/signers/{address}/{action}
-// signerActionMethods is the verb each state-changing action accepts, and it is
-// the same verb its own method-scoped route in router.go declares. ⚠️ `access`
-// is deliberately absent: it serves three methods on one path and dispatches on
-// them itself, so a single expected verb would be wrong for it.
-var signerActionMethods = map[string]string{
-	"unlock":   http.MethodPost,
-	"lock":     http.MethodPost,
-	"approve":  http.MethodPost,
-	"transfer": http.MethodPost,
+// signerAddress is requireAPIKey plus the {address} wildcard.
+//
+// ⚠️ It does NOT validate the address. HandleSignerAction did not either — it
+// took whatever segment followed the prefix — and the ownership lookup in each
+// callee is what answers 403/404 for an address that does not exist. Adding a
+// format check here would turn those into 400 and is a behaviour change this
+// step has no business making.
+func (h *SignerHandler) signerAddress(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if !h.requireAPIKey(w, r) {
+		return "", false
+	}
+	return r.PathValue("address"), true
 }
 
-func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Request) {
-	apiKey := middleware.GetAPIKey(r.Context())
-	if apiKey == nil {
-		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
+// ListSigners serves GET /api/v1/evm/signers.
+func (h *SignerHandler) ListSigners(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAPIKey(w, r) {
 		return
 	}
-
-	// Parse path: /api/v1/evm/signers/{address}[/{action}[/{extra}]]
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/signers/")
-	parts := strings.SplitN(path, "/", 3)
-	if len(parts) < 1 || parts[0] == "" {
-		respond.Error(w, "invalid path: expected /api/v1/evm/signers/{address}", http.StatusBadRequest, h.logger)
-		return
-	}
-
-	address := parts[0]
-	action := ""
-	if len(parts) >= 2 {
-		action = parts[1]
-	}
-
-	// Handle DELETE or PATCH /api/v1/evm/signers/{address} (no action segment)
-	if action == "" {
-		if r.Method == http.MethodDelete {
-			h.handleDeleteSigner(w, r, address)
-			return
-		}
-		if r.Method == http.MethodPatch {
-			h.handlePatchSignerLabels(w, r, address)
-			return
-		}
-		respond.Error(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest, h.logger)
-		return
-	}
-
-	// ⛔ The comment that used to stand here said the mux answers 405 before this
-	// switch runs, because each of these four has its own
-	// `POST /api/v1/evm/signers/{address}/<action>` route. **That was false, and
-	// it is the reasoning error that made the bug.**
-	//
-	// Go's ServeMux answers 405 only when a pattern matches the path and *no*
-	// pattern matches the method. `/api/v1/evm/signers/` is registered without a
-	// method (router.go), so it matches every method — there is always a match,
-	// and 405 never happens. A GET to .../{address}/unlock therefore did not get
-	// 405; it fell through to this handler, which read the action out of the path
-	// and unlocked the signer. Verified against the real pattern set:
-	//
-	//   POST   .../0xabc/unlock   → "POST /api/v1/evm/signers/{address}/unlock"
-	//   GET    .../0xabc/unlock   → "/api/v1/evm/signers/"      ← here
-	//   DELETE .../0xabc/approve  → "/api/v1/evm/signers/"      ← here
-	//
-	// So GET and DELETE performed ownership transfers, unlocks, locks and
-	// approvals on a daemon holding private keys, and none of the four
-	// handlers checks r.Method either.
-	//
-	// ⚠️ The permission is a separate question and deliberately not touched here:
-	// these four are gated on PermReadSigners, which is recorded in
-	// scripts/lib/arch-baseline/ast/route-mutating-perm.txt as a known deferred
-	// decision. This fix is only about the verb.
-	//
-	// ⭐ The structural fix is S5's decomposition — once the method-less prefix
-	// is gone, an unroutable verb cannot reach a handler at all. Until then this
-	// guard states the same rule in the one place that still needs it.
-	if want, isAction := signerActionMethods[action]; isAction && r.Method != want {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
-
-	switch action {
-	case "unlock":
-		h.handleUnlock(w, r, address)
-	case "lock":
-		h.handleLock(w, r, address)
-	case "approve":
-		h.handleApproveSigner(w, r, address)
-	case "transfer":
-		h.handleTransferOwnership(w, r, address)
-	case "access":
-		extra := ""
-		if len(parts) == 3 {
-			extra = parts[2]
-		}
-		h.handleAccess(w, r, address, extra)
-	default:
-		respond.Error(w, "unknown action: "+action, http.StatusBadRequest, h.logger)
-	}
+	h.listSigners(w, r)
 }
 
-// handleAccess routes access sub-actions
-func (h *SignerHandler) handleAccess(w http.ResponseWriter, r *http.Request, address, extra string) {
-	switch r.Method {
-	case http.MethodGet:
-		// GET /api/v1/evm/signers/{address}/access — list access
-		h.handleListAccess(w, r, address)
-	case http.MethodPost:
-		// POST /api/v1/evm/signers/{address}/access — grant access
-		h.handleGrantAccess(w, r, address)
-	case http.MethodDelete:
-		// DELETE /api/v1/evm/signers/{address}/access/{keyID}
-		if extra == "" {
-			respond.Error(w, "api_key_id is required in path", http.StatusBadRequest, h.logger)
-			return
-		}
-		h.handleRevokeAccess(w, r, address, extra)
-	default:
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
+// CreateSigner serves POST /api/v1/evm/signers.
+func (h *SignerHandler) CreateSigner(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAPIKey(w, r) {
+		return
 	}
+	h.createSigner(w, r)
 }
 
-// HandleWalletSigners handles GET /api/v1/evm/wallets/{wallet_id}/signers
-func (h *SignerHandler) HandleWalletSigners(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
+// DeleteSigner serves DELETE /api/v1/evm/signers/{address}.
+func (h *SignerHandler) DeleteSigner(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
 		return
 	}
+	h.handleDeleteSigner(w, r, address)
+}
 
-	// Parse wallet_id from path: /api/v1/evm/wallets/{wallet_id}/signers
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/wallets/")
-	path = strings.TrimSuffix(path, "/signers")
-	walletID := strings.TrimSpace(path)
-
-	if walletID == "" {
-		respond.Error(w, "wallet_id is required", http.StatusBadRequest, h.logger)
+// PatchSignerLabels serves PATCH /api/v1/evm/signers/{address}.
+func (h *SignerHandler) PatchSignerLabels(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
 		return
 	}
+	h.handlePatchSignerLabels(w, r, address)
+}
 
-	h.listWalletSigners(w, r, walletID)
+// Unlock serves POST /api/v1/evm/signers/{address}/unlock.
+func (h *SignerHandler) Unlock(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
+		return
+	}
+	h.handleUnlock(w, r, address)
+}
+
+// Lock serves POST /api/v1/evm/signers/{address}/lock.
+func (h *SignerHandler) Lock(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
+		return
+	}
+	h.handleLock(w, r, address)
+}
+
+// ApproveSigner serves POST /api/v1/evm/signers/{address}/approve.
+func (h *SignerHandler) ApproveSigner(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
+		return
+	}
+	h.handleApproveSigner(w, r, address)
+}
+
+// TransferOwnership serves POST /api/v1/evm/signers/{address}/transfer.
+func (h *SignerHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
+		return
+	}
+	h.handleTransferOwnership(w, r, address)
+}
+
+// ListAccess serves GET /api/v1/evm/signers/{address}/access.
+func (h *SignerHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
+		return
+	}
+	h.handleListAccess(w, r, address)
+}
+
+// GrantAccess serves POST /api/v1/evm/signers/{address}/access.
+func (h *SignerHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
+		return
+	}
+	h.handleGrantAccess(w, r, address)
+}
+
+// RevokeAccess serves DELETE /api/v1/evm/signers/{address}/access/{keyID}.
+//
+// ⚠️ handleAccess used to answer 400 "api_key_id is required in path" when the
+// key id segment was empty, which was only reachable because a prefix pattern
+// let `DELETE .../{address}/access` reach a handler at all. A {keyID} wildcard
+// does not match an empty segment, so that request now matches no DELETE
+// pattern and the mux answers 405 (GET and POST are registered on that path).
+// The guard is gone rather than kept as unreachable code.
+func (h *SignerHandler) RevokeAccess(w http.ResponseWriter, r *http.Request) {
+	address, ok := h.signerAddress(w, r)
+	if !ok {
+		return
+	}
+	h.handleRevokeAccess(w, r, address, r.PathValue("keyID"))
 }
 
 // readOnly reports whether write operations are blocked right now.

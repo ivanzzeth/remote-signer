@@ -63,6 +63,32 @@
 # ⭐ 也就是说「按注册侧数」在这一步会显示**零进展**,而实际上一个吞掉整棵子树的
 # 前缀消失了,`{address}` 第一次真的经 PathValue 送到 handler。这正是本判据
 # 盯 handler 侧而不是注册侧的理由,在 S4 上比在 S3 上更明显。
+#
+# 2026-09-10 · 提案 S4(signers 拆解,S4 的最后三分之一):**17 → 16 条**,文件数不变(14)。
+# 删掉的是 `internal/api/handler/evm.SignerHandler.HandleSignerAction` —— 一条,
+# 背后是 **9 个端点**(item DELETE/PATCH、unlock/lock/approve/transfer、
+# access 的 list/grant/revoke),外加 `ServeHTTP` 的两个(list/create)。
+# ⚠️ `SignerHandler.ServeHTTP` 和 wallet 那次一样**从来不在基线里** —— 它只
+# `switch r.Method`。所以这一步基线只少一行,而注册侧 **7 条 pattern → 11 条**。
+# ⚠️ 文件数**没动**:`HandleWalletSigners` 从 signer.go 挪到了 signer_wallet.go
+# (见下),一个文件退出、另一个文件进来。key 是 `<pkg>.<Recv>.<FuncName>`,
+# 不含文件名,所以这次挪动对基线本身是不可见的 —— 这里写出来是免得下一个人
+# 拿文件数去核对条数。
+#
+# ⛔ 这一步和前两步不同,它关的是一个**已经发生过**的洞:
+# `/api/v1/evm/signers/` 注册时不带 method,于是它匹配所有动词,而 Go 的 mux
+# 只有在「路径匹配、方法都不匹配」时才回 405 —— 有这个前缀在,永远有一条匹配,
+# 405 永远不会发生。`GET .../{address}/unlock` 因此真的解锁了 signer,
+# `DELETE .../{address}/approve` 真的批准了(6d30ba1)。那次修的是 handler 里
+# 加一道显式 method 守卫;这一步把守卫删了,因为**没有 pattern 再把这些动词
+# 路由到任何地方** —— 这是两种不同的东西:一条要有人记得写的规则,和一条
+# router 忘不掉的规则。
+#
+# ⛔ `SignerHandler.HandleWalletSigners` 留在基线里,而且它是**没有任何路由
+# 注册的**:全仓找不到 `/api/v1/evm/wallets/` 这条 pattern,pkg/client、web/src、
+# e2e/ 也没人请求它,它只被自己的 6 个测试调到。删一个带测试的导出方法不是
+# 「给每个端点一条路由」这件事的执行细节,所以这次不删 —— 它是一个决定,
+# 该单独判断(见 signer_wallet.go 上的注释)。
 internal/api/handler.ACLHandler.ServeHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
 internal/api/handler.PresetHandler.ServeHTTP
@@ -77,6 +103,5 @@ internal/api/handler/evm.RequestHandler.ServeHTTP
 internal/api/handler/evm.RequestSimulationHandler.ServeHTTP
 internal/api/handler/evm.RuleHandler.ServeHTTP
 internal/api/handler/evm.SignHandler.ServeHTTP
-internal/api/handler/evm.SignerHandler.HandleSignerAction
 internal/api/handler/evm.SignerHandler.HandleWalletSigners
 internal/api/handler/evm.TransactionsHandler.ServeHTTP

@@ -712,7 +712,7 @@ func TestHandleApproveSigner_AdminRequired(t *testing.T) {
 	require.NoError(t, err)
 
 	devKey := &types.APIKey{ID: "dev-key", Role: types.RoleDev, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.ApproveSigner, http.MethodPost,
 		"/api/v1/evm/signers/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", nil, devKey)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "admin access required")
@@ -736,7 +736,7 @@ func TestHandleApproveSigner_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.ApproveSigner, http.MethodPost,
 		"/api/v1/evm/signers/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", nil, adminKey)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -760,7 +760,7 @@ func TestHandleApproveSigner_AlreadyActive(t *testing.T) {
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.ApproveSigner, http.MethodPost,
 		"/api/v1/evm/signers/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", nil, adminKey)
 	assert.Equal(t, http.StatusConflict, rec.Code)
 }
@@ -784,7 +784,7 @@ func TestHandleApproveSigner_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.ApproveSigner, http.MethodPost,
 		"/api/v1/evm/signers/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", nil, adminKey)
 	assert.Equal(t, http.StatusOK, rec.Code)
 
@@ -804,7 +804,7 @@ func TestHandleTransferOwnership_MissingNewOwner(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", map[string]string{"new_owner_id": ""}, testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -829,7 +829,7 @@ func TestHandleTransferOwnership_NotOwner(t *testing.T) {
 	require.NoError(t, err)
 
 	strangerKey := &types.APIKey{ID: "stranger-key", Role: types.RoleDev, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", map[string]string{"new_owner_id": "new-owner"}, strangerKey)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -854,7 +854,7 @@ func TestHandleTransferOwnership_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", map[string]string{"new_owner_id": "new-owner"}, ownerKey)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
@@ -881,7 +881,7 @@ func TestHandleLock_AlreadyLocked(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, mgr, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.Lock, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/lock", nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusConflict, rec.Code)
 }
@@ -895,7 +895,7 @@ func TestHandleLock_SignerNotFound(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, mgr, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.Lock, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/lock", nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -909,7 +909,7 @@ func TestHandleLock_InternalError(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, mgr, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.Lock, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/lock", nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -928,7 +928,7 @@ func TestHandleUnlock_AlreadyUnlocked(t *testing.T) {
 	h := newActionHandler(t, mgr, owners)
 
 	body := map[string]string{"password": "secret123"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.Unlock, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/unlock", body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusConflict, rec.Code)
 }
@@ -943,7 +943,7 @@ func TestHandleUnlock_SignerNotFound(t *testing.T) {
 	h := newActionHandler(t, mgr, owners)
 
 	body := map[string]string{"password": "secret123"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.Unlock, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/unlock", body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -958,7 +958,7 @@ func TestHandleUnlock_InternalError(t *testing.T) {
 	h := newActionHandler(t, mgr, owners)
 
 	body := map[string]string{"password": "secret123"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.Unlock, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/unlock", body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -972,7 +972,7 @@ func TestHandleUnlock_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, testOwnerAPIKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.Unlock, rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -989,7 +989,7 @@ func TestHandleDeleteSigner_InternalError(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, mgr, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -1003,7 +1003,7 @@ func TestHandleDeleteSigner_SignerNotFound(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, mgr, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -1070,7 +1070,7 @@ func TestHandlePatchSignerLabels_NoDisplayNameOrTags(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPatch,
+	rec := doActionRequest(t, h.PatchSignerLabels, http.MethodPatch,
 		"/api/v1/evm/signers/"+testAddr, map[string]interface{}{}, testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -1080,7 +1080,7 @@ func TestHandlePatchSignerLabels_NotOwner(t *testing.T) {
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
 	body := map[string]interface{}{"display_name": "New Name"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPatch,
+	rec := doActionRequest(t, h.PatchSignerLabels, http.MethodPatch,
 		"/api/v1/evm/signers/"+testAddr, body, testOtherAPIKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -1111,7 +1111,7 @@ func TestHandlePatchSignerLabels_SignerNotFoundViaInfo(t *testing.T) {
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
 	body := map[string]interface{}{"display_name": "New Name"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPatch,
+	rec := doActionRequest(t, h.PatchSignerLabels, http.MethodPatch,
 		"/api/v1/evm/signers/"+testAddr, body, ownerKey)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }

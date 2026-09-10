@@ -489,7 +489,7 @@ func TestB3HandlePatchSignerLabels_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, testOwnerAPIKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.PatchSignerLabels, rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -502,7 +502,7 @@ func TestB3HandleTransferOwnership_NotOwner(t *testing.T) {
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
 	body := map[string]interface{}{"new_owner_id": "yet-another-key"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", body, testOtherAPIKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -512,7 +512,7 @@ func TestB3HandleTransferOwnership_NotFound(t *testing.T) {
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
 	body := map[string]interface{}{"new_owner_id": "other-key"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -651,7 +651,7 @@ func TestB3HandleDeleteSigner_IsOwnerError(t *testing.T) {
 	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", nil, signAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -669,7 +669,7 @@ func TestB3HandleTransferOwnership_InvalidBody2(t *testing.T) {
 	h, err := NewSignerHandler(&signerActionMock{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", bytes.NewBufferString("bad json"), testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -680,23 +680,10 @@ func TestB3HandleTransferOwnership_MissingNewOwner(t *testing.T) {
 	require.NoError(t, err)
 
 	body := map[string]string{}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "new_owner_id is required")
-}
-
-// ---------------------------------------------------------------------------
-// signer_access.go: handleRevokeAccess coverage
-// ---------------------------------------------------------------------------
-
-func TestB3HandleRevokeAccess_NoKeyInPath(t *testing.T) {
-	owners := map[string]string{testAddr: testKeyID}
-	h := newActionHandler(t, &signerActionMock{}, owners)
-
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
-		"/api/v1/evm/signers/"+testAddr+"/access", nil, testOwnerAPIKey())
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // ---------------------------------------------------------------------------
@@ -707,7 +694,7 @@ func TestB3HandleListAccess_NotFound(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodGet,
+	rec := doActionRequest(t, h.ListAccess, http.MethodGet,
 		"/api/v1/evm/signers/0xnonexistent/access", nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -1094,7 +1081,7 @@ func TestB3ListSigners_InvalidTypeFilter(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?type=invalid_type", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?type=invalid_type", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid type filter")
 }
@@ -1516,7 +1503,7 @@ func TestB3HandleRevokeAccess_Success(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.RevokeAccess, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr+"/access/some-key-id", nil, testOwnerAPIKey())
 	// Should succeed
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -1587,7 +1574,7 @@ func TestB3CreateSigner_ReadOnly(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), func() bool { return true })
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodPost, "/api/v1/evm/signers", signAdminKey())
+	rec := doSignerRequest(t, h.CreateSigner, http.MethodPost, "/api/v1/evm/signers", signAdminKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -1605,7 +1592,7 @@ func TestB3CreateSigner_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -1623,7 +1610,7 @@ func TestB3ListSigners_StatusFilter(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?status=active", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?status=active", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -1649,7 +1636,7 @@ func TestB3ListSigners_EnabledFilter(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=true", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?enabled=true", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -1863,7 +1850,7 @@ func TestB3HandleRevokeAccess_NotOwner(t *testing.T) {
 	owners := map[string]string{}
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.RevokeAccess, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr+"/access/some-key-id", nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -1876,7 +1863,7 @@ func TestB3HandleTransferOwnership_InvalidBody(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer",
 		strings.NewReader("bad json"), testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -1887,7 +1874,7 @@ func TestB3HandleTransferOwnership_NoNewOwner(t *testing.T) {
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
 	body := map[string]interface{}{"new_owner_id": ""}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -1930,7 +1917,7 @@ func TestB3CreateSigner_ResourceLimitExceeded(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -1951,7 +1938,7 @@ func TestB3CreateSigner_BothKeysProvided(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -1980,7 +1967,7 @@ func TestB3HandleDeleteSigner_OwnershipCheckError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/signers/"+testAddr, nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.DeleteSigner, rec, req)
 	// Ownership check succeeds (no record -> not owner), falls through to "signer not found"
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -2032,7 +2019,7 @@ func TestB3ListSigners_InvalidType(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?type=invalid", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?type=invalid", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2041,7 +2028,7 @@ func TestB3ListSigners_InvalidOffset(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?offset=-1", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?offset=-1", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2050,7 +2037,7 @@ func TestB3ListSigners_InvalidLimit(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?limit=-1", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?limit=-1", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2065,7 +2052,7 @@ func TestB3ListSigners_ForbiddenAPIKeyFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=other-key", agentKey)
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?api_key_id=other-key", agentKey)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -2074,7 +2061,7 @@ func TestB3ListSigners_InvalidLockedFilter(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=invalid", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?locked=invalid", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2083,7 +2070,7 @@ func TestB3ListSigners_InvalidEnabledFilter(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=invalid", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers?enabled=invalid", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2092,7 +2079,7 @@ func TestB3ListSigners_ListError(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
 	// Mock returns "not implemented" error -> 500
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2106,7 +2093,7 @@ func TestB3ListWalletSigners_InvalidOffset(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers?offset=-1", signAdminKey())
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers?offset=-1", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2115,7 +2102,7 @@ func TestB3ListWalletSigners_InvalidLimit(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers?limit=-1", signAdminKey())
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers?limit=-1", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2124,7 +2111,7 @@ func TestB3ListWalletSigners_ListError(t *testing.T) {
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers", signAdminKey())
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers", signAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -2138,7 +2125,7 @@ func TestB3ListWalletSigners_GetOwnershipError(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers", testOwnerAPIKey())
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers", testOwnerAPIKey())
 	// Access service stubs return empty ownerships but the signer mock returns signers -> should still work
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2152,7 +2139,7 @@ func TestB3HandlePatchSignerLabels_NotOwner(t *testing.T) {
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
 	body := map[string]interface{}{"display_name": "New Name"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPatch,
+	rec := doActionRequest(t, h.PatchSignerLabels, http.MethodPatch,
 		"/api/v1/evm/signers/"+testAddr, body, testOtherAPIKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -2165,7 +2152,7 @@ func TestB3HandlePatchSignerLabels_SignerNotFound(t *testing.T) {
 	h := newActionHandler(t, mgr, map[string]string{testAddr: testKeyID})
 
 	body := map[string]interface{}{"display_name": "New Name", "tags": []string{"tag1"}}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPatch,
+	rec := doActionRequest(t, h.PatchSignerLabels, http.MethodPatch,
 		"/api/v1/evm/signers/"+testAddr, body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -2179,7 +2166,7 @@ func TestB3HandleTransferOwnership_SelfTransfer(t *testing.T) {
 	h := newActionHandler(t, &signerActionMock{}, owners)
 
 	body := map[string]interface{}{"new_owner_id": testKeyID}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", body, testOwnerAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -2335,7 +2322,7 @@ func TestB3HandleGrantAccess_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, testOwnerAPIKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.GrantAccess, rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2349,7 +2336,7 @@ func TestB3HandleGrantAccess_MissingAPIKeyID(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, testOwnerAPIKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.GrantAccess, rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2363,7 +2350,7 @@ func TestB3HandleDeleteSigner_ProviderError(t *testing.T) {
 	}
 	h := newActionHandler(t, mgr, map[string]string{testAddr: testKeyID})
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2374,7 +2361,7 @@ func TestB3HandleDeleteSigner_SuccessWithOwnership(t *testing.T) {
 	}
 	h := newActionHandler(t, mgr, map[string]string{testAddr: testKeyID})
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
@@ -2563,7 +2550,7 @@ func TestB3HandlePatchSignerLabels_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, testOwnerAPIKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.PatchSignerLabels, rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -2607,7 +2594,7 @@ func TestB3ListSigners_WithValidOffsetLimit(t *testing.T) {
 	}
 	h := newActionHandler(t, &signerActionMock{signerMockSignerManager: *sm}, map[string]string{testAddr: testKeyID})
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet,
 		"/api/v1/evm/signers?offset=0&limit=10", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2626,7 +2613,7 @@ func TestB3ListWalletSigners_WithValidOffsetLimit(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/test-wallet/signers?offset=0&limit=10", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2645,7 +2632,7 @@ func TestB3ListWalletSigners_ExcludeHDDerived(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/test-wallet/signers?exclude_hd_derived=true", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2819,7 +2806,7 @@ func TestB3HandleDeleteSigner_IsOwnerError2(t *testing.T) {
 	h, err := NewSignerHandler(&signerActionMock{}, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -2832,7 +2819,7 @@ func TestB3HandleDeleteSigner_SignerNotFound(t *testing.T) {
 	// Empty owners map — not found
 	h := newActionHandler(t, &signerActionMock{}, nil)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -2855,7 +2842,7 @@ func TestB3HandlePatchSignerLabels_SignerNotFoundAfterPatch(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, testOwnerAPIKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.PatchSignerLabels, rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -2873,7 +2860,7 @@ func TestB3ListSigners_TagFilter(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{signerMockSignerManager: *sm}, owners)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet,
 		"/api/v1/evm/signers?tag=test-tag", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2892,7 +2879,7 @@ func TestB3ListSigners_LockedFilter(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{signerMockSignerManager: *sm}, owners)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet,
 		"/api/v1/evm/signers?locked=true", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2912,7 +2899,7 @@ func TestB3ListSigners_EnabledFilter2(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{signerMockSignerManager: *sm}, owners)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet,
 		"/api/v1/evm/signers?enabled=true", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2975,7 +2962,7 @@ func TestB3ListSigners_WalletEnrichment(t *testing.T) {
 	require.NoError(t, err)
 	h.SetWalletRepo(&stubWalletRepo{})
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet,
 		"/api/v1/evm/signers", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -2994,7 +2981,7 @@ func TestB3ListSigners_OffsetBeyondTotal(t *testing.T) {
 	owners := map[string]string{testAddr: testKeyID}
 	h := newActionHandler(t, &signerActionMock{signerMockSignerManager: *sm}, owners)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet,
 		"/api/v1/evm/signers?offset=10&limit=5", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -3013,7 +3000,7 @@ func TestB3ListWalletSigners_OffsetBeyondTotal(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/test-wallet/signers?offset=100", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -3032,7 +3019,7 @@ func TestB3ListWalletSigners_LimitCap(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/test-wallet/signers?limit=200", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -3058,7 +3045,7 @@ func TestB3CreateSigner_ValidationError(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	// Since createSigner now has CreateSignerRequest.Valid() returning error for empty keystore,
 	// it returns 400 before calling manager
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -3091,7 +3078,7 @@ func TestB3CreateSigner_ResourceLimitError(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	// May get 400 from validation or 500 from manager not implemented - either way exercises the code path
 	assert.Contains(t, []int{http.StatusBadRequest, http.StatusInternalServerError, http.StatusCreated}, rec.Code)
 }
@@ -3209,7 +3196,7 @@ func TestB3HandleTransferOwnership_AuditLogger(t *testing.T) {
 	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
 	body := map[string]string{"new_owner_id": "yet-another"}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
+	rec := doActionRequest(t, h.TransferOwnership, http.MethodPost,
 		"/api/v1/evm/signers/"+testAddr+"/transfer", body, testOwnerAPIKey())
 	// Expect 400 because new owner not found in stub API key repo
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -3261,7 +3248,7 @@ func TestB3HandleDeleteSigner_WithAuditLogger(t *testing.T) {
 	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
@@ -3433,7 +3420,7 @@ func TestB3ListWalletSigners_SortByAddress(t *testing.T) {
 	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/test-wallet/signers", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -3460,7 +3447,7 @@ func TestB3CreateSigner_AuditLoggerImport(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Contains(t, []int{http.StatusBadRequest, http.StatusCreated, http.StatusInternalServerError}, rec.Code)
 }
 
@@ -3635,7 +3622,7 @@ func TestB3ListWalletSigners_InvalidOffset2(t *testing.T) {
 	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/signers?offset=-1", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -3646,7 +3633,7 @@ func TestB3ListWalletSigners_InvalidLimit2(t *testing.T) {
 	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/signers?limit=-1", signAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -3672,7 +3659,7 @@ func TestB3ListWalletSigners_ValidOffsetAndLimit(t *testing.T) {
 	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/signers?offset=0&limit=50", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -3700,7 +3687,7 @@ func TestB3ListSigners_WalletEnrichmentError(t *testing.T) {
 	require.NoError(t, err)
 	h.SetWalletRepo(&failWalletRepo{})
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -3731,7 +3718,7 @@ func TestB3ListSigners_GetAccessibleAddressesError(t *testing.T) {
 	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
+	rec := doSignerRequest(t, h.ListSigners, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -3769,7 +3756,7 @@ func TestB3PatchSignerLabels_SignerNotFoundAfterPatch(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, testOwnerAPIKey()))
 	rec := httptest.NewRecorder()
-	h.HandleSignerAction(rec, req)
+	callSigner(h.PatchSignerLabels, rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -3795,7 +3782,7 @@ func TestB3CreateSigner_BothKeysProvided2(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -4250,7 +4237,7 @@ func TestB3DeleteSigner_SignerNotFound(t *testing.T) {
 	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
+	rec := doActionRequest(t, h.DeleteSigner, http.MethodDelete,
 		"/api/v1/evm/signers/"+testAddr, nil, testOwnerAPIKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -4278,7 +4265,7 @@ func TestB3CreateSigner_Unauthorized(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/signers", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
@@ -4306,7 +4293,7 @@ func TestB3ListWalletSigners_LimitCapped(t *testing.T) {
 	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/signers?limit=200", testOwnerAPIKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
@@ -4325,7 +4312,7 @@ func TestB3ListWalletSigners_ManagerListError(t *testing.T) {
 	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
-	rec := doSignerRequest(t, h, http.MethodGet,
+	rec := doSignerRequest(t, h.HandleWalletSigners, http.MethodGet,
 		"/api/v1/evm/wallets/0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/signers", signAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -4353,7 +4340,7 @@ func TestB3CreateSigner_ManagerError(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateSigner(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
