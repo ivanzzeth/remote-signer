@@ -138,10 +138,15 @@ func (i *TemplateInitializer) GetLoadedTemplates(templates []TemplateConfig) ([]
 //	*.template.yaml          (e.g. polymarket_safe.template.yaml)
 //	*.template.js.yaml       (e.g. erc20.template.js.yaml)
 //
-// The template's name is derived from the filename (basename without
-// the .template.* suffix), but the file's own `variables:` /
-// `budget_metering:` / `rules:` block is what populates the
-// TemplateConfig fields after the file-loader runs.
+// The template's name is derived from the filename (basename without the
+// .template.* suffix) and is what instance rules reference, so it wins over any
+// name: inside the file. The file's `variables:` / `budget_metering:` /
+// `rules:` / `chain_type:` / `variable_groups:` / `enabled:` blocks populate the
+// rest of the TemplateConfig after the file-loader runs.
+//
+// ⚠️ This comment used to say the file's own metadata wins downstream. It does
+// not, for name — and acting on that claim unresolves every instance rule that
+// referenced the entry by name.
 func LoadTemplatesFromDir(dir string, configDir string, logger *slog.Logger) ([]TemplateConfig, error) {
 	resolved := dir
 	if !filepath.IsAbs(resolved) {
@@ -256,13 +261,18 @@ func loadTemplateFromFileStatic(fileCfg TemplateConfig, configDir string, logger
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal template rules: %w", err)
 	}
-	// The file's own metadata wins where it is set, which is what
-	// LoadTemplatesFromDir's derived name is a fallback for. Enabled is the
-	// exception: either side switching the template off switches it off, so an
-	// operator disabling it in config.yaml is not overridden by the file.
+	// ⛔ Name comes from the config.yaml entry, not from the file. It is the key
+	// instance rules use to reference the template (`template: "Safe Template"`),
+	// so the file's own name: must not override it — doing so silently
+	// unresolves every rule that referenced the entry. The file's name is a
+	// fallback only, for an entry that supplies none.
+	//
+	// Enabled is the opposite case: it names nothing, so either side switching
+	// the template off switches it off. An operator disabling it in config.yaml
+	// is not overridden by a file that says true.
 	result := TemplateConfig{
-		Name:           firstNonEmpty(fileContent.Name, fileCfg.Name),
-		Description:    firstNonEmpty(fileContent.Description, fileCfg.Description),
+		Name:           firstNonEmpty(fileCfg.Name, fileContent.Name),
+		Description:    firstNonEmpty(fileCfg.Description, fileContent.Description),
 		ChainType:      fileContent.ChainType,
 		Variables:      fileContent.Variables,
 		VariableGroups: fileContent.VariableGroups,

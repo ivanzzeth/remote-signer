@@ -56,11 +56,11 @@ rules:
 	if got[0].Enabled {
 		t.Error("template declares enabled: false and must not be loaded as enabled")
 	}
-	if got[0].Name != "Real Name" {
-		t.Errorf("file name must win over the filename-derived one, got %q", got[0].Name)
-	}
-	if got[0].Description != "from the file" {
-		t.Errorf("description dropped, got %q", got[0].Description)
+	// ⛔ Not the file's name. The config.yaml entry's name is the key instance
+	// rules reference; letting the file override it unresolves them, which is
+	// exactly what the e2e suite caught when this was written the other way.
+	if got[0].Name != "Derived From Filename" {
+		t.Errorf("entry name must win over the file's, got %q", got[0].Name)
 	}
 	if got[0].ChainType != "evm" {
 		t.Errorf("chain_type dropped, got %q", got[0].ChainType)
@@ -134,5 +134,32 @@ func TestTemplateVarDefault_PointerIsNotRenderedAsAnAddress(t *testing.T) {
 		if got != "0xdeadbeef" {
 			t.Errorf("%s: want 0xdeadbeef, got %q", name, got)
 		}
+	}
+}
+
+// TestTemplateFile_NameFallsBackToFile: the file's name: is used only when the
+// config.yaml entry supplies none, so nothing that could be referenced is
+// renamed out from under a rule.
+func TestTemplateFile_NameFallsBackToFile(t *testing.T) {
+	fileCfg, dir := writeTemplateFile(t, `
+name: "Real Name"
+description: "from the file"
+rules:
+  - id: r1
+    name: R1
+    type: evm_js
+    mode: whitelist
+`)
+	fileCfg.Name = ""
+	fileCfg.Description = ""
+	got, err := loadTemplateFromFileStatic(fileCfg, dir, testLogger())
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got[0].Name != "Real Name" {
+		t.Errorf("want the file's name as fallback, got %q", got[0].Name)
+	}
+	if got[0].Description != "from the file" {
+		t.Errorf("want the file's description as fallback, got %q", got[0].Description)
 	}
 }

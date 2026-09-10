@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1033,9 +1035,123 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 		if err := validateVariableType(def.Name, def.Type, val); err != nil {
 			return err
 		}
+		// Declared constraints, applied after the type check.
+		if err := validateVariableConstraints(def, val); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+// validateVariableConstraints enforces the Options / Pattern / Min / Max a
+// template declares on a variable.
+//
+// ⚠️ These four fields shipped documented as enforced — "Validator requires the
+// operator-supplied value to appear in this list", "applied after the
+// type-specific format check" — and until 2026-09-10 nothing in the tree read
+// them. A template could declare max: "1000" on a spending cap and the operator
+// would be told the value was fine. No shipped template declared any of them,
+// which is the only reason this was invisible rather than exploited.
+//
+// ⚠️ An empty value skips every constraint, matching the convention the type
+// checks already use: empty means "unconstrained / not supplied" for address and
+// the list types, and an optional variable left blank must not trip a bound.
+func validateVariableConstraints(def types.TemplateVariable, value string) error {
+	if value == "" {
+		return nil
+	}
+
+	// An enum whose legal set is empty constrains nothing while looking like it
+	// constrains everything. That is the template author's bug, and the operator
+	// has no way to see it — fail closed.
+	if def.Type == types.VarTypeEnum && len(def.Options) == 0 {
+		return fmt.Errorf("variable '%s': template declares type enum with no options", def.Name)
+	}
+
+	if len(def.Options) > 0 && !slices.Contains(def.Options, value) {
+		return fmt.Errorf("variable '%s': %q is not one of %s", def.Name, value, strings.Join(def.Options, ", "))
+	}
+
+	if def.Pattern != "" {
+		re, err := regexp.Compile(def.Pattern)
+		if err != nil {
+			// The template author wrote the regex, not the operator, so this is
+			// a broken template rather than a bad value. Fail closed: an
+			// unenforceable constraint must not read as a satisfied one.
+			return fmt.Errorf("variable '%s': template declares an invalid pattern %q: %w", def.Name, def.Pattern, err)
+		}
+		if !re.MatchString(value) {
+			return fmt.Errorf("variable '%s': %q does not match pattern %q", def.Name, value, def.Pattern)
+		}
+	}
+
+	return validateVariableBounds(def, value)
+}
+
+// validateVariableBounds applies Min/Max in whatever ordering the declared type
+// has: decimal big-int for uint256, wall-clock for duration.
+//
+// ⛔ Not lexicographic. "9" > "1000" as strings, and a spending cap compared
+// that way would let a larger amount through than the template allows.
+func validateVariableBounds(def types.TemplateVariable, value string) error {
+	if def.Min == nil && def.Max == nil {
+		return nil
+	}
+
+	switch def.Type {
+	case types.VarTypeBigInt:
+		val, ok := new(big.Int).SetString(value, 10)
+		if !ok {
+			return fmt.Errorf("variable '%s': %q is not a decimal integer", def.Name, value)
+		}
+		cmpBound := func(bound *string, want int, label string) error {
+			if bound == nil {
+				return nil
+			}
+			b, ok := new(big.Int).SetString(*bound, 10)
+			if !ok {
+				return fmt.Errorf("variable '%s': template declares a non-numeric %s %q", def.Name, label, *bound)
+			}
+			if val.Cmp(b) == want {
+				return fmt.Errorf("variable '%s': %s is %s (%s)", def.Name, value, label, *bound)
+			}
+			return nil
+		}
+		if err := cmpBound(def.Min, -1, "below min"); err != nil {
+			return err
+		}
+		return cmpBound(def.Max, 1, "above max")
+
+	case types.VarTypeDuration:
+		val, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("variable '%s': %q is not a duration", def.Name, value)
+		}
+		cmpBound := func(bound *string, want int, label string) error {
+			if bound == nil {
+				return nil
+			}
+			b, err := time.ParseDuration(*bound)
+			if err != nil {
+				return fmt.Errorf("variable '%s': template declares a non-duration %s %q", def.Name, label, *bound)
+			}
+			if (want < 0 && val < b) || (want > 0 && val > b) {
+				return fmt.Errorf("variable '%s': %s is %s (%s)", def.Name, value, label, *bound)
+			}
+			return nil
+		}
+		if err := cmpBound(def.Min, -1, "below min"); err != nil {
+			return err
+		}
+		return cmpBound(def.Max, 1, "above max")
+
+	default:
+		// Min/Max have no defined ordering for the remaining types. Say so
+		// rather than ignoring the declaration — a bound nobody applies is
+		// worse than one nobody wrote.
+		return fmt.Errorf("variable '%s': min/max are not supported for type %q", def.Name, def.Type)
+	}
 }
 
 // validateVariableType validates a variable value against its declared
@@ -1071,11 +1187,56 @@ func validateVariableType(name string, varType types.VariableType, value string)
 			}
 		}
 	case types.VarTypeString:
-		// Any string is valid
+		// Any string is valid; Pattern is how a template narrows one.
+	case types.VarTypeEnum:
+		// The legal set is Options, which this function does not have.
+		// Enforced in validateVariableConstraints.
+	case types.VarTypeBool:
+		if value != "true" && value != "false" {
+			return fmt.Errorf("variable '%s': invalid bool %q, want true or false", name, value)
+		}
+	case types.VarTypeBytes:
+		if !isValidHexBytes(value, -1) {
+			return fmt.Errorf("variable '%s': invalid bytes %q, want 0x-prefixed hex of even length", name, value)
+		}
+	case types.VarTypeBytes4:
+		if !isValidHexBytes(value, 4) {
+			return fmt.Errorf("variable '%s': invalid bytes4 %q, want 0x followed by 8 hex characters", name, value)
+		}
+	case types.VarTypeDuration:
+		if _, err := time.ParseDuration(value); err != nil {
+			return fmt.Errorf("variable '%s': invalid duration %q", name, value)
+		}
+	case types.VarTypeJSON:
+		if !json.Valid([]byte(value)) {
+			return fmt.Errorf("variable '%s': invalid JSON", name)
+		}
 	default:
 		// Unknown type, skip validation
 	}
 	return nil
+}
+
+// isValidHexBytes reports whether s is 0x-prefixed hex. wantLen is the number of
+// bytes required, or -1 for any even-length payload.
+func isValidHexBytes(s string, wantLen int) bool {
+	if !strings.HasPrefix(s, "0x") {
+		return false
+	}
+	body := s[2:]
+	if wantLen >= 0 {
+		if len(body) != wantLen*2 {
+			return false
+		}
+	} else if len(body)%2 != 0 {
+		return false
+	}
+	for _, c := range body {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveDefaults fills in default values for optional variables that
