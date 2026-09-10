@@ -33,6 +33,10 @@ func NewTransactionsModule(repo ports.TransactionRepository, log *slog.Logger) (
 func (m *transactionsModule) Name() string { return "transactions" }
 
 func (m *transactionsModule) Routes(reg RouteRegistrar) {
-	reg.Authenticated("GET /api/v1/evm/transactions", m.h)
-	reg.Authenticated("GET /api/v1/evm/transactions/", m.h)
+	const why = "read-only and per-row: the handler joins sign_request.api_key_id against the caller, so a " +
+		"non-admin sees only transactions its own sign requests produced. Which rows a caller may see is not a " +
+		"decision a route can make, and there is no read_transactions permission to name — every authenticated " +
+		"role is allowed to look at its own."
+	reg.Handle("GET /api/v1/evm/transactions", AuthenticatedOnly(why), m.h)
+	reg.Handle("GET /api/v1/evm/transactions/", AuthenticatedOnly(why), m.h)
 }

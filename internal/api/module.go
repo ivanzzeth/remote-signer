@@ -1,10 +1,6 @@
 package api
 
-import (
-	"net/http"
-
-	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
-)
+import "net/http"
 
 // Module is one feature's slice of the HTTP surface: it holds its own
 // dependencies and registers its own routes.
@@ -36,28 +32,27 @@ type Module interface {
 // RouteRegistrar is the subset of Router a module may use. Narrow on purpose:
 // a module registers routes and nothing else — it cannot reach back into the
 // router's other state, which is what kept setupRoutes able to grow.
+//
+// ⚠️ It used to have three methods — Public / Authenticated / Permitted — and
+// two of them recorded nothing, so a module's routes were absent from the
+// authorization table and `Public` cost the same keystrokes as the two shapes
+// that do enforce something. One method taking a required RouteAuth removes
+// that: whatever a module says, it has to say it, and the table sees it.
 type RouteRegistrar interface {
-	// Public registers a pattern reachable without authentication.
-	Public(pattern string, h http.Handler)
-	// Authenticated registers a pattern requiring a valid API key.
-	Authenticated(pattern string, h http.Handler)
-	// Permitted registers a pattern requiring a valid API key with perm.
-	Permitted(pattern string, perm middleware.Permission, h http.Handler)
+	// Handle registers pattern behind auth. Build auth with Permitted,
+	// AuthenticatedOnly, Public or PublicUnwrapped — the exemption
+	// constructors take the reason as an argument, so registering a route
+	// without an authorization decision does not compile.
+	Handle(pattern string, auth RouteAuth, h http.Handler)
 }
 
-// routerRegistrar adapts *Router to RouteRegistrar.
+// routerRegistrar adapts *Router to RouteRegistrar. It delegates to the single
+// registration entry point rather than reaching for the mux, so a module route
+// is recorded exactly like a router route.
 type routerRegistrar struct{ r *Router }
 
-func (rr routerRegistrar) Public(pattern string, h http.Handler) {
-	rr.r.mux.Handle(pattern, middleware.SecurityHeadersMiddleware()(h))
-}
-
-func (rr routerRegistrar) Authenticated(pattern string, h http.Handler) {
-	rr.r.mux.Handle(pattern, rr.r.withAuth(h))
-}
-
-func (rr routerRegistrar) Permitted(pattern string, perm middleware.Permission, h http.Handler) {
-	rr.r.handlePerm(pattern, perm, h)
+func (rr routerRegistrar) Handle(pattern string, auth RouteAuth, h http.Handler) {
+	rr.r.handle(pattern, auth, h)
 }
 
 // mountModules registers every module that was constructed. A module that could

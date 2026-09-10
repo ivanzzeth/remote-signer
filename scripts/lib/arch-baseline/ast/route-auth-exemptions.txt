@@ -1,0 +1,91 @@
+# 每一条**不带权限**的路由,一行一条:`<形状> <mux pattern>`。
+#
+# 形状只有三种,都由 internal/api/route_auth.go 的构造器产生:
+#   public              无凭据可达,只套 SecurityHeaders
+#   public-unwrapped    连 SecurityHeaders 都不套(只有 SPA 一条,理由见调用点)
+#   authenticated-only  要有效 API key,但不要任何 permission
+#
+# ⛔ 这张表**不是**权限表,是「谁没有权限」的表。带权限的 55 条里的其余
+# 路由**不在这里**,它们的权限就写在注册处。
+#
+# ---------- 为什么这张表会自己过期 ----------
+#
+# 三种腐烂方式,每一种都对应棘轮的一个方向,都是**红**:
+#
+#   1. 新增一条没权限的路由 → 基线里没有这个 key → 红
+#   2. 路由被删了 → 基线里有一条对不上任何注册的 key → 红,把那行删掉
+#   3. 路由**现在有权限了** → 同样对不上 → 红,把那行删掉
+#
+# ⭐ 第 3 条最容易被忽略,也最要紧:留着它,下一次那条路由**丢掉**权限时
+# 这张表**不会**变红 —— 一条永远绿的豁免等于把检查关掉了。
+#
+# ---------- 理由在哪 ----------
+#
+# ⛔ 理由**不在这个文件里**,在注册那一行的 Public(...) / AuthenticatedOnly(...)
+# 参数里 —— 那是改这条路由的人会读到的地方,而不是他要另外去找的地方。
+# 门禁强制它非空(route-auth 这条硬规则),所以「没有理由的豁免」编译得过、
+# 但过不了 make check。下面的注释只是索引,⛔ 不是权威。
+#
+# ---------- ⚠️ 这张表**证明不了**的事 ----------
+#
+# 一条前缀 pattern 背后可能有十几个端点,而它只能声明一个权限。
+# `/api/v1/evm/rules/` 声明 PermListRules,handler/evm/rule.go:200-203 又在
+# handler 里单独查 admin 才让 validate 过 —— 于是「每条路由都声明了权限」
+# 今天就成立,而**逐端点的权限仍然是错的**。这张表数的是 pattern,
+# 而 pattern 不是端点。要它真正到位,得先做 handler 拆解(提案 S3–S8);
+# 在那之前它的价值是:拆解**新造**出来的每一条路由,出生时就得声明权限。
+#
+# ---------- 清单 ----------
+
+# 首次启动引导:api_keys 表是空的,没有公钥可验签,要求鉴权就是死锁;
+# 装好 admin key 之后 handler 自己回 410 关窗。
+public GET /api/v1/bootstrap/status
+public POST /api/v1/bootstrap/admin
+
+# 存活探针,编排器和 `server status` 在任何 key 存在之前就要能问。
+# ⚠️ 它回的不只是存活:还有版本 + 安全摘要(签名/自动锁超时、审计保留天数、
+# approval guard 状态)。那是个信息披露问题,归端点的主人判,不归这条豁免判。
+public GET /health
+
+# Prometheus 抓取,文档明写无鉴权(docs/sdk-cli-matrix.md:30),TUI 指标视图也这么抓。
+# ⚠️ middleware.PermReadMetrics 存在、授予了 admin+dev,却没有任何路由引用它 ——
+# 要么那个权限是死的,要么这条豁免是错的。⛔ 只记录,不就地决定:
+# 在这里加权限会静默打断每一个抓取端。
+public /metrics
+
+# SPA 本体 + catch-all。⛔ 是 public-unwrapped 而不是 public,因为
+# SecurityHeadersMiddleware 会下 `Content-Security-Policy: default-src 'none'`,
+# 那对 API 是对的,对它要发的 HTML/JS 是白屏。
+public-unwrapped /
+
+# 一条前缀四个子路径,权限在闭包里逐条装(approve → PermApproveRequest,
+# preview-rule → PermPreviewRule);剩下两支按调用者自己的行过滤,
+# 对陌生 id 回 404 而不是 403,免得 id 空间被枚举。
+authenticated-only /api/v1/evm/requests/
+
+# ⛔ 已知缺口(四条),不是决定:PermReadHDWallets / PermCreateHDWallet 声明了、
+# 按角色授予了,却没有任何路由引用 —— 任何一把已鉴权的 key(包括本来不持有
+# 任何 HD wallet 权限的 strategy key)都能走到这片。
+# ⚠️ 没有就地补权限:选哪个权限是逐条的安全决定,而失败方向是不对称的 ——
+# **过严会在 e2e 里显形,过松不会**。
+authenticated-only /api/v1/evm/hd-wallets
+authenticated-only /api/v1/evm/hd-wallets/
+authenticated-only GET /api/v1/evm/hd-wallets/{address}/derived
+authenticated-only POST /api/v1/evm/hd-wallets/{address}/derive
+
+# JSON-RPC 信封:能干什么由 body 里的 method 名决定,路由看不见它。
+# 闸门是 handler 的 allowlist(internal/chain/evm/rpc_provider.go:70),
+# 每一个 eth_sign* 都不在表里,所以非 admin key 不能拿它绕开 /api/v1/evm/sign。
+authenticated-only POST /api/v1/evm/rpc/
+
+# 只读 + 逐行:handler 拿 sign_request.api_key_id 和调用者做 join,
+# 非 admin 只看得到自己发起的那些;哪些行能看不是路由能做的判断。
+authenticated-only GET /api/v1/evm/transactions
+authenticated-only GET /api/v1/evm/transactions/
+
+# 比它所在的 PermManageAPIKeys 面**故意**弱:Web UI 靠它查自己这把 key 的角色
+# (web/src/lib/rbac.ts:8-11),扩展靠它填授权/签名者下拉(background.js:2680-2692),
+# 两者取的都是别人的 key。投影只有 id+name+role+enabled、且只含 enabled 的。
+# ⚠️ 它确实把 key 名册和角色透给了任何一把已鉴权的 key —— 这条路由本来就是
+# 为做这个取舍而建的,也是这张表里最该第一个被重新审视的一条。
+authenticated-only GET /api/v1/api-keys/names

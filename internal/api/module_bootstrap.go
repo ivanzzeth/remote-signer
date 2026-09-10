@@ -32,6 +32,11 @@ func NewBootstrapModule(repo ports.APIKeyRepository, creator bootstrap.AdminCrea
 func (m *bootstrapModule) Name() string { return "bootstrap" }
 
 func (m *bootstrapModule) Routes(reg RouteRegistrar) {
-	reg.Public("GET /api/v1/bootstrap/status", http.HandlerFunc(m.h.ServeStatus))
-	reg.Public("POST /api/v1/bootstrap/admin", http.HandlerFunc(m.h.ServeAdmin))
+	const why = "first run: the api_keys table is empty, so there is no public key to verify a signed request " +
+		"against and requiring auth here would be a deadlock. The window closes on its own — the handler returns " +
+		"410 Gone once an admin key exists — so the security property lives in that state check, not in a " +
+		"permission. The module is nil when no AdminCreator is wired, so a daemon that pre-seeds admin out of " +
+		"band never serves these at all."
+	reg.Handle("GET /api/v1/bootstrap/status", Public(why), http.HandlerFunc(m.h.ServeStatus))
+	reg.Handle("POST /api/v1/bootstrap/admin", Public(why), http.HandlerFunc(m.h.ServeAdmin))
 }

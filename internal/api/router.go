@@ -123,11 +123,15 @@ type RouterConfig struct {
 // Router handles HTTP routing
 type Router struct {
 	modules []string
-	// routePerms records the permission each pattern was registered with, so the
-	// route table can be asserted without standing up a live router. Permission
-	// is a property of the route now — see the budget registrations — and a
-	// property nothing can check is one that drifts.
-	routePerms    map[string]middleware.Permission
+	// routeAuth records what every registered pattern declared about
+	// authorization — a permission, or an explicit exemption carrying the reason
+	// it has none. Written only by handle, only during setupRoutes, and read
+	// afterwards by Handler's deny-by-default guard; see route_auth.go.
+	//
+	// ⚠️ It replaced routePerms, which recorded only the ~26 patterns that went
+	// through handlePerm. A table that describes half the surface answers "is
+	// there a route nobody decided about?" with silence.
+	routeAuth     map[string]RouteAuth
 	mux           *http.ServeMux
 	authVerifier  *auth.Verifier
 	signService   *service.SignService
@@ -153,7 +157,7 @@ func NewRouter(
 ) (*Router, error) {
 	r := &Router{
 		mux:           http.NewServeMux(),
-		routePerms:    map[string]middleware.Permission{},
+		routeAuth:     map[string]RouteAuth{},
 		authVerifier:  authVerifier,
 		signService:   signService,
 		signerManager: signerManager,
@@ -178,10 +182,22 @@ func (r *Router) setupRoutes() error {
 	r.healthHandler.SetSecurityConfig(r.config.AuditRetentionDays)
 	r.healthHandler.SetSettingsManager(r.config.SettingsManager)
 	r.syncApprovalGuard()
-	r.mux.Handle("GET /health", middleware.SecurityHeadersMiddleware()(r.healthHandler))
+	r.handle("GET /health", Public(
+		"liveness/readiness: scraped by orchestrators and by `remote-signer server status` before any API key exists, "+
+			"so requiring one would make the check useless exactly when it matters. "+
+			"⚠️ It answers with more than liveness — version plus a security summary "+
+			"(sign/auto-lock timeouts, audit retention, approval-guard state; handler/health.go:19-33). "+
+			"That is a disclosure question for whoever owns the endpoint, not something this exemption decides."),
+		r.healthHandler)
 
 	// Prometheus metrics (no auth; same port as API)
-	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
+	r.handle("/metrics", Public(
+		"Prometheus scrape. Unauthenticated on purpose and documented as such (docs/sdk-cli-matrix.md:30, "+
+			"\"CLI uses raw GET /metrics (no auth)\"), and the TUI metrics view scrapes it the same way. "+
+			"⚠️ middleware.PermReadMetrics exists and is granted to admin+dev (middleware/rbac.go:64) while being "+
+			"referenced by no route — so either that permission or this exemption is dead. Recorded, not resolved: "+
+			"putting a permission here would silently break every scraper."),
+		metrics.Handler())
 
 	// First-run bootstrap (no auth). On an empty api_keys table the daemon
 	// has no public key to verify a signed request against, so requiring
@@ -320,9 +336,9 @@ func (r *Router) setupRoutes() error {
 	}
 
 	// EVM routes (with auth)
-	r.handlePerm("POST /api/v1/evm/sign", middleware.PermSignRequest, signHandler)
-	r.mux.Handle("/api/v1/evm/requests", r.withAuthAndPerm(middleware.PermListOwnRequests, listHandler))
-	r.handlePerm("POST /api/v1/evm/requests/batch-approve", middleware.PermApproveRequest, batchApprovalHandler)
+	r.handle("POST /api/v1/evm/sign", Permitted(middleware.PermSignRequest), signHandler)
+	r.handle("/api/v1/evm/requests", Permitted(middleware.PermListOwnRequests), listHandler)
+	r.handle("POST /api/v1/evm/requests/batch-approve", Permitted(middleware.PermApproveRequest), batchApprovalHandler)
 	var requestSimHandler *evmhandler.RequestSimulationHandler
 	if r.config.RequestSimulationRepo != nil && r.config.RequestRepo != nil {
 		var rsErr error
@@ -333,41 +349,50 @@ func (r *Router) setupRoutes() error {
 			return fmt.Errorf("failed to create request simulation handler: %w", rsErr)
 		}
 	}
-	r.mux.Handle("/api/v1/evm/requests/", r.withAuth(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// Route to approval handler if path ends with /approve (admin only)
-		if strings.HasSuffix(req.URL.Path, "/approve") {
-			middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(approvalHandler).ServeHTTP(w, req)
-			return
-		}
-		// Route to preview-rule handler if path ends with /preview-rule
-		if strings.HasSuffix(req.URL.Path, "/preview-rule") {
-			middleware.RequirePermission(middleware.PermPreviewRule, r.logger, r.config.AlertService)(previewRuleHandler).ServeHTTP(w, req)
-			return
-		}
-		// Route to simulation handler if path ends with /simulation.
-		// Visibility is enforced inside the handler (non-admin only
-		// sees own); 404 on parent-not-found prevents id-pattern
-		// enumeration by foreign callers.
-		if strings.HasSuffix(req.URL.Path, "/simulation") {
-			if requestSimHandler == nil {
-				http.NotFound(w, req)
+	r.handle("/api/v1/evm/requests/", AuthenticatedOnly(
+		"one prefix, four sub-paths with different permissions: the closure below installs "+
+			"PermApproveRequest for .../approve and PermPreviewRule for .../preview-rule itself. "+
+			"The two remaining branches carry none by design — .../simulation and the default "+
+			"\"read one request\" are scoped to the caller's own rows inside the handler, and answer 404 "+
+			"rather than 403 for a foreign id so the id space cannot be enumerated. "+
+			"⚠️ This is the KNOWN LIMIT in route_auth.go made concrete: a prefix can declare one permission, "+
+			"so this one declares none and the four real endpoints are invisible to the route table until "+
+			"the closure is decomposed into four patterns (proposal S7)."),
+		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// Route to approval handler if path ends with /approve (admin only)
+			if strings.HasSuffix(req.URL.Path, "/approve") {
+				middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(approvalHandler).ServeHTTP(w, req)
 				return
 			}
-			requestSimHandler.ServeHTTP(w, req)
-			return
-		}
-		// Otherwise, route to request handler (any authenticated user can view own requests)
-		requestHandler.ServeHTTP(w, req)
-	})))
+			// Route to preview-rule handler if path ends with /preview-rule
+			if strings.HasSuffix(req.URL.Path, "/preview-rule") {
+				middleware.RequirePermission(middleware.PermPreviewRule, r.logger, r.config.AlertService)(previewRuleHandler).ServeHTTP(w, req)
+				return
+			}
+			// Route to simulation handler if path ends with /simulation.
+			// Visibility is enforced inside the handler (non-admin only
+			// sees own); 404 on parent-not-found prevents id-pattern
+			// enumeration by foreign callers.
+			if strings.HasSuffix(req.URL.Path, "/simulation") {
+				if requestSimHandler == nil {
+					http.NotFound(w, req)
+					return
+				}
+				requestSimHandler.ServeHTTP(w, req)
+				return
+			}
+			// Otherwise, route to request handler (any authenticated user can view own requests)
+			requestHandler.ServeHTTP(w, req)
+		}))
 
 	// Rule management routes (RBAC: PermListRules covers GET for admin/dev/agent)
-	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
-	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
+	r.handle("/api/v1/evm/rules", Permitted(middleware.PermListRules), ruleHandler)
+	r.handle("/api/v1/evm/rules/", Permitted(middleware.PermListRules), ruleHandler)
 	// /rules/{id}/budgets/reset changes budgets, so it is gated on
 	// PermManageBudgets rather than reached on PermListRules and re-checked
 	// inside the handler. Registered after the prefix pattern above; Go's mux
 	// prefers the more specific one.
-	r.handlePerm("POST /api/v1/evm/rules/{id}/budgets/reset", middleware.PermManageBudgets, ruleHandler)
+	r.handle("POST /api/v1/evm/rules/{id}/budgets/reset", Permitted(middleware.PermManageBudgets), ruleHandler)
 
 	// Budget routes:
 	//   GET    /api/v1/evm/budgets         list (PermReadBudgets)
@@ -404,24 +429,24 @@ func (r *Router) setupRoutes() error {
 		// The trailing-slash patterns cover the sub-paths: POST reaches
 		// /budgets/{id}/reset, DELETE reaches both /budgets/{id} and
 		// /budgets/by-rule/{ruleID}.
-		r.handlePerm("GET /api/v1/evm/budgets", middleware.PermReadBudgets, budgetListHandler)
-		r.handlePerm("POST /api/v1/evm/budgets", middleware.PermManageBudgets, budgetListHandler)
-		r.handlePerm("GET /api/v1/evm/budgets/", middleware.PermReadBudgets, budgetItemHandler)
-		r.handlePerm("POST /api/v1/evm/budgets/", middleware.PermManageBudgets, budgetItemHandler)
-		r.handlePerm("PATCH /api/v1/evm/budgets/", middleware.PermManageBudgets, budgetItemHandler)
-		r.handlePerm("DELETE /api/v1/evm/budgets/", middleware.PermManageBudgets, budgetItemHandler)
+		r.handle("GET /api/v1/evm/budgets", Permitted(middleware.PermReadBudgets), budgetListHandler)
+		r.handle("POST /api/v1/evm/budgets", Permitted(middleware.PermManageBudgets), budgetListHandler)
+		r.handle("GET /api/v1/evm/budgets/", Permitted(middleware.PermReadBudgets), budgetItemHandler)
+		r.handle("POST /api/v1/evm/budgets/", Permitted(middleware.PermManageBudgets), budgetItemHandler)
+		r.handle("PATCH /api/v1/evm/budgets/", Permitted(middleware.PermManageBudgets), budgetItemHandler)
+		r.handle("DELETE /api/v1/evm/budgets/", Permitted(middleware.PermManageBudgets), budgetItemHandler)
 	}
 
 	// Approval guard resume (admin only). Route is always registered; handler
 	// returns 501 when security.approval_guard.enabled is false.
-	r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndPerm(middleware.PermResumeGuard, http.HandlerFunc(r.handleGuardResume)))
+	r.handle("/api/v1/evm/guard/resume", Permitted(middleware.PermResumeGuard), http.HandlerFunc(r.handleGuardResume))
 
 	// Signer management routes
 	// GET: PermReadSigners (all roles); POST: PermCreateSigners checked in handler
 	// Method-scoped so creation is gated at the route. The handler used to be
 	// reached on the read permission and re-check PermCreateSigners itself.
-	r.handlePerm("GET /api/v1/evm/signers", middleware.PermReadSigners, signerHandler)
-	r.handlePerm("POST /api/v1/evm/signers", middleware.PermCreateSigners, signerHandler)
+	r.handle("GET /api/v1/evm/signers", Permitted(middleware.PermReadSigners), signerHandler)
+	r.handle("POST /api/v1/evm/signers", Permitted(middleware.PermCreateSigners), signerHandler)
 	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock (admin only via PermUnlockSigner in handler)
 	// The four POST-only actions get their own method-scoped patterns so the mux
 	// rejects a GET rather than the handler doing it four times. The prefix
@@ -434,17 +459,34 @@ func (r *Router) setupRoutes() error {
 	// approval.go keeps its check; see the note in
 	// scripts/lib/arch-baseline/inline-permission-checks.txt.
 	for _, action := range []string{"unlock", "lock", "approve", "transfer"} {
-		r.handlePerm("POST /api/v1/evm/signers/{address}/"+action,
-			middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction))
+		r.handle("POST /api/v1/evm/signers/{address}/"+action,
+			Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
 	}
-	r.mux.Handle("/api/v1/evm/signers/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction)))
+	r.handle("/api/v1/evm/signers/", Permitted(middleware.PermReadSigners), http.HandlerFunc(signerHandler.HandleSignerAction))
 
 	// HD wallet management routes
-	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
+	//
+	// ⛔ KNOWN GAP — all four. middleware.PermReadHDWallets and
+	// middleware.PermCreateHDWallet are declared (middleware/rbac.go:53-55) and
+	// granted (admin+dev+agent read, admin create), and no route references
+	// either one. Every authenticated key, including a `strategy` key that holds
+	// no HD-wallet permission at all, reaches list/create/derive here.
+	//
+	// ⚠️ They are exempted rather than fixed **in this change on purpose**:
+	// picking the permission is a per-route security decision, and the failure
+	// direction is asymmetric — too strict shows up in e2e, too loose ships
+	// silently. What this exemption buys is that the gap is now a named line in
+	// the exemption baseline that goes red the day someone edits these routes,
+	// instead of four calls that look exactly like a deliberate choice.
+	const hdWalletGap = "⛔ KNOWN GAP, not a decision: PermReadHDWallets/PermCreateHDWallet exist and are granted by role, " +
+		"but no HD-wallet route references them, so any authenticated key reaches this surface. " +
+		"Left as-is here because assigning the permission is a security decision that has to be made per route, " +
+		"and a too-loose guess would ship silently while a too-strict one would fail e2e."
+	r.handle("/api/v1/evm/hd-wallets", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
 	// derive is POST-only, derived is GET-only; the prefix keeps serving the rest.
-	r.mux.Handle("POST /api/v1/evm/hd-wallets/{address}/derive", r.withAuth(hdWalletHandler))
-	r.mux.Handle("GET /api/v1/evm/hd-wallets/{address}/derived", r.withAuth(hdWalletHandler))
-	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))
+	r.handle("POST /api/v1/evm/hd-wallets/{address}/derive", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
+	r.handle("GET /api/v1/evm/hd-wallets/{address}/derived", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
+	r.handle("/api/v1/evm/hd-wallets/", AuthenticatedOnly(hdWalletGap), hdWalletHandler)
 
 	// Simulation routes (optional, requires simulation engine)
 	if r.config.Simulator != nil {
@@ -452,9 +494,9 @@ func (r *Router) setupRoutes() error {
 		if simErr != nil {
 			return fmt.Errorf("failed to create simulate handler: %w", simErr)
 		}
-		r.handlePerm("POST /api/v1/evm/simulate", middleware.PermSignRequest, simulateHandler)
-		r.handlePerm("POST /api/v1/evm/simulate/batch", middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeBatchHTTP))
-		r.handlePerm("GET /api/v1/evm/simulate/status", middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeStatusHTTP))
+		r.handle("POST /api/v1/evm/simulate", Permitted(middleware.PermSignRequest), simulateHandler)
+		r.handle("POST /api/v1/evm/simulate/batch", Permitted(middleware.PermSignRequest), http.HandlerFunc(simulateHandler.ServeBatchHTTP))
+		r.handle("GET /api/v1/evm/simulate/status", Permitted(middleware.PermSignRequest), http.HandlerFunc(simulateHandler.ServeStatusHTTP))
 	}
 
 	// Simulation history (persisted snapshots from the sign pipeline).
@@ -463,7 +505,7 @@ func (r *Router) setupRoutes() error {
 		if shErr != nil {
 			return fmt.Errorf("failed to create simulation history handler: %w", shErr)
 		}
-		r.mux.Handle("/api/v1/evm/simulations", r.withAuthAndPerm(middleware.PermSignRequest, simHistHandler))
+		r.handle("/api/v1/evm/simulations", Permitted(middleware.PermSignRequest), simHistHandler)
 	}
 
 	// Broadcast route (optional, requires RPC provider)
@@ -472,19 +514,20 @@ func (r *Router) setupRoutes() error {
 		if bcErr != nil {
 			return fmt.Errorf("failed to create broadcast handler: %w", bcErr)
 		}
-		r.handlePerm("POST /api/v1/evm/broadcast", middleware.PermSignRequest, broadcastHandler)
+		r.handle("POST /api/v1/evm/broadcast", Permitted(middleware.PermSignRequest), broadcastHandler)
 
 		// Wallet RPC proxy: browser-extension EIP1193Provider routes
 		// every read method + signed-tx broadcast through here so the
 		// extension doesn't have to ship a list of public RPC URLs.
-		// withAuth (no admin perm) — the handler's allowlist gates
-		// what actually goes upstream, sign methods are explicitly
-		// excluded so a non-admin key can't bypass /sign.
 		rpcProxyHandler, rpErr := evmhandler.NewRPCProxyHandler(r.config.RPCProvider, r.config.TransactionService, r.logger)
 		if rpErr != nil {
 			return fmt.Errorf("failed to create rpc proxy handler: %w", rpErr)
 		}
-		r.mux.Handle("POST /api/v1/evm/rpc/", r.withAuth(rpcProxyHandler))
+		r.handle("POST /api/v1/evm/rpc/", AuthenticatedOnly(
+			"JSON-RPC envelope, not a REST resource: what the caller may do is decided by the method name inside "+
+				"the body, which a route cannot see. The handler's allowlist is the gate — every eth_sign* method is "+
+				"excluded there, so a non-admin key cannot use this to bypass POST /api/v1/evm/sign."),
+			rpcProxyHandler)
 	}
 
 	// On-chain transactions read API. Registered independently of
@@ -511,7 +554,7 @@ func (r *Router) setupRoutes() error {
 		}
 		batchSignHandler.SetSignTimeout(
 			r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return s.SignTimeout }))
-		r.handlePerm("POST /api/v1/evm/sign/batch", middleware.PermSignRequest, batchSignHandler)
+		r.handle("POST /api/v1/evm/sign/batch", Permitted(middleware.PermSignRequest), batchSignHandler)
 	}
 
 	// Audit routes
@@ -520,8 +563,8 @@ func (r *Router) setupRoutes() error {
 	// hand-rolls `if r.Method != …`. Thirty-five of those checks existed and
 	// forgetting one means a GET reaching a write path — a mistake the mux
 	// cannot make.
-	r.handlePerm("GET /api/v1/audit", middleware.PermReadAudit, auditHandler)
-	r.handlePerm("GET /api/v1/audit/requests/", middleware.PermReadAudit, http.HandlerFunc(auditHandler.ServeRequestHTTP))
+	r.handle("GET /api/v1/audit", Permitted(middleware.PermReadAudit), auditHandler)
+	r.handle("GET /api/v1/audit/requests/", Permitted(middleware.PermReadAudit), http.HandlerFunc(auditHandler.ServeRequestHTTP))
 
 	// Set rule repo on access service for cascade cleanup
 	if accessService != nil {
@@ -548,9 +591,17 @@ func (r *Router) setupRoutes() error {
 		// land BEFORE the /api/v1/api-keys/ prefix so the standard mux's
 		// longest-match wins and we don't accidentally route through
 		// ServeKeyHTTP (which would treat "names" as an id and 404).
-		r.mux.Handle("GET /api/v1/api-keys/names", r.withAuth(http.HandlerFunc(apiKeyHandler.ListAPIKeyNames)))
-		r.mux.Handle("/api/v1/api-keys", r.withAuthAndPerm(middleware.PermManageAPIKeys, apiKeyHandler))
-		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndPerm(middleware.PermManageAPIKeys, http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
+		r.handle("GET /api/v1/api-keys/names", AuthenticatedOnly(
+			"deliberately weaker than the PermManageAPIKeys surface it sits inside, and the callers are known: "+
+				"the Web UI resolves its own key's role through it (web/src/lib/rbac.ts:8-11) and the extension "+
+				"fills the grant-access and signer-filter dropdowns (extension/background.js:2680-2692) — both from "+
+				"keys that are not the caller's. The projection is id+name+role+enabled over enabled keys only "+
+				"(handler/apikey.go:231-254) — no public key, no material, no ability to mutate. "+
+				"⚠️ It does disclose the roster of key names and roles to any authenticated key; that is the "+
+				"trade this route was created to make, and it is the one to revisit first if it turns out to be wrong."),
+			http.HandlerFunc(apiKeyHandler.ListAPIKeyNames))
+		r.handle("/api/v1/api-keys", Permitted(middleware.PermManageAPIKeys), apiKeyHandler)
+		r.handle("/api/v1/api-keys/", Permitted(middleware.PermManageAPIKeys), http.HandlerFunc(apiKeyHandler.ServeKeyHTTP))
 	}
 
 	// Wallet routes (all authenticated users can manage their own wallets)
@@ -559,14 +610,14 @@ func (r *Router) setupRoutes() error {
 		if collErr != nil {
 			return fmt.Errorf("failed to create wallet handler: %w", collErr)
 		}
-		r.mux.Handle("/api/v1/wallets", r.withAuthAndPerm(middleware.PermManageWallets, walletHandler))
-		r.mux.Handle("/api/v1/wallets/", r.withAuthAndPerm(middleware.PermManageWallets, http.HandlerFunc(walletHandler.ServeWalletHTTP)))
+		r.handle("/api/v1/wallets", Permitted(middleware.PermManageWallets), walletHandler)
+		r.handle("/api/v1/wallets/", Permitted(middleware.PermManageWallets), http.HandlerFunc(walletHandler.ServeWalletHTTP))
 	}
 
 	// ACLs read-only routes (admin only): IP whitelist config
 	if r.config.IPWhitelistConfigForRead != nil {
 		aclHandler := handler.NewACLHandler(r.config.IPWhitelistConfigForRead)
-		r.handlePerm("GET /api/v1/acls/ip-whitelist", middleware.PermReadACLs, aclHandler)
+		r.handle("GET /api/v1/acls/ip-whitelist", Permitted(middleware.PermReadACLs), aclHandler)
 	}
 
 	// Runtime-mutable settings (admin only). PUT against /api/v1/admin/settings/security
@@ -578,7 +629,7 @@ func (r *Router) setupRoutes() error {
 			settingsHandler.SetAuditLogger(r.config.AuditLogger)
 		}
 		settingsHandler.SetOnSecurityUpdated(r.syncApprovalGuard)
-		r.mux.Handle("/api/v1/admin/settings/", r.withAuthAndPerm(middleware.PermManageSettings, settingsHandler))
+		r.handle("/api/v1/admin/settings/", Permitted(middleware.PermManageSettings), settingsHandler)
 	}
 
 	// Template routes (read: PermReadTemplates; mutate: PermInstantiateTemplate checked in handler)
@@ -597,8 +648,8 @@ func (r *Router) setupRoutes() error {
 			return err
 		}
 
-		r.mux.Handle("/api/v1/templates", r.withAuthAndPerm(middleware.PermReadTemplates, templateHandler))
-		r.mux.Handle("/api/v1/templates/", r.withAuthAndPerm(middleware.PermReadTemplates, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.handle("/api/v1/templates", Permitted(middleware.PermReadTemplates), templateHandler)
+		r.handle("/api/v1/templates/", Permitted(middleware.PermReadTemplates), http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			// Route to instance handler if path starts with /instances/
 			if strings.HasPrefix(req.URL.Path, "/api/v1/templates/instances/") {
 				templateHandler.ServeInstanceHTTP(w, req)
@@ -606,7 +657,7 @@ func (r *Router) setupRoutes() error {
 			}
 			// Otherwise, route to template handler
 			templateHandler.ServeHTTP(w, req)
-		})))
+		}))
 	}
 
 	// Preset API (read: PermReadPresets; apply: PermApplyPreset checked in handler)
@@ -629,12 +680,12 @@ func (r *Router) setupRoutes() error {
 		if r.config.AuditLogger != nil {
 			presetHandler.SetAuditLogger(r.config.AuditLogger)
 		}
-		r.mux.Handle("/api/v1/presets", r.withAuthAndPerm(middleware.PermReadPresets, presetHandler))
+		r.handle("/api/v1/presets", Permitted(middleware.PermReadPresets), presetHandler)
 		// /presets/{id}/apply and /presets/{id}/validate are POSTs that change
 		// the catalogue, so they carry PermApplyPreset at the route instead of
 		// being reached on the read permission and re-checked inside apply().
-		r.handlePerm("GET /api/v1/presets/", middleware.PermReadPresets, http.HandlerFunc(presetHandler.ServeHTTP))
-		r.handlePerm("POST /api/v1/presets/", middleware.PermApplyPreset, http.HandlerFunc(presetHandler.ServeHTTP))
+		r.handle("GET /api/v1/presets/", Permitted(middleware.PermReadPresets), http.HandlerFunc(presetHandler.ServeHTTP))
+		r.handle("POST /api/v1/presets/", Permitted(middleware.PermApplyPreset), http.HandlerFunc(presetHandler.ServeHTTP))
 	}
 
 	// Registry refresh endpoint — re-runs Template + Preset Registry
@@ -650,7 +701,7 @@ func (r *Router) setupRoutes() error {
 		if err != nil {
 			return err
 		}
-		r.handlePerm("POST /api/v1/registry/refresh", middleware.PermApplyPreset, refreshHandler)
+		r.handle("POST /api/v1/registry/refresh", Permitted(middleware.PermApplyPreset), refreshHandler)
 	}
 
 	// Web UI catch-all. Must be registered LAST so every explicit
@@ -660,7 +711,15 @@ func (r *Router) setupRoutes() error {
 	// — flipping the setting at runtime is enough to disable the UI.
 	if r.config.SettingsManager != nil {
 		webHandler := web.NewHandler(r.config.SettingsManager, r.logger)
-		r.mux.Handle("/", webHandler)
+		r.handle("/", PublicUnwrapped(
+			"the SPA itself: HTML, JS and assets a browser fetches before it has any credential, so there is "+
+				"nobody to authenticate. It is PublicUnwrapped rather than Public because "+
+				"SecurityHeadersMiddleware sets `Content-Security-Policy: default-src 'none'`, which is right for "+
+				"an API and would blank the page here. The handler short-circuits when settings.web.enabled is "+
+				"false, so the switch — not the registration — is what turns the UI off. "+
+				"⚠️ It is also the catch-all: every path no /api/v1 pattern claims lands here, which is why the "+
+				"deny-by-default guard in Handler() cannot be phrased as \"unmatched means denied\"."),
+			webHandler)
 	}
 
 	return nil
@@ -685,27 +744,11 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 	return r.chain(h, middlewares...)
 }
 
-// withAuthAndPerm wraps a handler with authentication + RBAC permission middleware.
-// handlePerm registers h at pattern behind auth plus perm, and records the
-// pairing for RoutePermissions.
-//
-// ⛔ Prefer this over calling mux.Handle with withAuthAndPerm directly: a route
-// registered the other way is invisible to the route-table test, which is the
-// only thing that can notice a mutating path gated on a read permission.
-func (r *Router) handlePerm(pattern string, perm middleware.Permission, h http.Handler) {
-	r.routePerms[pattern] = perm
-	r.mux.Handle(pattern, r.withAuthAndPerm(perm, h))
-}
-
-// RoutePermissions returns the permission each registered pattern requires.
-func (r *Router) RoutePermissions() map[string]middleware.Permission {
-	out := make(map[string]middleware.Permission, len(r.routePerms))
-	for k, v := range r.routePerms {
-		out[k] = v
-	}
-	return out
-}
-
+// withAuthAndPerm wraps a handler with authentication + RBAC permission
+// middleware. ⛔ Reachable only through handle (route_auth.go); calling it and
+// handing the result to the mux yourself is what the archcheck `route-auth`
+// gate exists to catch, because a route registered that way is absent from the
+// authorization table and therefore invisible to everything that reads it.
 func (r *Router) withAuthAndPerm(perm middleware.Permission, h http.Handler) http.Handler {
 	middlewares := []func(http.Handler) http.Handler{
 		middleware.SecurityHeadersMiddleware(),
@@ -797,9 +840,14 @@ func (r *Router) syncApprovalGuard() {
 	}
 }
 
-// Handler returns the HTTP handler
+// Handler returns the HTTP handler.
+//
+// ⚠️ It is the mux behind the deny-by-default guard, never the bare mux: a
+// pattern that reached the mux without going through handle is refused here.
+// See the Layer 3 note in route_auth.go for what was there before (nothing) and
+// why an unmatched request is deliberately left alone.
 func (r *Router) Handler() http.Handler {
-	return r.mux
+	return r.denyUndeclared(r.mux)
 }
 
 // StartRateLimitCleanup starts the rate limit cleanup routine

@@ -108,6 +108,24 @@ var checks = []checkDef{
 		Run:      checkHandlerPathDispatch,
 	},
 	{
+		Name:     "route-auth",
+		Baseline: "", // hard rule: a hole in the mechanism is not debt to be scheduled
+		Hint:     "Register through (*Router).handle with Permitted(perm) — or, when the route genuinely carries no permission, AuthenticatedOnly/Public/PublicUnwrapped with a written reason. ⛔ 没有理由的豁免等于关掉检查:an exemption nobody can argue with is the same as no check at all.",
+		Run:      checkRouteAuth,
+	},
+	{
+		Name:     "route-auth-exempt",
+		Baseline: "route-auth-exemptions.txt",
+		Hint:     "Every route that declares no permission is listed here with its reason at the call site. ⛔ Adding a line means adding an endpoint nobody has to hold a permission for — say why in the constructor first. Removing one is the good direction: a route that gained a permission, or stopped existing, must lose its line or the list stops going red when it matters.",
+		Run:      checkRouteAuthExempt,
+	},
+	{
+		Name:     "route-mutating-perm",
+		Baseline: "route-mutating-perm.txt",
+		Hint:     "A route that changes state must not be reachable on a permission that only means \"may look\". ⚠️ Where the real check is resource-scoped (does this caller own *this* signer?), the route-level permission is only the outer door — those entries are in the baseline with the reason.",
+		Run:      checkRouteMutatingPerm,
+	},
+	{
 		Name:     "respond-shape",
 		Baseline: "respond-shape.txt",
 		Hint:     "One argument order for all of them, then delete the per-handler copies in favour of a shared respond package.",

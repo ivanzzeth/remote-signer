@@ -120,7 +120,7 @@ illusion that someone is watching.
 | `arch/10` | `ValidateWithInput` — the direct JS entry point — is called only from `internal/chain/evm/testcase_runner.go`. ⚠️ Not "test cases have one execution path": they have two, answering different questions (the script alone, vs. the whole engine including blocklists and delegation), and `remote-signer validate` deliberately uses the second | template/preset/rule validation each kept its own copy of the test-case loop; two of them substituted variables *before* validating, so **matrix presets validated every test case against the wrong chain** — silently, for months |
 | `arch/20` | Every preset's `template_ids` resolve | A dangling id makes `preset apply` install one rule fewer **without erroring** — it surfaces later as "a signature mysteriously went to `authorizing`" |
 | `arch/30` | `signer` / `test_signer` / `from` hold only allowlisted or structurally-impossible addresses | `b922718` scrubbed operator wallets once; new aori/stargate work reintroduced the same address **23 times**, 2 of them buried inside calldata hex (`…000764602fead…`) where grepping for the address misses them. This submodule is open-source, so a real EOA in a signer field publishes someone's wallet |
-| `arch/05` 🔒 | **AST**, not text: Clean Architecture dependency direction; settings knobs frozen into struct fields (this retired `50-dependency-direction` and `80-settings-single-source` too — one property should not carry two baselines); rule-repo holders and unvalidated writers; `write*` helpers with more than one argument order; **mirror structs** — several structs parsing one config format, compared by serialization tag; **rule-type table** — a declared rule type missing from the one table everything derives from; **engine dispatch** — callers that ask which engine a rule uses; **duplication** — functions whose normalized shape is ≥88% identical; **handler path dispatch** — handlers under `internal/api/handler/**` that still slice `r.URL.Path` instead of reading `r.PathValue` | Every grep gate here carries a note about a case its text criterion got wrong, and two were the same mistake: the Solidity ratchet counted `evm_solidity_expression` in comments, and the retired grep gate `40-rule-write-chokepoint` flagged `cmd/archcheck`'s own doc comment for the words `storage.RuleRepository`. Reading declarations instead of lines also widened what is visible — grep saw 3 files breaking dependency direction, the AST saw **13 package edges**, including the `internal/api → internal/config` class it never reported at all. All 13 are now fixed and the baseline is empty |
+| `arch/05` 🔒 | **AST**, not text: Clean Architecture dependency direction; settings knobs frozen into struct fields (this retired `50-dependency-direction` and `80-settings-single-source` too — one property should not carry two baselines); rule-repo holders and unvalidated writers; `write*` helpers with more than one argument order; **mirror structs** — several structs parsing one config format, compared by serialization tag; **rule-type table** — a declared rule type missing from the one table everything derives from; **engine dispatch** — callers that ask which engine a rule uses; **duplication** — functions whose normalized shape is ≥88% identical; **handler path dispatch** — handlers under `internal/api/handler/**` that still slice `r.URL.Path` instead of reading `r.PathValue`; **route auth** — three checks that together make a route with no authorization decision unrepresentable: `route-auth` (⛔ zero baseline — nobody reaches the mux except `(*Router).handle`, and every route that declares no permission carries a written reason), `route-auth-exempt` (🔒 the list of routes with no permission, 14 today, expiring by itself in both directions), `route-mutating-perm` (🔒 a state-changing route gated on a read-only permission) | Every grep gate here carries a note about a case its text criterion got wrong, and two were the same mistake: the Solidity ratchet counted `evm_solidity_expression` in comments, and the retired grep gate `40-rule-write-chokepoint` flagged `cmd/archcheck`'s own doc comment for the words `storage.RuleRepository`. Reading declarations instead of lines also widened what is visible — grep saw 3 files breaking dependency direction, the AST saw **13 package edges**, including the `internal/api → internal/config` class it never reported at all. All 13 are now fixed and the baseline is empty |
 | `arch/60` 🔒 | The set of `${var}` substitution implementations only shrinks | Validation uses the strict one (`core/service/substitute.go`, reports errors); evaluation uses the lenient one (`core/rule/effective_config.go`, never errors). One divergence between them = a rule whose test cases are green authorizing something else at runtime |
 | `arch/70` 🔒 | Per-handler `write*` helpers, `RouterConfig` fields and hand-rolled method checks only go down; no new in-handler `HasPermission` | 48 write helpers in **three different argument orders** — swap two and it still compiles (`any` + `int`), shipping errors inside a 200. A permission check in a function body means forgetting one is a bypass, and nothing reports it |
 | `arch/90` | Every `scripts/arch/NN-*.sh` has a row in the table above, every `arch/NN` named here exists, and each script is executable and runnable standalone | This table said "5 gates" while 7 existed — the count was never updated when gates 6 and 7 landed. The damage is not the wrong number: a newcomer reads it as the complete list and never learns `scripts/arch/` exists, so the next gate gets bolted somewhere else. The gate caught itself on its first run |
@@ -219,6 +219,41 @@ assumed: `auth.go:97-100` must sign `EscapedPath()` — the exact bytes the clie
 signed, since preset ids contain `/` and arrive as `%2F` while `PathValue`
 returns a decoded segment — and every other middleware read puts the request
 line into the audit log, which has to name the whole path.
+
+The **route-auth** trio is the one gate that is only one third of its own
+mechanism, and the other two thirds are in the daemon.
+
+Before it, 55 mux patterns were registered in five different shapes and only one
+of them — `handlePerm` — recorded what it had decided, so `RoutePermissions()`
+described fewer than half the surface. `r.mux.Handle(p, r.withAuth(h))` looked
+exactly like a deliberate "authenticated, no permission needed" and exactly like
+somebody forgetting, and nothing could tell them apart. The test that claimed to
+cover this built a `&Router{routePerms: …}` literal with **two hand-written
+rows** and never called `setupRoutes`; all 55 real routes could have been gated
+wrong with it still green.
+
+| Layer | Where | What it makes impossible |
+|---|---|---|
+| type | [`internal/api/route_auth.go`](internal/api/route_auth.go) | Omitting the decision does not compile: `handle(pattern, RouteAuth, h)` takes it positionally, and the exemption constructors take the reason as an argument. The mux field is unexported, so nothing outside package api can reach it |
+| AST | `route-auth` in [`cmd/archcheck/routeauth.go`](cmd/archcheck/routeauth.go) | Nothing inside package api reaches the mux either, and no exemption ships without a reason a person wrote |
+| runtime | `Router.Handler` | A pattern that reached the mux anyway — from a `_test.go` or build-tagged file archcheck does not parse — is answered **403**, not served |
+
+⚠️ How far the type layer actually reaches, since "structurally impossible"
+invites over-claiming: inside package api the composite literal `RouteAuth{}` is
+still writable and Go cannot forbid it. It is rejected at startup (the daemon
+panics rather than serving an undecided route) and statically by the gate.
+Compile-time it is not.
+
+⛔ **The limit worth reading twice**: a prefix pattern serving many endpoints can
+declare only ONE permission. `/api/v1/evm/rules/` declares `PermListRules` for
+all twelve endpoints behind it while `handler/evm/rule.go:200-203` separately
+checks admin inside the handler for `validate`. So "every route declares a
+permission" is satisfiable today **while the per-endpoint permissions are still
+wrong**, and none of the three layers can see that — they count patterns, and a
+pattern is not an endpoint. This reaches full strength only after the handler
+decomposition. ⭐ What it is worth now: every route that decomposition creates
+must declare a permission at birth, and the routes that declare none are a list
+of 14 with written reasons that goes red when any of them changes.
 
 ⛔ Widening a layer's `MayImport` to silence a violation is shortening the ruler
 to make someone taller. The baseline is where a violation goes, with its reason.

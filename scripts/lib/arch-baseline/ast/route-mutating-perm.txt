@@ -1,0 +1,27 @@
+# 改状态的路由,却挂在一个只表示「可以看」的权限上。
+#
+# 这条判据原本写在 internal/api/route_permissions_test.go 里,而那个测试
+# **自己造了两行 fixture 再对着它断言**,从不调 setupRoutes —— 55 条真路由
+# 全挂错它也是绿的。所以判据搬到了这里:archcheck 读的是注册调用点本身,
+# 包括 13 处 `if r.config.X != nil` 里那些任何 fixture 都装不出来的条件路由。
+#
+# ⛔ 这条门禁**不知道**某条路由「应该」挂什么权限,别的东西也不知道。
+# 改权限是逐条的安全决定,而失败方向不对称:**过严会在 e2e 里显形,过松不会**。
+# 它只回答一个问题:有没有一条写操作,门口挂的是读权限。
+#
+# ---------- ⚠️ 它看不见的那一半 ----------
+#
+# 只有带 method 前缀的 pattern 才判得了。`/api/v1/evm/rules/` 没有 method 前缀,
+# 它背后 12 个端点里的 POST/DELETE 全都挂在 PermListRules 上,而这条门禁
+# 一个字都说不出来 —— 那正是 handler 拆解(提案 S3–S8)要解决的形状。
+#
+# ---------- 清单 ----------
+
+# unlock / lock / approve / transfer 四条(注册处是一个 for 循环拼接的 pattern,
+# `*` 就是那个循环变量)。挂 PermReadSigners 是**有意的**:真正的判断是
+# 资源域的 —— 这把 key 是不是**这个** signer 的 owner —— handler 拿被操作的
+# 那个 signer 去查(handler/evm/signer_locking.go:24-38 的 IsOwner:不是 owner
+# 回 403,连 ownership 记录都没有回 404),路由做不了这个判断,
+# 路由权限在这里只是外面那道门。
+# ⚠️ 留在基线里不代表它是对的,代表**改它是一个安全决定**,不是重构。
+POST /api/v1/evm/signers/{address}/*
