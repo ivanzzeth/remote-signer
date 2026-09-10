@@ -108,7 +108,7 @@ illusion that someone is watching.
 | `arch/10` | `ValidateWithInput` — the direct JS entry point — is called only from `internal/chain/evm/testcase_runner.go`. ⚠️ Not "test cases have one execution path": they have two, answering different questions (the script alone, vs. the whole engine including blocklists and delegation), and `remote-signer validate` deliberately uses the second | template/preset/rule validation each kept its own copy of the test-case loop; two of them substituted variables *before* validating, so **matrix presets validated every test case against the wrong chain** — silently, for months |
 | `arch/20` | Every preset's `template_ids` resolve | A dangling id makes `preset apply` install one rule fewer **without erroring** — it surfaces later as "a signature mysteriously went to `authorizing`" |
 | `arch/30` | `signer` / `test_signer` / `from` hold only allowlisted or structurally-impossible addresses | `b922718` scrubbed operator wallets once; new aori/stargate work reintroduced the same address **23 times**, 2 of them buried inside calldata hex (`…000764602fead…`) where grepping for the address misses them. This submodule is open-source, so a real EOA in a signer field publishes someone's wallet |
-| `arch/05` 🔒 | **AST**, not text: Clean Architecture dependency direction; settings knobs frozen into struct fields (this retired `50-dependency-direction` and `80-settings-single-source` too — one property should not carry two baselines); rule-repo holders and unvalidated writers; `write*` helpers with more than one argument order | Every grep gate here carries a note about a case its text criterion got wrong, and two were the same mistake: the Solidity ratchet counted `evm_solidity_expression` in comments, and the retired grep gate `40-rule-write-chokepoint` flagged `cmd/archcheck`'s own doc comment for the words `storage.RuleRepository`. Reading declarations instead of lines also widened what is visible — grep saw 3 files breaking dependency direction, the AST saw **13 package edges**, including the `internal/api → internal/config` class it never reported at all. All 13 are now fixed and the baseline is empty |
+| `arch/05` 🔒 | **AST**, not text: Clean Architecture dependency direction; settings knobs frozen into struct fields (this retired `50-dependency-direction` and `80-settings-single-source` too — one property should not carry two baselines); rule-repo holders and unvalidated writers; `write*` helpers with more than one argument order; **mirror structs** — several structs parsing one config format, compared by serialization tag | Every grep gate here carries a note about a case its text criterion got wrong, and two were the same mistake: the Solidity ratchet counted `evm_solidity_expression` in comments, and the retired grep gate `40-rule-write-chokepoint` flagged `cmd/archcheck`'s own doc comment for the words `storage.RuleRepository`. Reading declarations instead of lines also widened what is visible — grep saw 3 files breaking dependency direction, the AST saw **13 package edges**, including the `internal/api → internal/config` class it never reported at all. All 13 are now fixed and the baseline is empty |
 | `arch/60` 🔒 | The set of `${var}` substitution implementations only shrinks | Validation uses the strict one (`core/service/substitute.go`, reports errors); evaluation uses the lenient one (`core/rule/effective_config.go`, never errors). One divergence between them = a rule whose test cases are green authorizing something else at runtime |
 | `arch/70` 🔒 | Per-handler `write*` helpers, `RouterConfig` fields and hand-rolled method checks only go down; no new in-handler `HasPermission` | 48 write helpers in **three different argument orders** — swap two and it still compiles (`any` + `int`), shipping errors inside a 200. A permission check in a function body means forgetting one is a bypass, and nothing reports it |
 | `arch/90` | Every `scripts/arch/NN-*.sh` has a row in the table above, every `arch/NN` named here exists, and each script is executable and runnable standalone | This table said "5 gates" while 7 existed — the count was never updated when gates 6 and 7 landed. The damage is not the wrong number: a newcomer reads it as the complete list and never learns `scripts/arch/` exists, so the next gate gets bolted somewhere else. The gate caught itself on its first run |
@@ -135,6 +135,20 @@ a layer to:
 go run ./cmd/archcheck layers
 go run ./cmd/archcheck -unclassified
 ```
+
+The **mirror-structs** check is the one that reads a wire format rather than a
+dependency. Three times in one week a field was added to one struct parsing a
+YAML file and not to the others parsing the same file, and nothing failed —
+yaml discards a key it has no home for, so the only symptom was behaviour that
+depended on which code path read the file (a dropped `variables:` override, a
+dropped `priority:`, an ignored `budget_metering:`). It reported 1333 pairs
+before three conditions cut it to the real ones: both sides must carry yaml
+tags (a config file, not a response DTO), the smaller side must be roughly a
+subset (a mirror is a reduced copy), and three generic single-word tags is a
+coincidence while four — or one shared compound key — is a format.
+
+⛔ The fix is to give the format one struct and alias it (`type X = pkg.X`), not
+to top up the missing field. Topping up lasts until the next field.
 
 ⛔ Widening a layer's `MayImport` to silence a violation is shortening the ruler
 to make someone taller. The baseline is where a violation goes, with its reason.

@@ -161,7 +161,7 @@ go test -tags e2e ./e2e/...
 测试带 `integration` tag。一个名叫「仓储·真 SQLite」而实际跑纯测试的层会骗人。
 
 判据：**这个 bug 最早能在哪一层被抓到？** 那就是它该待的层。
-详见 [TESTING.md](TESTING.md)。`make check` 现有 **14 条已负向验证的门禁**：6 条测试结构（`scripts/check-tests.sh`）+ 8 条架构约束（`scripts/arch/*.sh`，每条一个文件、可单独跑）。其中 arch/05 是 **AST 判定**（`cmd/archcheck`，仅用标准库，0.2s 扫全树）：Clean Architecture 依赖方向、settings 开关冻结、规则写入收口、write helper 参数顺序；arch/90 钉住「门禁清单与 TESTING.md 一致」——这句话本身漂过一次。
+详见 [TESTING.md](TESTING.md)。`make check` 现有 **14 条已负向验证的门禁**：6 条测试结构（`scripts/check-tests.sh`）+ 8 条架构约束（`scripts/arch/*.sh`，每条一个文件、可单独跑）。其中 arch/05 是 **AST 判定**（`cmd/archcheck`，仅用标准库，0.2s 扫全树）：Clean Architecture 依赖方向、settings 开关冻结、规则写入收口、write helper 参数顺序、同一份配置格式的多份镜像结构体（按序列化 tag 比对，⛔ 修法是让格式只有一个结构体并用 `type X = pkg.X` 别名，不是把缺的字段补齐）；arch/90 钉住「门禁清单与 TESTING.md 一致」——这句话本身漂过一次。
 
 ## 架构概览
 
