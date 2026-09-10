@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
@@ -62,6 +63,9 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 		}
 		if len(templateFile.TestVariables) == 0 {
 			return nil, 0, 0, fmt.Errorf("template file requires test_variables for validation (file: %s)", filePath)
+		}
+		if err := validateBudgetMeteringUnit(templateFile, filePath); err != nil {
+			return nil, 0, 0, err
 		}
 		rulesJSON, err := json.Marshal(templateFile.Rules)
 		if err != nil {
@@ -305,4 +309,32 @@ func configToRuleWithID(idx int, cfg RuleConfig) (*types.Rule, error) {
 	}
 
 	return rule, nil
+}
+
+// validateBudgetMeteringUnit checks that budget_metering.unit resolves with the
+// template's own test_variables.
+//
+// A budget unit is the key spend is recorded against — "1:0xA0b8…" — so an
+// unresolved ${token_address} in it means the spend lands on a different row
+// than the limit it should have been checked against. The daemon already
+// refuses such a rule, but it does so at startup: internal/config's rule-init
+// returns an error and the daemon does not come up. Catching it here turns a
+// failed boot into a failed validate, which is where it belongs.
+func validateBudgetMeteringUnit(tf TemplateFile, filePath string) error {
+	if len(tf.BudgetMetering) == 0 {
+		return nil
+	}
+	unit, _ := tf.BudgetMetering["unit"].(string)
+	if strings.TrimSpace(unit) == "" {
+		return nil
+	}
+	resolved := rule.ExpandPlaceholders(unit, tf.TestVariables)
+	if rest := rule.UnresolvedPlaceholders(resolved); len(rest) > 0 {
+		return fmt.Errorf(
+			"%s: budget_metering.unit %q does not resolve with this template's test_variables "+
+				"(unresolved: %s) — the daemon refuses such a rule at startup, so fix the unit or "+
+				"add the variable to test_variables",
+			filePath, unit, strings.Join(rest, ", "))
+	}
+	return nil
 }

@@ -75,6 +75,22 @@ type TemplateFile struct {
 	Variables     []TemplateVarConfig `yaml:"variables"`
 	TestVariables map[string]string   `yaml:"test_variables"`
 	Rules         []RuleConfig        `yaml:"rules"`
+
+	// BudgetMetering is kept untyped because it carries ${var} placeholders
+	// before substitution — `unit: "${chain_id}:${token_address}"` will not
+	// unmarshal into types.BudgetMetering until those resolve.
+	//
+	// ⚠️ This field was missing until 2026-09-10, so `remote-signer validate`
+	// ignored budget_metering entirely: a unit that cannot resolve passed
+	// validation and was only caught at daemon startup, where rule-init refuses
+	// it — meaning the daemon would not start. Catching it here turns a failed
+	// boot into a failed validate.
+	//
+	// ⛔ Three structs parse this same file format — registry.templateYAML,
+	// config.templateFileContent and this one — and a field missing from one of
+	// them is silently dropped on that path. Adding a field to the template
+	// format means adding it to all three.
+	BudgetMetering map[string]any `yaml:"budget_metering,omitempty"`
 }
 
 // ValidationFileResult contains validation result for a single rule

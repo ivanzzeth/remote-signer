@@ -4,7 +4,23 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 fail=0
 
-# ---------- ① evm_js test case 只有一条执行路径 ----------
+# ---------- ① 直接跑 JS 规则只有一个入口 ----------
+#
+# ⚠️ 这条门禁**不**保证「test case 只有一条执行路径」—— 那句话曾写在这里,
+# 而它不是真的。test case 实际上有两条路,回答的是两个不同的问题:
+#
+#   RunJSTestCases(→ ValidateWithInput)  这个脚本单独跑,接受还是拒绝这个输入?
+#     用于:template validate API、preset validate、rule validate
+#
+#   cli/validate 的引擎路径(EvaluateWithResult) 整个引擎(blocklist + 委派 +
+#     这条规则)对这个输入是什么结论?
+#     用于:`remote-signer validate`
+#
+# 两者可以合法地不一致 —— 一条白名单规则单独跑通过,但被某条 blocklist 拦下 ——
+# cli/validate 里那个 `useFullEngine && isNoMatch && isWhitelistRule` 分支就是
+# 在处理这件事。⛔ 所以别把它们合并,先想清楚要回答哪个问题。
+#
+# 本门禁钉住的是**其中一条**:直接跑 JS 的底层入口只许有一个调用者。
 #
 # `ValidateWithInput` 是「拿 script + input + config 跑一次 JS 规则」的底层入口。
 # 它**只允许**被 internal/chain/evm/testcase_runner.go 调用。
@@ -17,7 +33,7 @@ fail=0
 #
 # 判据:*又有人要直接跑 JS 规则了吗?* 那就是第四份抄本的开始。
 # 要加新的校验入口 → 走 RunJSTestCases,或改本门禁的白名单并说明为什么它必须分叉。
-echo "==> evm_js test case 单一执行路径"
+echo "==> 直接跑 JS 规则单一入口"
 ALLOWED_CALLER="internal/chain/evm/testcase_runner.go"
 DEFINER="internal/chain/evm/js_evaluator.go"
 offenders=$(grep -rn "ValidateWithInput(" --include='*.go' . 2>/dev/null \
