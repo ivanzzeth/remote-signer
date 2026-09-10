@@ -35,5 +35,15 @@
 # 现在是 signer_routes_test.go 里 TestSignerRoutes_UnclaimedPathsReachNoHandler
 # 的一行,断言的是同一个请求**到不了任何 handler**(经生产 pattern 判定)。
 
+# 2026-09-11 · 提案 S5(settings 拆解):**15664 → 15612 行**,文件数不变。
+# 少掉的 52 行是 `errorSettingsStore` 与 `TestCoverage_Settings_Put_Error`,
+# 它们**搬到了 internal/api/handler/settings_test.go**,名字与断言一个字没改。
+# ⛔ 不是删掉了事:走的正是上面那条「能说清测的是什么行为的 → 改名搬去对应的
+# _test.go」——它测的是九个 group 的 PUT 在 store 写失败时回 500,是 settings
+# 的行为,和 coverage_boost 里那些 api-key 的私有方法调用没有关系。
+# ⚠️ 搬家的**触发**恰恰是这条棘轮:S5 先是把那张表从「路径 → ServeHTTP」改成
+# 「路径 + 端点函数」,coverage_boost 涨了 11 行,棘轮报红 —— 提示语写的
+# 「别往 coverage_boost 里塞」就是这次该做的事。
+
 files      13
-lines   15664
+lines   15612

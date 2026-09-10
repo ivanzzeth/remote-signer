@@ -268,7 +268,11 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 		{"RuleEngine + signer access service", "POST /api/v1/evm/sign/batch"},
 		{"APIKeyRepo", "GET /api/v1/api-keys/names"},
 		{"IPWhitelistConfigForRead", "GET /api/v1/acls/ip-whitelist"},
-		{"SettingsManager", "/api/v1/admin/settings/"},
+		// ⛔ This row used to be the literal "/api/v1/admin/settings/" — one
+		// method-less prefix that stood for eighteen endpoints. S5 replaced it, so
+		// the row names one of the eighteen (enough to prove the branch fired) and
+		// the module block below proves that *all* of them reached the mux.
+		{"SettingsManager", "GET /api/v1/admin/settings/security"},
 		{"SettingsManager (SPA catch-all)", "/"},
 		{"Template", "/api/v1/templates"},
 		{"PresetRepo + Template", "/api/v1/presets"},
@@ -350,6 +354,29 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 				"than signersModule.Routes() says it serves", pattern)
 		}
 	}))
+
+	// ⛔ And the module S5 created, which is the largest of the five: eighteen
+	// routes where one method-less prefix stood. Its branch IS gated by a config
+	// field (SettingsManager), so the row above proves the branch fired; this
+	// proves the branch registered all eighteen rather than some of them.
+	settingsMod, err := NewSettingsModule(maximalSettingsHandler(t))
+	if err != nil {
+		t.Fatalf("building the settings module: %v", err)
+	}
+	settingsMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("settings pattern %q is absent from the router, so the branch gated by "+
+				"SettingsManager registered less than settingsModule.Routes() says it serves", pattern)
+		}
+	}))
+}
+
+// maximalSettingsHandler builds the handler the settings module wraps. ⚠️ Only
+// its route patterns are read here, never its behaviour, so a manager with a nil
+// store is enough — the same one maximalRouterConfig hands the router.
+func maximalSettingsHandler(t *testing.T) *handler.SettingsHandler {
+	t.Helper()
+	return handler.NewSettingsHandler(settings.NewManager(nil, testLogger()), testLogger())
 }
 
 // maximalSignerHandler builds the handler the signers module wraps, with the

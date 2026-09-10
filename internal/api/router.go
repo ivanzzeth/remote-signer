@@ -600,15 +600,25 @@ func (r *Router) setupRoutes() error {
 	}
 
 	// Runtime-mutable settings (admin only). PUT against /api/v1/admin/settings/security
-	// persists into system_settings and refreshes the local snapshot; PR7c/d
-	// add the other groups as they become DB-backed.
+	// persists into system_settings and refreshes the local snapshot.
+	//
+	// ⚠️ The eighteen patterns and their permission live in module_settings.go
+	// now, and the permission is byte-for-byte the PermManageSettings the one
+	// method-less prefix declared for all of them. What changed is that the
+	// prefix — behind which the request body type varied with a path segment,
+	// the one shape OpenAPI cannot describe — became one route per group per
+	// method, each with a concrete body type. See settingsModule.Routes.
 	if r.config.SettingsManager != nil {
 		settingsHandler := handler.NewSettingsHandler(r.config.SettingsManager, r.logger)
 		if r.config.AuditLogger != nil {
 			settingsHandler.SetAuditLogger(r.config.AuditLogger)
 		}
 		settingsHandler.SetOnSecurityUpdated(r.syncApprovalGuard)
-		r.handle("/api/v1/admin/settings/", Permitted(middleware.PermManageSettings), settingsHandler)
+		settingsMod, sModErr := NewSettingsModule(settingsHandler)
+		if sModErr != nil {
+			return fmt.Errorf("failed to create settings module: %w", sModErr)
+		}
+		r.mountModules(settingsMod)
 	}
 
 	// Template routes (read: PermReadTemplates; mutate: PermInstantiateTemplate checked in handler)

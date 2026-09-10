@@ -3,10 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
@@ -19,6 +17,26 @@ import (
 // without restarting the daemon (config.yaml stays the bootstrap minimum).
 //
 // All endpoints require admin role. Writes are recorded via the audit logger.
+//
+// # ⭐ Why there are eighteen methods here and not two (proposal S5)
+//
+// This used to be one ServeHTTP behind one method-less pattern,
+// "/api/v1/admin/settings/", which cut the group out of r.URL.Path and switched
+// on it twice — once to pick a snapshot to return, once to pick a struct to
+// decode the request body into. ⛔ That last part is the thing OpenAPI cannot
+// describe at all: one path, nine different request-body schemas, chosen by a
+// value inside the path. A spec has one requestBody per path+method, so the
+// only honest thing it could say about this surface was nothing.
+//
+// One route per group per method makes each body a concrete type at a concrete
+// path, which is the entire point of this step rather than a side effect of it.
+// ⛔ Do not collapse these back into a `{group}` wildcard route: that would put
+// the group back inside the path *value* and restore exactly the shape that
+// cannot be expressed — the route table would look decomposed while the schema
+// problem stayed.
+//
+// ⚠️ The nine group identifiers contain dots ("evm.foundry") but never slashes,
+// so each is a single literal path segment and Go's mux matches it as one.
 type SettingsHandler struct {
 	mgr   *settings.Manager
 	log   *slog.Logger
@@ -41,184 +59,162 @@ func (h *SettingsHandler) SetOnSecurityUpdated(fn func()) {
 // so the change history lives alongside other admin operations.
 func (h *SettingsHandler) SetAuditLogger(a *audit.AuditLogger) { h.audit = a }
 
-// ServeHTTP routes /api/v1/admin/settings/:group. GET returns the current
-// snapshot as JSON; PUT replaces the entire snapshot for the named group.
-func (h *SettingsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	const prefix = "/api/v1/admin/settings/"
-	if !strings.HasPrefix(r.URL.Path, prefix) {
-		http.NotFound(w, r)
-		return
-	}
-	group := strings.TrimPrefix(r.URL.Path, prefix)
-	if group == "" || strings.Contains(group, "/") {
-		http.Error(w, "group required: /api/v1/admin/settings/<group>", http.StatusBadRequest)
-		return
-	}
+// ---------------------------------------------------------------------------
+// GET — one endpoint per group
+// ---------------------------------------------------------------------------
+//
+// ⚠️ There is no "unknown group" arm any more. snapshot() used to answer 404
+// "unknown settings group: x" for a group nobody had implemented; a group with
+// no route is now simply not routed, and a daemon answers the /api/v1/ JSON 404
+// instead. That is a *narrower* handler, not a lost check — the set of groups
+// this API serves is now stated where the mux enforces it.
 
-	switch r.Method {
-	case http.MethodGet:
-		h.handleGet(w, r, settings.Group(group))
-	case http.MethodPut:
-		h.handlePut(w, r, settings.Group(group))
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
+// GetSecurity returns the current security snapshot.
+func (h *SettingsHandler) GetSecurity(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.Security())
 }
 
-func (h *SettingsHandler) handleGet(w http.ResponseWriter, _ *http.Request, group settings.Group) {
-	snap, err := h.snapshot(group)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	writeSettingsJSON(w, http.StatusOK, snap)
+// GetNotify returns the current notification snapshot.
+func (h *SettingsHandler) GetNotify(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.Notify())
 }
 
-func (h *SettingsHandler) handlePut(w http.ResponseWriter, r *http.Request, group settings.Group) {
+// GetAuditMonitor returns the current audit-monitor snapshot.
+func (h *SettingsHandler) GetAuditMonitor(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.AuditMonitor())
+}
+
+// GetBlocklist returns the current dynamic-blocklist snapshot.
+func (h *SettingsHandler) GetBlocklist(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.Blocklist())
+}
+
+// GetSimulation returns the current simulation snapshot.
+func (h *SettingsHandler) GetSimulation(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.Simulation())
+}
+
+// GetFoundry returns the current Foundry snapshot.
+func (h *SettingsHandler) GetFoundry(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.Foundry())
+}
+
+// GetRPCGateway returns the current RPC-gateway snapshot.
+func (h *SettingsHandler) GetRPCGateway(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.RPCGateway())
+}
+
+// GetMaterialCheck returns the current material-check snapshot.
+func (h *SettingsHandler) GetMaterialCheck(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.MaterialCheck())
+}
+
+// GetWeb returns the current Web UI snapshot.
+func (h *SettingsHandler) GetWeb(w http.ResponseWriter, _ *http.Request) {
+	writeSettingsJSON(w, http.StatusOK, h.mgr.Web())
+}
+
+// ---------------------------------------------------------------------------
+// PUT — one endpoint per group, each with its own body type
+// ---------------------------------------------------------------------------
+
+// PutSecurity replaces the security snapshot.
+//
+// ⚠️ The only group with an after-save hook: the router passes syncApprovalGuard
+// through SetOnSecurityUpdated, so a changed approval policy takes effect
+// without a restart. Written here rather than inside putSettingsGroup because
+// "security is special" is a fact about this endpoint, not about the mechanism.
+func (h *SettingsHandler) PutSecurity(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupSecurity, h.mgr.UpdateSecurity,
+		func() any { return h.mgr.Security() }, h.onSecurityUpdated)
+}
+
+// PutNotify replaces the notification snapshot.
+func (h *SettingsHandler) PutNotify(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupNotify, h.mgr.UpdateNotify,
+		func() any { return h.mgr.Notify() }, nil)
+}
+
+// PutAuditMonitor replaces the audit-monitor snapshot.
+func (h *SettingsHandler) PutAuditMonitor(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupAuditMonitor, h.mgr.UpdateAuditMonitor,
+		func() any { return h.mgr.AuditMonitor() }, nil)
+}
+
+// PutBlocklist replaces the dynamic-blocklist snapshot.
+func (h *SettingsHandler) PutBlocklist(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupBlocklist, h.mgr.UpdateBlocklist,
+		func() any { return h.mgr.Blocklist() }, nil)
+}
+
+// PutSimulation replaces the simulation snapshot.
+func (h *SettingsHandler) PutSimulation(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupSimulation, h.mgr.UpdateSimulation,
+		func() any { return h.mgr.Simulation() }, nil)
+}
+
+// PutFoundry replaces the Foundry snapshot.
+func (h *SettingsHandler) PutFoundry(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupFoundry, h.mgr.UpdateFoundry,
+		func() any { return h.mgr.Foundry() }, nil)
+}
+
+// PutRPCGateway replaces the RPC-gateway snapshot.
+func (h *SettingsHandler) PutRPCGateway(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupRPCGateway, h.mgr.UpdateRPCGateway,
+		func() any { return h.mgr.RPCGateway() }, nil)
+}
+
+// PutMaterialCheck replaces the material-check snapshot.
+func (h *SettingsHandler) PutMaterialCheck(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupMaterialCheck, h.mgr.UpdateMaterialCheck,
+		func() any { return h.mgr.MaterialCheck() }, nil)
+}
+
+// PutWeb replaces the Web UI snapshot.
+func (h *SettingsHandler) PutWeb(w http.ResponseWriter, r *http.Request) {
+	putSettingsGroup(h, w, r, settings.GroupWeb, h.mgr.UpdateWeb,
+		func() any { return h.mgr.Web() }, nil)
+}
+
+// putSettingsGroup is the one PUT body every group shares, with the *type* it
+// decodes as the parameter. It is byte-for-byte the sequence the nine arms of
+// the old handlePut switch ran: decode, update, hook, audit, echo the manager's
+// new view — including the status codes (400 on a decode failure, 500 on an
+// update failure, 200 with the fresh snapshot on success).
+//
+// ⚠️ A free function rather than a method because Go methods cannot take type
+// parameters. ⛔ It must stay a *shape* and not grow group-specific behaviour:
+// the moment it needs to know which group it is serving, the nine endpoints
+// have stopped being nine endpoints again.
+func putSettingsGroup[T any](
+	h *SettingsHandler,
+	w http.ResponseWriter,
+	r *http.Request,
+	group settings.Group,
+	update func(context.Context, *T, string) error,
+	current func() any,
+	after func(),
+) {
 	actor := settings.UpdatedByAPI
 	if k := middleware.GetAPIKey(r.Context()); k != nil && k.ID != "" {
 		actor = k.ID
 	}
-	switch group {
-	case settings.GroupSecurity:
-		var patch settings.SecuritySnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateSecurity(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if h.onSecurityUpdated != nil {
-			h.onSecurityUpdated()
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.Security())
-	case settings.GroupNotify:
-		var patch settings.NotifySnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateNotify(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.Notify())
-	case settings.GroupAuditMonitor:
-		var patch settings.AuditMonitorSnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateAuditMonitor(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.AuditMonitor())
-	case settings.GroupBlocklist:
-		var patch settings.BlocklistSnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateBlocklist(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.Blocklist())
-	case settings.GroupSimulation:
-		var patch settings.SimulationSnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateSimulation(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.Simulation())
-	case settings.GroupFoundry:
-		var patch settings.FoundrySnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateFoundry(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.Foundry())
-	case settings.GroupRPCGateway:
-		var patch settings.RPCGatewaySnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateRPCGateway(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.RPCGateway())
-	case settings.GroupMaterialCheck:
-		var patch settings.MaterialCheckSnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateMaterialCheck(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.MaterialCheck())
-	case settings.GroupWeb:
-		var patch settings.WebSnapshot
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := h.mgr.UpdateWeb(r.Context(), &patch, actor); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.recordAudit(r.Context(), actor, group, &patch)
-		writeSettingsJSON(w, http.StatusOK, h.mgr.Web())
-	default:
-		http.Error(w, "unknown or read-only settings group: "+string(group), http.StatusBadRequest)
-	}
-}
 
-func (h *SettingsHandler) snapshot(group settings.Group) (any, error) {
-	switch group {
-	case settings.GroupSecurity:
-		return h.mgr.Security(), nil
-	case settings.GroupNotify:
-		return h.mgr.Notify(), nil
-	case settings.GroupFoundry:
-		return h.mgr.Foundry(), nil
-	case settings.GroupSimulation:
-		return h.mgr.Simulation(), nil
-	case settings.GroupBlocklist:
-		return h.mgr.Blocklist(), nil
-	case settings.GroupAuditMonitor:
-		return h.mgr.AuditMonitor(), nil
-	case settings.GroupRPCGateway:
-		return h.mgr.RPCGateway(), nil
-	case settings.GroupMaterialCheck:
-		return h.mgr.MaterialCheck(), nil
-	case settings.GroupWeb:
-		return h.mgr.Web(), nil
-	default:
-		return nil, fmt.Errorf("unknown settings group: %s", group)
+	var patch T
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
 	}
+	if err := update(r.Context(), &patch, actor); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if after != nil {
+		after()
+	}
+	h.recordAudit(r.Context(), actor, group, &patch)
+	writeSettingsJSON(w, http.StatusOK, current())
 }
 
 func (h *SettingsHandler) recordAudit(ctx context.Context, actor string, group settings.Group, patch any) {

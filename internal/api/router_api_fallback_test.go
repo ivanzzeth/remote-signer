@@ -481,6 +481,115 @@ func TestAPIFallback_RulesPrefixStillAnswersItsOwn400(t *testing.T) {
 	}
 }
 
+// TestAPIFallback_SettingsStrandedPaths is where the behaviour-change table on
+// settingsModule.Routes is *measured* rather than reasoned about.
+//
+// ⚠️ Unlike the three modules before it, this one closes no reachability defect:
+// SettingsHandler.ServeHTTP dispatched on `switch r.Method` with a 405 default
+// and rejected every deep path with 400, so nothing here ever mutated on a read
+// verb and nothing ever leaked a snapshot from a path no endpoint owned. What it
+// closes is the *schema* hole — the request body type varied with a path segment
+// — and the stranded shapes below are the price of removing the prefix that
+// allowed that.
+//
+// ⚠️ The handler-package tests for this module run against a bare mux with no
+// fallback, so they see the mux's own 404 and 405. Here the real
+// registerAPIFallback stands next to the real module, which is the only place
+// the daemon's answer is visible: "/api/v1/" matches every path and every
+// method, so ⛔ the daemon never answers 405 for these — every stranded shape,
+// wrong-verb ones included, lands on the JSON 404 fallback. What must never
+// happen is that it lands on the SPA and comes back text/html to a JSON client.
+func TestAPIFallback_SettingsStrandedPaths(t *testing.T) {
+	settingsMod, err := NewSettingsModule(maximalSettingsHandler(t))
+	if err != nil {
+		t.Fatalf("building the settings module: %v", err)
+	}
+
+	var patterns []string
+	settingsMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		patterns = append(patterns, pattern)
+	}))
+	if len(patterns) != 18 {
+		t.Fatalf("settingsModule registered %d patterns, want 18 — the rows below would pass for the wrong reason",
+			len(patterns))
+	}
+
+	r := newChainedTestRouter()
+	r.mountModules(settingsMod)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<!doctype html><html>spa</html>"))
+	r.registerAPIFallback()
+
+	// Each real endpoint still resolves to its own pattern: the fallback shadows
+	// none of them, and the decomposition left none of them behind. ⚠️ The group
+	// segments contain dots; this is where "a dot is an ordinary character in a
+	// mux path segment" is measured rather than assumed.
+	for _, pattern := range patterns {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("settings pattern %q has no method — the rows below assume method+path patterns", pattern)
+		}
+		if strings.Contains(path, "{") {
+			t.Fatalf("settings pattern %q has a wildcard — ⛔ S5's whole point is that the group is a "+
+				"literal segment, so that each route carries one concrete body type", pattern)
+		}
+		if _, got := r.mux.Handler(httptest.NewRequest(method, path, nil)); got != pattern {
+			t.Errorf("%s %s dispatches to %q, want its own route %q", method, path, got, pattern)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+	}{
+		// ---- what the prefix used to swallow, all of them 400 or 405 before ----
+		{"the bare prefix, which answered 400 group required", http.MethodGet, "/api/v1/admin/settings/"},
+		{"the bare prefix on a PUT", http.MethodPut, "/api/v1/admin/settings/"},
+		// ⚠️ Trailing slash, and in the direction opposite to hd-wallets: settings
+		// never ran TrimSuffix, so "security/" hit the slash guard and answered
+		// 400. It was already refused; only the status and body change.
+		{"a group with a trailing slash", http.MethodGet, "/api/v1/admin/settings/security/"},
+		{"a group with a trailing slash on a PUT", http.MethodPut, "/api/v1/admin/settings/security/"},
+		{"a deep path, which answered 400 group required", http.MethodGet, "/api/v1/admin/settings/security/extra"},
+		{"a deeper path still", http.MethodGet, "/api/v1/admin/settings/a/b/c/d"},
+		{"an unknown group, which answered 404 unknown settings group", http.MethodGet, "/api/v1/admin/settings/unknown.group"},
+		{"an unknown group on a PUT, which answered 400", http.MethodPut, "/api/v1/admin/settings/unknown.group"},
+		// ⚠️ These three were the handler's own 405. ⛔ They never mutated —
+		// settings had no verb hole — so this row is a status change, not a
+		// defect being closed.
+		{"POST on a group, which answered 405", http.MethodPost, "/api/v1/admin/settings/security"},
+		{"DELETE on a group, which answered 405", http.MethodDelete, "/api/v1/admin/settings/security"},
+		{"PATCH on a group, which answered 405", http.MethodPatch, "/api/v1/admin/settings/security"},
+		// ⚠️ These two were **301 redirects**, not 405s: ServeMux redirects a path
+		// with no match to the subtree pattern one level up, and
+		// "/api/v1/admin/settings/" was such a pattern, so the collection — on any
+		// verb — was bounced into the prefix and answered 400 there. With the
+		// prefix gone there is nothing to redirect to.
+		{"the collection, which used to 301 into the prefix", http.MethodGet, "/api/v1/admin/settings"},
+		{"the collection on a PUT, which used to 301 into the prefix", http.MethodPut, "/api/v1/admin/settings"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pattern := r.mux.Handler(httptest.NewRequest(tc.method, tc.target, nil))
+			if pattern != "/api/v1/" {
+				t.Fatalf("%s %s dispatches to %q, want the /api/v1/ fallback — "+
+					"a settings pattern is still claiming more than one endpoint's worth of paths",
+					tc.method, tc.target, pattern)
+			}
+
+			rec := httptest.NewRecorder()
+			r.Handler().ServeHTTP(rec, httptest.NewRequest(tc.method, tc.target, nil))
+			if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+				t.Fatalf("%s %s answered HTML (%d, content-type %q) — a JSON client would break on it",
+					tc.method, tc.target, rec.Code, rec.Header().Get("Content-Type"))
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s answered %d, want 401: the request carries no credential and the fallback is "+
+					"AuthenticatedOnly, so the chain must refuse before the 404 body", tc.method, tc.target, rec.Code)
+			}
+		})
+	}
+}
+
 // TestAPIFallback_HDWalletAndAPIKeyStrandedPaths is the S4 twin of
 // TestAPIFallback_WalletDeepPathAndWrongMethod, and it is where the
 // behaviour-change tables on hdWalletsModule.Routes and apiKeysModule.Routes are

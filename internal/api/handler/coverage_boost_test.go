@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,20 +14,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/settings"
 )
-
-// ---------------------------------------------------------------------------
-// Mock settings store that returns errors on Put
-// ---------------------------------------------------------------------------
-
-type errorSettingsStore struct {
-	settings.Store
-}
-
-func (e *errorSettingsStore) Put(_ context.Context, _ settings.Group, _, _ string) error {
-	return fmt.Errorf("store write error")
-}
 
 // ---------------------------------------------------------------------------
 // APIKeyHandler: listAPIKeys — valid offset query (line 192)
@@ -244,44 +230,6 @@ func TestCoverage_Audit_FilterSignRequestID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// SettingsHandler: update error paths via errorSettingsStore
-// ---------------------------------------------------------------------------
-
-func TestCoverage_Settings_Put_Error(t *testing.T) {
-	store := &errorSettingsStore{Store: newFakeSettingsStore()}
-	mgr := settings.NewManager(store, silentSettingsLogger())
-	h := NewSettingsHandler(mgr, silentSettingsLogger())
-
-	tests := []struct {
-		group string
-		path  string
-		body  string
-	}{
-		{"security", "security", `{"audit_retention_days":30}`},
-		{"notify", "notify", `{"slack_webhook_url":"https://hooks.slack.com/test"}`},
-		{"audit_monitor", "audit_monitor", `{"enabled":true}`},
-		{"blocklist", "evm.dynamic_blocklist", `{"enabled":true}`},
-		{"simulation", "evm.simulation", `{"enabled":true}`},
-		{"foundry", "evm.foundry", `{"url":"http://localhost:8545"}`},
-		{"rpc_gateway", "evm.rpc_gateway", `{"url":"http://localhost:8545"}`},
-		{"material_check", "evm.material_check", `{"enabled":true}`},
-		{"web", "web", `{"url":"http://localhost:8080"}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.group, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/"+tt.path,
-				strings.NewReader(tt.body))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusInternalServerError, w.Code, "group=%s body=%s", tt.group, w.Body.String())
-			assert.Contains(t, w.Body.String(), "store write error")
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
 // BootstrapHandler: nil logger path
 // ---------------------------------------------------------------------------
 
@@ -295,9 +243,9 @@ func TestCoverage_Bootstrap_NilLogger(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCoverage_Settings_RecordAudit(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
+	h, _ := NewSettingsHandlerForTest(t)
 	mockAuditRepo := newMockAuditRepo()
-	auditLogger, err := audit.NewAuditLogger(mockAuditRepo, silentSettingsLogger())
+	auditLogger, err := audit.NewAuditLogger(mockAuditRepo, SettingsTestLogger())
 	require.NoError(t, err)
 	h.SetAuditLogger(auditLogger)
 	h.recordAudit(context.Background(), "test-actor", "security", map[string]interface{}{"key": "val"})

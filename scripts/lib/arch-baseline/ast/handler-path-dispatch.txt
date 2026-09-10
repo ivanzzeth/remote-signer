@@ -89,10 +89,26 @@
 # e2e/ 也没人请求它,它只被自己的 6 个测试调到。删一个带测试的导出方法不是
 # 「给每个端点一条路由」这件事的执行细节,所以这次不删 —— 它是一个决定,
 # 该单独判断(见 signer_wallet.go 上的注释)。
+
+# ⭐ 2026-09-11,提案 S5:**16 → 15**,删掉的是
+# `internal/api/handler.SettingsHandler.ServeHTTP` —— 一条,背后是 **18 个端点**
+# (9 个 group × GET/PUT),是这张表里单条含端点数最多的一行(rule.go 的 12 条
+# 现在排第二)。
+#
+# ⛔ 这一条和前三步关的洞不一样,值得写清楚:settings 没有动词洞,也没有吞路径。
+# ServeHTTP 是 `switch r.Method` + 405 default,GET 改不了任何东西(实测:拿四个
+# 动词各打一次真 manager,读回快照,只有 PUT 变);`strings.Contains(group,"/")`
+# 把每一条深路径挡在 400,没有 signers 那种 `.../access/a/b` 返回真实列表的事。
+# 它关的是**另一个洞**:请求体的类型随路径里的一段变 —— 9 个 group、9 种互不相干
+# 的 body 结构、一条 path。OpenAPI 一条 path+method 只有一个 requestBody schema,
+# 所以这条 pattern 在 spec 里唯一诚实的写法是「什么都不写」。
+# ⛔ 修法必须是**每个 group 一条字面量路由**:`PUT .../{group}` 通配符会把类型
+# 选择从 handler 挪到路由表,而 body 类型仍然随 path 的**取值**变 —— 路由表看着
+# 拆开了,表达不了的形状原封不动。
+
 internal/api/handler.ACLHandler.ServeHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
 internal/api/handler.PresetHandler.ServeHTTP
-internal/api/handler.SettingsHandler.ServeHTTP
 internal/api/handler.TemplateHandler.ServeHTTP
 internal/api/handler.TemplateHandler.ServeInstanceHTTP
 internal/api/handler/evm.ApprovalHandler.ServeHTTP

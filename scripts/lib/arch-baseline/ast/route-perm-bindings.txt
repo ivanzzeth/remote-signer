@@ -4,7 +4,7 @@
 #
 # 别的基线是**债务清单**:每一行是一处该被修掉的东西,行数只许往下走,
 # 减到零是目标。这一张不是。这一张是**当前事实的记录** —— 它正确的大小
-# 就是「每一条带权限的路由一行」,今天 53 行。
+# 就是「每一条带权限的路由一行」,今天 70 行。
 #
 #   ⛔ 不要「清理」它,不要试图让它变短。
 #   ⛔ 一行消失**不是**修好了,是那条路由的权限动了 —— 门禁会为此报红,
@@ -78,7 +78,20 @@
 # 2026-09-10 · 提案 S4(hd-wallets 拆解):**这张表一行都没动**。四条 HD 钱包
 # 路由一个权限都不挂,拆解前后都在 route-auth-exemptions.txt 里。
 
-/api/v1/admin/settings/ manage_settings
+# 2026-09-11 · 提案 S5(settings 拆解):**53 → 70 行**。⛔ 没有任何一条路由的权限
+# 变了。落空的一行是 `/api/v1/admin/settings/` —— 一条**不带 method** 的前缀,
+# 背后藏着 18 个端点(9 个 group × GET/PUT);新增的十八行就是那 18 个端点,
+# 逐条仍然是 `manage_settings`,与那条前缀声明的一模一样。
+# ⭐ 这次 diff 的读法和 S4 一样:permission 那一列**十八行全是 manage_settings**,
+# 那就是这次拆解没顺手改权限的证据。
+# ⚠️ 值得单独说一句的是**九条 GET**:拆解第一次让「读设置」和「写设置」成为
+# 各自独立的路由,于是「把读放松到一个只读权限」第一次成为一处可以顺手做的
+# 编辑 —— 而 route-mutating-perm 只看得见写操作挂只读权限,放松一条**读**路由
+# 是本仓库十五条门禁全都看不见的那个方向(见本文件开头)。这张表是唯一会为此
+# 变红的东西。
+# ⚠️ route-mutating-perm **一行都没动**(仍然 8 条):manage_settings 不在
+# readPermissions 里,所以九条 PUT 不构成「写操作挂只读权限」。
+
 /api/v1/evm/guard/resume resume_guard
 /api/v1/evm/requests list_own_requests
 /api/v1/evm/rules list_rules
@@ -94,6 +107,15 @@ DELETE /api/v1/evm/signers/{address}/access/{keyID} read_signers
 DELETE /api/v1/wallets/{id} manage_wallets
 DELETE /api/v1/wallets/{id}/members/{signerAddress} manage_wallets
 GET /api/v1/acls/ip-whitelist read_acls
+GET /api/v1/admin/settings/audit_monitor manage_settings
+GET /api/v1/admin/settings/evm.dynamic_blocklist manage_settings
+GET /api/v1/admin/settings/evm.foundry manage_settings
+GET /api/v1/admin/settings/evm.material_check manage_settings
+GET /api/v1/admin/settings/evm.rpc_gateway manage_settings
+GET /api/v1/admin/settings/evm.simulation manage_settings
+GET /api/v1/admin/settings/notify manage_settings
+GET /api/v1/admin/settings/security manage_settings
+GET /api/v1/admin/settings/web manage_settings
 GET /api/v1/api-keys manage_api_keys
 GET /api/v1/api-keys/{id} manage_api_keys
 GET /api/v1/audit read_audit
@@ -130,4 +152,13 @@ POST /api/v1/presets/ apply_preset
 POST /api/v1/registry/refresh apply_preset
 POST /api/v1/wallets manage_wallets
 POST /api/v1/wallets/{id}/members manage_wallets
+PUT /api/v1/admin/settings/audit_monitor manage_settings
+PUT /api/v1/admin/settings/evm.dynamic_blocklist manage_settings
+PUT /api/v1/admin/settings/evm.foundry manage_settings
+PUT /api/v1/admin/settings/evm.material_check manage_settings
+PUT /api/v1/admin/settings/evm.rpc_gateway manage_settings
+PUT /api/v1/admin/settings/evm.simulation manage_settings
+PUT /api/v1/admin/settings/notify manage_settings
+PUT /api/v1/admin/settings/security manage_settings
+PUT /api/v1/admin/settings/web manage_settings
 PUT /api/v1/api-keys/{id} manage_api_keys

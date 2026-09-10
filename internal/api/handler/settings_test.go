@@ -1,39 +1,51 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
-	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/settings"
 )
 
 // ---------------------------------------------------------------------------
 // Fake in-memory settings store
 // ---------------------------------------------------------------------------
+//
+// ⚠️ Exported from a _test.go file — the export_test.go idiom, the same one
+// apikey_test.go and hdwallet_test.go use, and for the same reason. Proposal S5
+// moved this handler's route-level tests to the external package handler_test
+// (settings_routes_test.go), because driving the production route patterns means
+// importing internal/api, which imports this package. The fake store is shared
+// with in-package tests that stay here (TestCoverage_Settings_Put_Error wraps it
+// in errorSettingsStore), so it cannot move — it is exported instead.
+// ⛔ It is not part of the package's API: a _test.go file is compiled only into
+// the test binary.
 
-type fakeSettingsStore struct {
+// FakeSettingsStore is an in-memory settings.Store for tests.
+type FakeSettingsStore struct {
 	mu   sync.Mutex
 	data map[settings.Group]string
 }
 
-func newFakeSettingsStore() *fakeSettingsStore {
-	return &fakeSettingsStore{data: make(map[settings.Group]string)}
+// NewFakeSettingsStore returns an empty in-memory store.
+func NewFakeSettingsStore() *FakeSettingsStore {
+	return &FakeSettingsStore{data: make(map[settings.Group]string)}
 }
 
-func (f *fakeSettingsStore) Get(_ context.Context, key settings.Group) (*settings.Setting, error) {
+// Get implements settings.Store.
+func (f *FakeSettingsStore) Get(_ context.Context, key settings.Group) (*settings.Setting, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	v, ok := f.data[key]
@@ -43,14 +55,16 @@ func (f *fakeSettingsStore) Get(_ context.Context, key settings.Group) (*setting
 	return &settings.Setting{Key: string(key), ValueJSON: v}, nil
 }
 
-func (f *fakeSettingsStore) Put(_ context.Context, key settings.Group, valueJSON string, updatedBy string) error {
+// Put implements settings.Store.
+func (f *FakeSettingsStore) Put(_ context.Context, key settings.Group, valueJSON string, updatedBy string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.data[key] = valueJSON
 	return nil
 }
 
-func (f *fakeSettingsStore) List(_ context.Context) ([]*settings.Setting, error) {
+// List implements settings.Store.
+func (f *FakeSettingsStore) List(_ context.Context) ([]*settings.Setting, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []*settings.Setting
@@ -64,398 +78,89 @@ func (f *fakeSettingsStore) List(_ context.Context) ([]*settings.Setting, error)
 // Helpers
 // ---------------------------------------------------------------------------
 
-func silentSettingsLogger() *slog.Logger {
+// SettingsTestLogger is a logger that discards everything. Exported for the
+// external route-test package; see the note on FakeSettingsStore.
+func SettingsTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func newSettingsHandlerForTest(t *testing.T) (*SettingsHandler, *settings.Manager) {
+// NewSettingsHandlerForTest builds a handler over a fresh in-memory store and
+// returns the manager alongside it, so a test can read back what a PUT wrote.
+func NewSettingsHandlerForTest(t *testing.T) (*SettingsHandler, *settings.Manager) {
 	t.Helper()
-	store := newFakeSettingsStore()
-	mgr := settings.NewManager(store, silentSettingsLogger())
-	h := NewSettingsHandler(mgr, silentSettingsLogger())
+	store := NewFakeSettingsStore()
+	mgr := settings.NewManager(store, SettingsTestLogger())
+	h := NewSettingsHandler(mgr, SettingsTestLogger())
 	return h, mgr
 }
 
 // ---------------------------------------------------------------------------
-// NewSettingsHandler
+// Store that fails every write
 // ---------------------------------------------------------------------------
 
-func TestNewSettingsHandler(t *testing.T) {
-	mgr := settings.NewManager(newFakeSettingsStore(), silentSettingsLogger())
-	h := NewSettingsHandler(mgr, silentSettingsLogger())
-	assert.NotNil(t, h)
+// errorSettingsStore turns every Put into a failure, which is how the 500 arm of
+// each PUT endpoint is reached.
+//
+// ⚠️ It and TestCoverage_Settings_Put_Error moved here from
+// coverage_boost_test.go in proposal S5 — same name, same assertions, different
+// file. They belong next to the other in-package settings tests, and the
+// coverage_boost ratchet (that file may only shrink) is the mechanism that says
+// so.
+type errorSettingsStore struct {
+	settings.Store
 }
 
-func TestSettingsHandler_SetAuditLogger(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	h.SetAuditLogger(nil) // just ensure no panic
+func (e *errorSettingsStore) Put(_ context.Context, _ settings.Group, _, _ string) error {
+	return fmt.Errorf("store write error")
 }
 
-// ---------------------------------------------------------------------------
-// ServeHTTP — routing
-// ---------------------------------------------------------------------------
+// TestCoverage_Settings_Put_Error stays in package handler because
+// errorSettingsStore is unexported (S5 moved the rest of the settings route
+// tests to package handler_test).
+//
+// ⚠️ The rows used to be paths dispatched through ServeHTTP; they name their
+// endpoint function directly now, one identifier per row, because ServeHTTP is
+// gone and the route decides which function runs. The path is still passed so
+// the request is well-formed, ⛔ but it no longer selects anything — that is the
+// point of the change, and a row pointing at the wrong function would now fail
+// on its own body rather than being silently re-routed by the path.
+func TestCoverage_Settings_Put_Error(t *testing.T) {
+	store := &errorSettingsStore{Store: NewFakeSettingsStore()}
+	mgr := settings.NewManager(store, SettingsTestLogger())
+	h := NewSettingsHandler(mgr, SettingsTestLogger())
 
-func TestSettingsHandler_ServeHTTP_NoPrefix(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/something-else", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
+	tests := []struct {
+		group    string
+		path     string
+		body     string
+		endpoint http.HandlerFunc
+	}{
+		{"security", "security", `{"audit_retention_days":30}`, h.PutSecurity},
+		{"notify", "notify", `{"slack_webhook_url":"https://hooks.slack.com/test"}`, h.PutNotify},
+		{"audit_monitor", "audit_monitor", `{"enabled":true}`, h.PutAuditMonitor},
+		{"blocklist", "evm.dynamic_blocklist", `{"enabled":true}`, h.PutBlocklist},
+		{"simulation", "evm.simulation", `{"enabled":true}`, h.PutSimulation},
+		{"foundry", "evm.foundry", `{"url":"http://localhost:8545"}`, h.PutFoundry},
+		{"rpc_gateway", "evm.rpc_gateway", `{"url":"http://localhost:8545"}`, h.PutRPCGateway},
+		{"material_check", "evm.material_check", `{"enabled":true}`, h.PutMaterialCheck},
+		{"web", "web", `{"url":"http://localhost:8080"}`, h.PutWeb},
+	}
 
-func TestSettingsHandler_ServeHTTP_NoGroup(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_ServeHTTP_GroupWithSlash(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/security/extra", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_ServeHTTP_MethodNotAllowed(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	for _, method := range []string{http.MethodPost, http.MethodDelete, http.MethodPatch} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/v1/admin/settings/security", nil)
-			req = req.WithContext(adminCtx(t))
+	for _, tt := range tests {
+		t.Run(tt.group, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/"+tt.path,
+				strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
-			h.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+			tt.endpoint(w, req)
+			assert.Equal(t, http.StatusInternalServerError, w.Code, "group=%s body=%s", tt.group, w.Body.String())
+			assert.Contains(t, w.Body.String(), "store write error")
 		})
 	}
 }
 
 // ---------------------------------------------------------------------------
-// GET — all known groups
-// ---------------------------------------------------------------------------
-
-func TestSettingsHandler_GET_Security(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/security", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var s settings.SecuritySnapshot
-	err := json.Unmarshal(w.Body.Bytes(), &s)
-	require.NoError(t, err)
-	assert.True(t, s.NonceRequired)
-}
-
-func TestSettingsHandler_GET_Notify(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/notify", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_AuditMonitor(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/audit_monitor", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_Blocklist(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/evm.dynamic_blocklist", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_Simulation(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/evm.simulation", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_Foundry(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/evm.foundry", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_RPCGateway(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/evm.rpc_gateway", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_MaterialCheck(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/evm.material_check", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_Web(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/web", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_GET_UnknownGroup(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings/unknown.group", nil)
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
-// ---------------------------------------------------------------------------
-// PUT — security group
-// ---------------------------------------------------------------------------
-
-func TestSettingsHandler_PUT_Security(t *testing.T) {
-	h, mgr := newSettingsHandlerForTest(t)
-	body := `{"nonce_required": false, "rate_limit_default": 200}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/security", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	assert.False(t, mgr.Security().NonceRequired)
-	assert.Equal(t, 200, mgr.Security().RateLimitDefault)
-}
-
-func TestSettingsHandler_PUT_Security_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{invalid json`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/security", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// ---------------------------------------------------------------------------
-// PUT — all other groups
-// ---------------------------------------------------------------------------
-
-func TestSettingsHandler_PUT_Notify_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{invalid json`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/notify", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_AuditMonitor_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{bad`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/audit_monitor", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_Blocklist_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{{{`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.dynamic_blocklist", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_Simulation_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{bad`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.simulation", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_Foundry_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{{{`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.foundry", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_RPCGateway_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{bad`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.rpc_gateway", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_MaterialCheck_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{bad`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.material_check", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_Web_InvalidJSON(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{bad`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/web", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestSettingsHandler_PUT_Notify(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"providers": {}, "channels": {}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/notify", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_AuditMonitor(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"enabled": true, "interval": 60000000000}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/audit_monitor", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_Blocklist(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"enabled": true, "sources": []}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.dynamic_blocklist", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_Simulation(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"enabled": true, "timeout": 30000000000}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.simulation", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_Foundry(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"enabled": true}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.foundry", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_RPCGateway(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"base_url": "http://localhost:8545"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.rpc_gateway", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_MaterialCheck(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"enabled": true}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/evm.material_check", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_Web(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"enabled": false}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/web", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-func TestSettingsHandler_PUT_UnknownGroup(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"enabled": true}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/unknown.group", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// ---------------------------------------------------------------------------
-// writeSettingsJSON
+// writeSettingsJSON — unexported, so this test cannot leave the package
 // ---------------------------------------------------------------------------
 
 func TestWriteSettingsJSON(t *testing.T) {
@@ -471,40 +176,23 @@ func TestWriteSettingsJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// recordAudit
+// recordAudit — unexported, so these tests cannot leave the package either
 // ---------------------------------------------------------------------------
 
 func TestSettingsHandler_RecordAudit_NilAuditLogger(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
+	h, _ := NewSettingsHandlerForTest(t)
 	// Should not panic
 	h.recordAudit(context.Background(), "admin", settings.GroupSecurity, &settings.SecuritySnapshot{})
 }
 
 func TestSettingsHandler_RecordAudit_WithAuditLogger(t *testing.T) {
-	store := newFakeSettingsStore()
-	mgr := settings.NewManager(store, silentSettingsLogger())
-	auditLogger, err := audit.NewAuditLogger(newMockAuditRepo(), silentSettingsLogger())
+	store := NewFakeSettingsStore()
+	mgr := settings.NewManager(store, SettingsTestLogger())
+	auditLogger, err := audit.NewAuditLogger(newMockAuditRepo(), SettingsTestLogger())
 	require.NoError(t, err)
 
-	h := NewSettingsHandler(mgr, silentSettingsLogger())
+	h := NewSettingsHandler(mgr, SettingsTestLogger())
 	h.SetAuditLogger(auditLogger)
 	// Should not panic with a real audit logger; the mock repo records the event.
 	h.recordAudit(context.Background(), "admin-key", settings.GroupSecurity, &settings.SecuritySnapshot{NonceRequired: true})
-}
-
-// ---------------------------------------------------------------------------
-// PUT with API key in context (actor = key ID)
-// ---------------------------------------------------------------------------
-
-func TestSettingsHandler_PUT_WithAPIKeyActor(t *testing.T) {
-	h, _ := newSettingsHandlerForTest(t)
-	body := `{"max_request_age": 120000000000}` // 2 minutes
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/security", bytes.NewReader([]byte(body)))
-	req.Header.Set("Content-Type", "application/json")
-	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: "my-key", Role: types.RoleAdmin})
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
 }
