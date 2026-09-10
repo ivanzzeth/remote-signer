@@ -20,7 +20,8 @@
 | S1① 循环展成 4 条字面量 | ✅ 已落地 | `c17665b` |
 | S1② `/api/v1/` JSON 404 兜底 | ✅ 已落地 | `c17665b` `97e4a29` |
 | S1③ maximal-config 冲突测试 | ✅ 已落地 | `8175a6b` |
-| S2 起 | ⬜ 未开始 | |
+| S2 wallet 测试走真 mux | ✅ 已落地 | `e9cdbbf` |
+| S3 起 | ⬜ 未开始 | |
 
 ### 实测订正 —— 以下几条是**量过的**，不是重读原文得出的
 
@@ -32,7 +33,15 @@
 
 4. ⚠️ **「55 条 mux pattern」需要重新推导**。maximal config 下实际注册 51 条（50 真实 + 1 条测试探针），S1② 之后 `r.handle(` 是 51 处。门禁 C 的分母别直接用 55。
 
-5. ⚠️ **§2.3 的「405 语义不变」在 S1② 之后有一处例外**：method 不匹配的请求会落到 `/api/v1/` 拿到 404 而不是 405。⭐ 但只在**没有 `SettingsManager` 的 Router** 上可见 —— 有 Web UI 的部署里 `/` 早就把这类请求接走并回 HTML 200 了，本来就没有 405 可丢。
+5. ⛔ **§2.4「每个 handler 测试族都有一个同形状的 helper，换掉即可」对 wallet 不成立。** wallet 有 **42 处**直接分发（⚠️ `WalletHandler` 有**两个** mux 入口：`ServeHTTP` 12 处 + `ServeWalletHTTP` 30 处；只 grep 前者会少算 4 倍），而且 46 个 wallet 测试里有 **20 个用到非导出方法/DTO**，永远成不了路由测试。所以 S2 对每个 handler 都是**文件拆分**，不是换一个函数 —— 后面 S4–S8 按「拆分」估工作量，别按「换 helper」。
+
+6. ⛔ **包依赖方向决定了 S2 的形状**：`internal/api` import 了 `internal/api/handler`，所以 `package handler` 内的测试**不能**反向 import 去拿真 mux（成环）。可行解是把面向 mux 的那些测试挪到**外部测试包 `package handler_test`**（它可以 import 一个 import 了被测包的包）。⭐ 范本形状 = **feature module（`module_wallets.go`）+ 外部测试包 + 测试用 RouteRegistrar**，S4–S8 复制这个形状。
+
+7. ⚠️ **S2 走通的是「分发」，不是「鉴权」。** 测试用的 registrar 丢掉 `RouteAuth` 只注册裸 handler —— 因为 `handle` 套的链首是 `AuthMiddleware`（`middleware/auth.go:62-69`），没有签名头一律 401，而这些测试是从 context 注入 API key 的；走真链等于把 46 个测试全改成鉴权测试。补偿是一条断言「模块注册的就是这两条 pattern **且**带 `permitted(manage_wallets)`」的测试（已负向验证：改权限即红）。⭐ S3 拆解时**必须同步扩充那条断言**到全部 8 条路由及其权限 —— 它是唯一挡住「拆解顺手改权限」的东西，而 §6 把那件事列为**唯一语义不可逆**的风险。
+
+8. ⚠️ **wallet 作为范本 PR 在「快反馈」这条轴上偏弱**：三个文件全是 `//go:build integration`，不在 `http` 层，所以 §2.4「mux 冲突 panic 落到 2.5 秒的 http 层」在它身上不成立（那张网由 `router_maximal_config_test.go` 提供）。⭐ 真能兑现这条收益的是 `internal/api/handler/**` 里**无 tag 的那 569 个用例**。wallet 在 §2.5 的其余判据（自包含、测试厚、无跨 handler 闭包）上仍然成立，可以继续当范本 —— 它的可迁移资产是**形状**，不是它跑在哪一层。
+
+9. ⚠️ **§2.3 的「405 语义不变」在 S1② 之后有一处例外**：method 不匹配的请求会落到 `/api/v1/` 拿到 404 而不是 405。⭐ 但只在**没有 `SettingsManager` 的 Router** 上可见 —— 有 Web UI 的部署里 `/` 早就把这类请求接走并回 HTML 200 了，本来就没有 405 可丢。
 
 ---
 
