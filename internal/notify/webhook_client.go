@@ -50,15 +50,6 @@ func NewWebhookClient(timeout time.Duration, headers map[string]string) (*Webhoo
 //   - Disable HTTP redirects (attacker can redirect to internal IPs)
 //   - Consider DNS rebinding protection (re-resolve after redirect)
 func (w *WebhookClient) SendToURLs(urls []string, message string) error {
-	if len(urls) == 0 {
-		return fmt.Errorf("webhook URLs are required")
-	}
-	if message == "" {
-		return fmt.Errorf("message is required")
-	}
-
-	log := logger.GetGlobal()
-
 	payload := WebhookPayload{
 		Text:      message,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -68,51 +59,47 @@ func (w *WebhookClient) SendToURLs(urls []string, message string) error {
 		return fmt.Errorf("failed to marshal webhook payload: %w", err)
 	}
 
-	var lastErr error
-	successCount := 0
+	return fanOut(urls, message, webhookURLs, func(url string) error {
+		return w.postOne(url, body)
+	})
+}
 
-	for _, url := range urls {
-		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			lastErr = fmt.Errorf("failed to create request for %s: %w", url, err)
-			log.Warn().Err(lastErr).Str("url", url).Msg("Failed to create webhook request")
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		for k, v := range w.headers {
-			req.Header.Set(k, v)
-		}
+// webhookURLs is the webhook fan-out's half of the strings — see fanout.go.
+var webhookURLs = fanOutTarget{
+	emptyErr:   "webhook URLs are required",
+	allFailed:  "failed to send to any webhook",
+	logField:   "url",
+	sendFailed: "Webhook delivery failed",
+	partial:    "Some webhooks failed to receive notification",
+	sent:       "Webhook notification sent",
+	allSent:    "Successfully sent notification to webhooks",
+}
 
-		resp, err := w.httpClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to post to %s: %w", url, err)
-			log.Warn().Err(lastErr).Str("url", url).Msg("Webhook request failed")
-			continue
-		}
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Warn().Err(closeErr).Msg("failed to close response body")
-		}
+// postOne delivers the already-marshalled body to one URL. Each failure names
+// the URL in the error itself, because the fan-out logs one line per failed
+// recipient and that line is all the operator gets.
+func (w *WebhookClient) postOne(url string, body []byte) error {
+	log := logger.GetGlobal()
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			lastErr = fmt.Errorf("webhook %s returned status %d", url, resp.StatusCode)
-			log.Warn().Err(lastErr).Str("url", url).Int("status", resp.StatusCode).Msg("Webhook returned non-2xx")
-			continue
-		}
-
-		successCount++
-		log.Debug().Str("url", url).Msg("Webhook notification sent")
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request for %s: %w", url, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range w.headers {
+		req.Header.Set(k, v)
 	}
 
-	if successCount == 0 {
-		return fmt.Errorf("failed to send to any webhook: %w", lastErr)
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to post to %s: %w", url, err)
+	}
+	if closeErr := resp.Body.Close(); closeErr != nil {
+		log.Warn().Err(closeErr).Msg("failed to close response body")
 	}
 
-	if lastErr != nil {
-		log.Warn().
-			Int("success_count", successCount).
-			Int("total_count", len(urls)).
-			Msg("Some webhooks failed to receive notification")
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("webhook %s returned status %d", url, resp.StatusCode)
 	}
-
 	return nil
 }

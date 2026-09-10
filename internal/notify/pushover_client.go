@@ -176,41 +176,24 @@ func maskUserKey(key string) string {
 	return key[:4] + "***" + key[len(key)-4:]
 }
 
-// SendToUsers sends the notification to multiple Pushover users.
+// pushoverUsers is the Pushover fan-out's half of the strings — see fanout.go.
+// It is the only target that masks the recipient: a Pushover user key is a
+// credential, and the log is not the place for it.
+var pushoverUsers = fanOutTarget{
+	emptyErr:   "user keys are required",
+	allFailed:  "failed to send to any user",
+	logField:   "user_key",
+	sendFailed: "Failed to send notification to user",
+	partial:    "Some users failed to receive notification",
+	sent:       "Sent Pushover notification to user",
+	allSent:    "Successfully sent notification to Pushover users",
+	mask:       maskUserKey,
+}
+
+// SendToUsers sends the notification to multiple Pushover users. Partial
+// failures are logged and tolerated; an error means nothing was delivered.
 func (p *PushoverClient) SendToUsers(userKeys []string, message string, priority int, sound string) error {
-	if len(userKeys) == 0 {
-		return fmt.Errorf("user keys are required")
-	}
-	if message == "" {
-		return fmt.Errorf("message is required")
-	}
-
-	log := logger.GetGlobal()
-	var lastErr error
-	successCount := 0
-
-	for _, userKey := range userKeys {
-		if err := p.SendNotification(userKey, message, priority, sound); err != nil {
-			lastErr = err
-			log.Warn().
-				Err(err).
-				Str("user_key", maskUserKey(userKey)).
-				Msg("Failed to send notification to user")
-			continue
-		}
-		successCount++
-	}
-
-	if successCount == 0 {
-		return fmt.Errorf("failed to send to any user: %w", lastErr)
-	}
-
-	if lastErr != nil {
-		log.Warn().
-			Int("success_count", successCount).
-			Int("total_count", len(userKeys)).
-			Msg("Some users failed to receive notification")
-	}
-
-	return nil
+	return fanOut(userKeys, message, pushoverUsers, func(userKey string) error {
+		return p.SendNotification(userKey, message, priority, sound)
+	})
 }

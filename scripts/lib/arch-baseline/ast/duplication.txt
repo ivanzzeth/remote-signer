@@ -35,7 +35,7 @@
 #   能正常启动的原因,哪份副本掉了它,一边的目录会把空目录读成启动失败,另一边
 #   照常。两份已经在文档上漂了:模板那份的注释写着「解析失败不中断遍历,跳过该
 #   文件」,而代码其实是 return err 中断整棵树 —— 注释描述的是早就不存在的行为。
-
+#
 # 2026-09-10:4 → 3。两个 Upsert(模板 / preset)合成泛型 upsertCatalogueRow,
 #   两张表各自的差异收进一个 fresh 谓词。preset 那份的注释写着「Mirrors
 #   TemplateRepository.Upsert exactly」—— 而它不是:模板那份的跳过条件除了
@@ -44,7 +44,7 @@
 #   那句「exactly」:下一个照着 preset 抄第三张表的人会连模板的修复逻辑一起漏掉。
 #   selectCols 与 fresh 现在挨着写 —— 投影里漏一列,那列读回来是零值、永远比不
 #   相等,跳过分支会退化成每次启动整表 UPDATE。
-
+#
 # 2026-09-10:3 → 2。doRPC / doRPCUnchecked / doRPCRaw 三份(门禁只配到其中
 #   两份,doRPCRaw 是它没配上的第三份)合成一条 rpcRoundTrip:熔断 → 限流 →
 #   组包 → POST → 限长读 → 查状态 → 解信封 → 报 JSON-RPC 错。三份副本各自写了
@@ -55,8 +55,18 @@
 #   两份已经在外观上漂了:doRPC 的熔断文案多一句「using cached data only」,
 #   而缓存是 TokenMetadataCache 那一层的事,provider 自己并不用缓存 —— 统一成
 #   不带那句的准确文案。
-
+#
+# 2026-09-10:2 → 0。四个通知客户端的扇出(Slack / Telegram / Pushover /
+#   webhook —— 门禁只配到前三个中的两对)合成一个 fanOut。要守住的是「部分失败」
+#   那条规则:三个频道里挂了一个返回 nil(人已经收到了,只是没收全),三个全挂
+#   才返回 error —— 上层的升级逻辑就认这一点。哪份副本把这两半中的任意一半写反,
+#   要么丢掉一条没人会发现缺失的告警,要么把一条其实已经送达的告警报成失败。
+#   四份在成功路径的日志上已经漂了:Telegram 每条 debug + 全成功 info,webhook
+#   每条 debug,Slack 与 Pushover 成功时一个字都不写 —— 运维在日志里看得见
+#   Telegram 发成功,看不见 Slack 发成功。现在统一成 Telegram 那份(只增不减)。
+#
+# 这份基线现在是空的。⛔ 空不等于这道门禁没用了:它禁止的是数量变多,
+#   下一个 ≥88%、≥30 行的新副本会当场把 make check 判红。
+#
 # ⛔ 收敛方向是「同一个形状只留一份实现,两边都用它」。
 #
-internal/notify/pushover_client.go:(*PushoverClient).SendToUsers <-> internal/notify/slack_client.go:(*SlackClient).SendToChannels
-internal/notify/slack_client.go:(*SlackClient).SendToChannels <-> internal/notify/telegram_client.go:(*TelegramClient).SendToChats

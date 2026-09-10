@@ -345,41 +345,21 @@ func (s *SlackClient) filterBots(userIDs []string) ([]string, error) {
 	return humanMembers, nil
 }
 
-// SendToChannels sends the message to multiple Slack channels.
+// slackChannels is the Slack fan-out's half of the strings — see fanout.go.
+var slackChannels = fanOutTarget{
+	emptyErr:   "channel IDs are required",
+	allFailed:  "failed to send to any channel",
+	logField:   "channel_id",
+	sendFailed: "Failed to send message to channel",
+	partial:    "Some channels failed to receive message",
+	sent:       "Sent message to Slack channel",
+	allSent:    "Successfully sent notification to Slack channels",
+}
+
+// SendToChannels sends the message to multiple Slack channels. Partial
+// failures are logged and tolerated; an error means nothing was delivered.
 func (s *SlackClient) SendToChannels(channelIDs []string, message string) error {
-	if len(channelIDs) == 0 {
-		return fmt.Errorf("channel IDs are required")
-	}
-	if message == "" {
-		return fmt.Errorf("message is required")
-	}
-
-	log := logger.GetGlobal()
-	var lastErr error
-	successCount := 0
-
-	for _, channelID := range channelIDs {
-		if err := s.PostMessage(channelID, message); err != nil {
-			lastErr = err
-			log.Warn().
-				Err(err).
-				Str("channel_id", channelID).
-				Msg("Failed to send message to channel")
-			continue
-		}
-		successCount++
-	}
-
-	if successCount == 0 {
-		return fmt.Errorf("failed to send to any channel: %w", lastErr)
-	}
-
-	if lastErr != nil {
-		log.Warn().
-			Int("success_count", successCount).
-			Int("total_count", len(channelIDs)).
-			Msg("Some channels failed to receive message")
-	}
-
-	return nil
+	return fanOut(channelIDs, message, slackChannels, func(channelID string) error {
+		return s.PostMessage(channelID, message)
+	})
 }

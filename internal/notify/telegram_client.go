@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
 
 const telegramAPIBase = "https://api.telegram.org"
@@ -45,48 +43,25 @@ type sendMessageResponse struct {
 	Description string `json:"description,omitempty"`
 }
 
+// telegramChats is the Telegram fan-out's half of the strings — see fanout.go.
+var telegramChats = fanOutTarget{
+	emptyErr:   "chat IDs are required",
+	allFailed:  "failed to send to any Telegram chat",
+	logField:   "chat_id",
+	sendFailed: "Failed to send Telegram message",
+	partial:    "Some Telegram chats failed to receive message",
+	sent:       "Sent Telegram message",
+	allSent:    "Successfully sent notification to Telegram chats",
+}
+
 // SendToChats sends the message to each chat (chat_id or @channel).
 // chatID can be a numeric ID or a channel username (e.g. @mychannel).
+// Partial failures are logged and tolerated; an error means nothing was
+// delivered.
 func (c *TelegramClient) SendToChats(chatIDs []string, message string) error {
-	if len(chatIDs) == 0 {
-		return fmt.Errorf("chat IDs are required")
-	}
-	if message == "" {
-		return fmt.Errorf("message is required")
-	}
-
-	log := logger.GetGlobal()
-	var lastErr error
-	successCount := 0
-
-	for _, chatID := range chatIDs {
-		if err := c.sendMessage(chatID, message); err != nil {
-			lastErr = err
-			log.Warn().
-				Err(err).
-				Str("chat_id", chatID).
-				Msg("Failed to send Telegram message")
-			continue
-		}
-		successCount++
-		log.Debug().Str("chat_id", chatID).Msg("Sent Telegram message")
-	}
-
-	if successCount == 0 {
-		return fmt.Errorf("failed to send to any Telegram chat: %w", lastErr)
-	}
-	if lastErr != nil {
-		log.Warn().
-			Int("success_count", successCount).
-			Int("total_count", len(chatIDs)).
-			Msg("Some Telegram chats failed to receive message")
-	} else {
-		log.Info().
-			Int("chat_count", len(chatIDs)).
-			Msg("Successfully sent notification to Telegram chats")
-	}
-
-	return nil
+	return fanOut(chatIDs, message, telegramChats, func(chatID string) error {
+		return c.sendMessage(chatID, message)
+	})
 }
 
 func (c *TelegramClient) sendMessage(chatID, text string) error {
