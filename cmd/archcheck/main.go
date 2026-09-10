@@ -78,6 +78,12 @@ var checks = []checkDef{
 		Run:      checkRuleWrite,
 	},
 	{
+		Name:     "engine-dispatch",
+		Baseline: "engine-dispatch.txt",
+		Hint:     "Let the engine answer the question — a RuleValidator interface and a registry, the way RuleEvaluator already works for evaluation. ⛔ Never by removing an engine.",
+		Run:      checkEngineDispatch,
+	},
+	{
 		Name:     "mirror-structs",
 		Baseline: "mirror-structs.txt",
 		Hint:     "Give the format one struct and let the other packages alias it (`type X = pkg.X`). A mirror that is merely brought back in step drifts again the next time a field is added.",
