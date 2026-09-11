@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -53,7 +54,9 @@ func TestE2E_PolymarketV2_ValidateAfterJSFix(t *testing.T) {
 			Error    string `json:"error,omitempty"`
 		} `json:"results,omitempty"`
 	}
-	rawSignedRequest(t, http.MethodPost, "/api/v1/templates/"+targetID+"/validate", nil, &vresp)
+	// ⛔ url.PathEscape: targetID is "evm/polymarket_v2" — see the same call in
+	// e2e_validation_test.go for why a raw '/' here made the path ambiguous.
+	rawSignedRequest(t, http.MethodPost, "/api/v1/templates/"+url.PathEscape(targetID)+"/validate", nil, &vresp)
 
 	require.GreaterOrEqual(t, vresp.Total, 1, "polymarket_v2 template should produce at least 1 rule")
 	assert.Equal(t, 0, vresp.Failed, "all polymarket_v2 test cases should pass after JS fix; failed=%d", vresp.Failed)

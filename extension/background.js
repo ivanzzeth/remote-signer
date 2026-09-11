@@ -2593,7 +2593,7 @@ try { importScripts("bg-config.js"); } catch(e) {}
     async get(templateID) {
       return this.transport.request(
         "GET",
-        `/api/v1/templates/${templateID}`,
+        `/api/v1/templates/${encodeURIComponent(templateID)}`,
         null
       );
     }
@@ -2613,7 +2613,7 @@ try { importScripts("bg-config.js"); } catch(e) {}
     async update(templateID, req) {
       return this.transport.request(
         "PATCH",
-        `/api/v1/templates/${templateID}`,
+        `/api/v1/templates/${encodeURIComponent(templateID)}`,
         req
       );
     }
@@ -2623,7 +2623,7 @@ try { importScripts("bg-config.js"); } catch(e) {}
     async delete(templateID) {
       await this.transport.request(
         "DELETE",
-        `/api/v1/templates/${templateID}`,
+        `/api/v1/templates/${encodeURIComponent(templateID)}`,
         null
       );
     }
@@ -2633,7 +2633,7 @@ try { importScripts("bg-config.js"); } catch(e) {}
     async instantiate(templateID, req) {
       return this.transport.request(
         "POST",
-        `/api/v1/templates/${templateID}/instantiate`,
+        `/api/v1/templates/${encodeURIComponent(templateID)}/instantiate`,
         req
       );
     }
@@ -2643,7 +2643,7 @@ try { importScripts("bg-config.js"); } catch(e) {}
     async validate(templateID) {
       return this.transport.request(
         "POST",
-        `/api/v1/templates/${templateID}/validate`,
+        `/api/v1/templates/${encodeURIComponent(templateID)}/validate`,
         null
       );
     }
@@ -2653,7 +2653,7 @@ try { importScripts("bg-config.js"); } catch(e) {}
     async revokeInstance(ruleID) {
       return this.transport.request(
         "DELETE",
-        `/api/v1/templates/instances/${ruleID}`,
+        `/api/v1/templates/instances/${encodeURIComponent(ruleID)}`,
         null
       );
     }

@@ -183,6 +183,36 @@ export interface RevokeInstanceResponse {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * Percent-encode one path segment.
+ *
+ * ⛔ A template id is a file stem under the registry's templates directory
+ * (internal/core/registry/file_source.go relPathIdentity), so shipped ids look
+ * like "evm/erc20" and "evm/polymarket_v2" — the slash is part of the id, not a
+ * path separator. Interpolating such an id raw produced
+ * `/api/v1/templates/evm/erc20`, a URL that is simultaneously "template
+ * evm/erc20" and "template evm, sub-action erc20"; only a hard-coded list of
+ * known suffixes told the two apart, which is why the daemon could not name
+ * these endpoints as routes.
+ *
+ * ⚠️ encodeURIComponent, NOT encodeURI: encodeURI leaves '/' alone and would
+ * change nothing here. The other SDKs already do the equivalent —
+ * pkg/client/templates/templates.go uses url.PathEscape and
+ * pkg/rs-client/src/templates/templates.rs uses urlencoding::encode, both of
+ * which emit %2F — and the daemon has accepted the encoded form all along
+ * (it routes on r.URL.EscapedPath()). So this is backward compatible with every
+ * deployed daemon, and it is what lets a future daemon stop accepting the
+ * ambiguous raw form.
+ *
+ * ⚠️ Also applied to the instance rule id below. Instance ids are minted as
+ * "inst_" + hex (internal/core/service/template.go) and never contain a slash,
+ * so the encoded and raw forms are byte-identical there today; encoding it is
+ * belt-and-braces, not a fix.
+ */
+function seg(value: string): string {
+  return encodeURIComponent(value);
+}
+
 export class TemplateService {
   constructor(private readonly transport: HttpTransport) {}
 
@@ -210,7 +240,7 @@ export class TemplateService {
   async get(templateID: string): Promise<Template> {
     return this.transport.request<Template>(
       "GET",
-      `/api/v1/templates/${templateID}`,
+      `/api/v1/templates/${seg(templateID)}`,
       null,
     );
   }
@@ -232,7 +262,7 @@ export class TemplateService {
   async update(templateID: string, req: UpdateTemplateRequest): Promise<Template> {
     return this.transport.request<Template>(
       "PATCH",
-      `/api/v1/templates/${templateID}`,
+      `/api/v1/templates/${seg(templateID)}`,
       req,
     );
   }
@@ -243,7 +273,7 @@ export class TemplateService {
   async delete(templateID: string): Promise<void> {
     await this.transport.request<void>(
       "DELETE",
-      `/api/v1/templates/${templateID}`,
+      `/api/v1/templates/${seg(templateID)}`,
       null,
     );
   }
@@ -254,7 +284,7 @@ export class TemplateService {
   async instantiate(templateID: string, req: InstantiateRequest): Promise<InstantiateResponse> {
     return this.transport.request<InstantiateResponse>(
       "POST",
-      `/api/v1/templates/${templateID}/instantiate`,
+      `/api/v1/templates/${seg(templateID)}/instantiate`,
       req,
     );
   }
@@ -265,7 +295,7 @@ export class TemplateService {
   async validate(templateID: string): Promise<ValidateTemplateResponse> {
     return this.transport.request<ValidateTemplateResponse>(
       "POST",
-      `/api/v1/templates/${templateID}/validate`,
+      `/api/v1/templates/${seg(templateID)}/validate`,
       null,
     );
   }
@@ -276,7 +306,7 @@ export class TemplateService {
   async revokeInstance(ruleID: string): Promise<RevokeInstanceResponse> {
     return this.transport.request<RevokeInstanceResponse>(
       "POST",
-      `/api/v1/templates/instances/${ruleID}/revoke`,
+      `/api/v1/templates/instances/${seg(ruleID)}/revoke`,
       null,
     );
   }

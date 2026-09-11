@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -391,8 +392,19 @@ func TestE2E_ValidateTemplate(t *testing.T) {
 	}
 	require.NotEmpty(t, targetID, "no suitable template found for validate test")
 
+	// ⛔ url.PathEscape, not raw concatenation. A shipped template id is a file
+	// stem under the registry's templates dir, so it contains '/' ("evm/agent"),
+	// and a raw id made this path ambiguous: "/api/v1/templates/evm/agent/validate"
+	// is equally "template evm/agent, validate" and "template evm, sub-action
+	// agent/validate", separable only by a hard-coded suffix list inside
+	// TemplateHandler.ServeHTTP. Every other SDK already escapes
+	// (pkg/client/templates/templates.go, pkg/rs-client, pkg/js-client), and the
+	// daemon has always routed on r.URL.EscapedPath(), so the escaped form works
+	// against today's server as well as a decomposed one. ⚠️ rawSignedRequest
+	// signs the string passed here and Go's client writes URL.RequestURI()
+	// (EscapedPath), so the signed bytes and the wire bytes stay identical.
 	var vresp validateTemplateResponse
-	rawSignedRequest(t, http.MethodPost, "/api/v1/templates/"+targetID+"/validate", nil, &vresp)
+	rawSignedRequest(t, http.MethodPost, "/api/v1/templates/"+url.PathEscape(targetID)+"/validate", nil, &vresp)
 
 	// Verify response structure
 	assert.Equal(t, targetID, vresp.TemplateID)
