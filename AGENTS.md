@@ -99,7 +99,7 @@ remote-signer/
 make build              # ⬅ 默认：带 Web UI 的二进制（= build-embed）
 make build-embed        # 同 make build
 make build-cli          # 仅 Go 二进制（无 Web UI，后端快速迭代用）
-make check              # ⬅ 秒级反馈（≈13s）：fmt/vet/staticcheck/测试结构/架构约束
+make check              # ⬅ 秒级反馈（≈5.5s 热跑）：fmt/vet/staticcheck/丢掉的错误/测试结构/架构约束
 make test               # 默认层（unit http cli，≈16s 冷跑）
 make test LAYER=unit    # 只跑单元层（零/低 IO，最快）
 make test LAYER=e2e     # 端到端（真起 daemon）
@@ -163,7 +163,7 @@ go test -tags e2e ./e2e/...
 测试带 `integration` tag。一个名叫「仓储·真 SQLite」而实际跑纯测试的层会骗人。
 
 判据：**这个 bug 最早能在哪一层被抓到？** 那就是它该待的层。
-详见 [TESTING.md](TESTING.md)。`make check` 现有 **15 条已负向验证的门禁**：6 条测试结构（`scripts/check-tests.sh`）+ 9 条架构约束（`scripts/arch/*.sh`，每条一个文件、可单独跑）。其中 arch/05 是 **AST 判定**（`cmd/archcheck`，仅用标准库，0.2s 扫全树）：Clean Architecture 依赖方向、settings 开关冻结、规则写入收口、write helper 参数顺序、同一份配置格式的多份镜像结构体（按序列化 tag 比对，⛔ 修法是让格式只有一个结构体并用 `type X = pkg.X` 别名，不是把缺的字段补齐）、规则类型表的完整性（零基线）、调用方对引擎的分发（⛔ 收敛方向是让引擎自己回答问题，永远不是删掉某个引擎）、形状高度相似的函数对（归一化后 ≥88%、各 ≥30 行；⚠️ 相似不等于重复，长得像但意思不同的对留在基线里写清理由）、handler 自己按 `r.URL.Path` 分发（`internal/api/handler/**` 里一条 mux pattern 背后藏着好几个端点；⭐ 盯的是 handler 侧而非注册侧——通配符已注册但全仓 `PathValue` 0 次）、**路由鉴权四件套**（`route-auth` 零基线：谁都不许绕过唯一注册入口 `(*Router).handle` 直接摸 mux，豁免必须带**写下来的**理由——⛔ 没有理由的豁免等于关掉检查；`route-auth-exempt`：**不带权限的路由清单**，15 条，双向棘轮让它自己过期——新增一条没权限的路由、或某条**补上了**权限却没删基线行，都红；`route-mutating-perm`：写操作挂在只读权限上；`route-perm-binding`：**每条路由挂哪个权限**，46 条，key 同时含 pattern 和权限的线上取值——⛔ 这一条的基线**是当前事实的记录、不是债务清单**，本来就该每条带权限的路由一行、⛔ 不许「清理」变短。2026-09-10 提案 S3 实测：把 `GET /api/v1/wallets/{id}` 从 `PermManageWallets` 松成 `PermReadSigners`，前三条门禁和其余 12 条**全绿**——只读路由被放松是唯一没人看得见的方向）；arch/40 钉住**构建产物不许入库**（二进制按 git 自己的内容判定，不看后缀；另加 1 MB 上限，两条各自漏掉对方抓的那一半）；arch/90 钉住「门禁清单与 TESTING.md 一致」——这句话本身漂过一次。
+详见 [TESTING.md](TESTING.md)。`make check` 现有 **15 条已负向验证的门禁**：6 条测试结构（`scripts/check-tests.sh`）+ 9 条架构约束（`scripts/arch/*.sh`，每条一个文件、可单独跑）。其中 arch/05 是 **AST 判定**（`cmd/archcheck`，仅用标准库，0.2s 扫全树）：Clean Architecture 依赖方向、settings 开关冻结、规则写入收口、write helper 参数顺序、同一份配置格式的多份镜像结构体（按序列化 tag 比对，⛔ 修法是让格式只有一个结构体并用 `type X = pkg.X` 别名，不是把缺的字段补齐）、规则类型表的完整性（零基线）、调用方对引擎的分发（⛔ 收敛方向是让引擎自己回答问题，永远不是删掉某个引擎）、形状高度相似的函数对（归一化后 ≥88%、各 ≥30 行；⚠️ 相似不等于重复，长得像但意思不同的对留在基线里写清理由）、handler 自己按 `r.URL.Path` 分发（`internal/api/handler/**` 里一条 mux pattern 背后藏着好几个端点；⭐ 盯的是 handler 侧而非注册侧——通配符已注册但全仓 `PathValue` 0 次）、**路由鉴权四件套**（`route-auth` 零基线：谁都不许绕过唯一注册入口 `(*Router).handle` 直接摸 mux，豁免必须带**写下来的**理由——⛔ 没有理由的豁免等于关掉检查；`route-auth-exempt`：**不带权限的路由清单**，15 条，双向棘轮让它自己过期——新增一条没权限的路由、或某条**补上了**权限却没删基线行，都红；`route-mutating-perm`：写操作挂在只读权限上；`route-perm-binding`：**每条路由挂哪个权限**，46 条，key 同时含 pattern 和权限的线上取值——⛔ 这一条的基线**是当前事实的记录、不是债务清单**，本来就该每条带权限的路由一行、⛔ 不许「清理」变短。2026-09-10 提案 S3 实测：把 `GET /api/v1/wallets/{id}` 从 `PermManageWallets` 松成 `PermReadSigners`，前三条门禁和其余 12 条**全绿**——只读路由被放松是唯一没人看得见的方向）；arch/40 钉住**构建产物不许入库**（二进制按 git 自己的内容判定，不看后缀；另加 1 MB 上限，两条各自漏掉对方抓的那一半）；arch/90 钉住「门禁清单与 TESTING.md 一致」——这句话本身漂过一次。⚠️ 这个数字只数那**两族**；`make check` 还跑两条同样做过负向验证、但不在这两族里的门禁：`scripts/check-docs.sh`（文档）与 **`scripts/check-lint.sh` ⑫（被丢掉的错误）**——⑫a 签名路径（`core/service` + `chain/evm` + `core/rule`）零容忍、无基线；⑫c `forcetypeassert` 全仓 0；⑫b 其余按九档计数棘轮登记在 `scripts/lib/arch-baseline/ignored-errors.txt`。⛔ 在此之前 errcheck 这一整类**由什么都没有在检查**（`go vet` 和 `staticcheck` 都不做），而一次「测出 0 条」其实是 errcheck 在编译不过的包上崩了。配置见 `.golangci.yml`，版本钉在 `.golangci-version`。
 
 > ⛔ **门禁在哪儿执行，比门禁有几条重要。** 2026-09-10 之前，这些门禁只挂在
 > `.githooks/pre-commit` 上，而 `core.hooksPath` 从来没人设过 —— 也就是说

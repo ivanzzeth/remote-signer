@@ -1,0 +1,157 @@
+# golangci-lint —— 本仓库只用它做**一件事**:钉住「不许悄悄丢掉错误」。
+#
+# ⛔ 这个文件不是「把 linter 开满」的地方。判据和 make check 里其它门禁一致:
+# *这个错误再犯一次,什么会变红?* 开一条会在惯用写法上误报的 linter,后果不是
+# 「多几条噪声」—— 是整个 golangci 步骤被人 `|| true` 掉,然后连 errcheck 一起
+# 失效。staticcheck.conf 里关掉 U1000 那一段写的就是这件事(131 条噪声埋着
+# 13 条真问题 → 人会把整条门禁删了)。
+#
+# ---------- 为什么必须有这个文件 ----------
+#
+# 2026-09-11 之前 `make check` 只跑 go vet + staticcheck,而**两者都不做
+# errcheck**。也就是说「返回的 error 被整个丢掉」这一整类问题,在一个持有私钥、
+# 会签名转账的守护进程里,由**什么都没有**在检查。实测当时的数字:
+#
+#   errcheck(严格:-blank -asserts)生产文件          221
+#   errcheck(普通:error 被完全丢掉)生产文件          50
+#   其中签名路径(core/service + chain/evm + core/rule)  1   ← 只有一条
+#
+# ⚠️ 更早一次测量得到的是「0」,而那是 errcheck 在一个编译不过的测试包上**崩了**、
+# stderr 又被丢掉的结果。**一个报告成功却什么都没检查的门禁** —— 这个文件存在
+# 的理由正是它。所以 scripts/check-lint.sh 会断言退出码只能是 0 或 1,
+# 并把 stderr 打出来。
+#
+# ---------- 为什么没开别的 ----------
+#
+# ⛔ depguard:本仓库的 Clean Architecture 依赖方向由 AST 门禁管
+#    (`go run ./cmd/archcheck layers`,零基线,scripts/lib/arch-baseline/ast/layers.txt)。
+#    depguard 会变成同一个事实的第二个真相源 —— 两份规则只要漂开一点,
+#    「依赖方向对不对」就有两个答案,而本仓库专门有门禁在防这件事。
+#
+# ⛔ govet / staticcheck:它们已经是 scripts/run-checks.sh 里**各自独立的一步**,
+#    带各自的配置(staticcheck.conf;go vet 还要跑 integration / e2e 两套 build
+#    tag,golangci 在一次 run 里表达不了)。在这里再开一遍 = 同一个检查两个配置源,
+#    理由同 depguard。⭐ 「与现有的保持一致」在这里的意思是**不要跑第二遍**。
+#
+# ⛔ 复杂度类(gocyclo/cyclop/funlen)、wsl、nlreturn、gochecknoglobals、godox、
+#    `default: all`:不在本次目标内,且其中几条会在惯用写法上开火或只是改格式。
+#
+# ---------- 版本钉死 ----------
+#
+# golangci-lint 的**发现集随版本变**(默认排除表、linter 实现都会动)。门禁的
+# 有效强度因此不能取决于哪台机器上装了哪个版本 —— 那正是「基线在 CI 上和本地
+# 不一样」的来源。
+#
+# ⭐ 版本的**唯一真值**是仓库根的 `.golangci-version`(和 `.go-version` 同一个形状):
+#   · scripts/check-prereqs.sh 读它,并断言本机装的就是这个版本 —— 装了但版本不对 = 红
+#   · .github/workflows/check.yml 的安装步骤读同一个文件
+# ⛔ 不要在这个文件里再抄一遍版本号:那是第二个真相源,而它会漂。
+
+version: "2"
+
+run:
+  # ⛔ 只看**会进生产二进制的代码**,和 scripts/lib/arch.sh 的 arch_prod_files
+  # 同一个判据。理由:基线要有意义就必须和「这段代码会不会跑在守护进程里」对齐。
+  #
+  # ⚠️ 代价写在这儿:_test.go 完全不看(测试里严格模式下有 ~1000 条,
+  # 其中绝大多数是 os.Setenv / provider.Close 这类)。**一个丢掉错误的测试
+  # 可能在悄悄跳过它自己的断言** —— 这是本配置已知的盲区,不是被忘掉的。
+  # 想收进来的话:tests: true,然后给测试单独开一档棘轮。
+  tests: false
+
+  # 报告里的路径相对**本配置文件**(= 仓库根)。绝对路径会让
+  # scripts/check-lint.sh 的分类规则在不同机器上得到不同结果。
+  relative-path-mode: cfg
+
+issues:
+  # ⛔⛔ 这两行是本文件里最要紧的两行,别删。
+  #
+  # golangci 的默认值是 max-issues-per-linter: 50 / max-same-issues: 3 ——
+  # **它会静默截断**。实测:第一版配置报「errcheck: 50」,而真实数字是 184。
+  # 那个 50 不是巧合,就是上限本身。棘轮读一个被截断的数字 = 基线以下随便涨,
+  # 一个字都不会说。⭐ 这就是「报告成功却什么都没检查」的门禁的标准长相。
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    - errcheck        # 返回的 error 没被接收 / 被扔进 _
+    - errorlint       # %v 包 error 而不是 %w;== 比较 error 而不是 errors.Is
+    - nilerr          # err != nil 却 return nil —— 一条静默的成功路径
+    - forcetypeassert # x.(T) 不带 ok(会 panic)。今天全仓 0,零基线。
+
+  settings:
+    errcheck:
+      # `v, _ := x.(T)` —— 断言失败静默拿零值。签名路径上「地址取不到 → 空字符串」
+      # 这种降级是危险的,所以要看得见。今天 92 条,走棘轮。
+      check-type-assertions: true
+
+      # `_ = f()` —— 显式丢掉。比不接收好一点(至少 review 看得见),但仍然是丢掉。
+      check-blank: true
+
+      # ⛔ 关掉 golangci **内建的**默认排除表,改成下面这份写在仓库里的。
+      #
+      # 不是因为默认表太松,而是因为它**不可见也会变**:升一次 golangci,
+      # 我们的门禁到底在检查什么就跟着变了,而基线数字不会有任何反应。
+      # 下面每一行都带理由,那才是能被 review 的排除。
+      disable-default-exclusions: true
+
+      exclude-functions:
+        # ── ① 这些函数的 error **文档保证永远是 nil** ──
+        # strings.Builder / bytes.Buffer:标准库明写 "err is always nil"。
+        # 全仓 ~800 处,一条都不可能为真。留着它们 = 真问题被 800 条不可能
+        # 事件淹掉,然后没人再读这条门禁的输出。
+        - (*strings.Builder).Write
+        - (*strings.Builder).WriteByte
+        - (*strings.Builder).WriteRune
+        - (*strings.Builder).WriteString
+        - (*bytes.Buffer).Write
+        - (*bytes.Buffer).WriteByte
+        - (*bytes.Buffer).WriteRune
+        - (*bytes.Buffer).WriteString
+        - (hash.Hash).Write        # hash.Hash 契约:never returns an error
+        - math/rand.Read           # 文档:always returns len(p), nil
+        - (*math/rand.Rand).Read
+
+        # ── ② 往本进程自己的终端打字 ──
+        # fmt.Print/Printf/Println 固定写 os.Stdout。写失败(管道被关)时
+        # 这个守护进程做不了任何事 —— 它连报错都得往同一个 stdout 写。
+        #
+        # ⛔ 注意**没有** fmt.Fprint / Fprintf / Fprintln:它们收任意 Writer,
+        # 可能是 http.ResponseWriter 或一个文件,那里丢掉错误是真问题。
+        # golangci 的内建默认表把 Fprint/Fprintf 也排掉了 —— 这份表**比它严**,
+        # 代价是基线里多约 105 条(cmd/ 与 internal/cli 的表格输出)。
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+
+        # ── ③ 已读完的 HTTP 响应体的 defer Close ──
+        # 全仓 21 处,全是同一个形状:`defer resp.Body.Close()`。
+        #
+        # 为什么排除而不是「修」:唯一的修法是
+        # `defer func() { _ = resp.Body.Close() }()` —— 而 check-blank 会照样
+        # 报它。也就是说「修」其实是在 21 个地方写 nolint 注释,而这里一行
+        # 带理由的排除表达的是同一个决定,只是写在一处、能被 review。
+        #
+        # ⛔ 范围**必须**是 io.ReadCloser,不是「所有 Close」:
+        #   · (*os.File).Close        丢掉 = 可能丢掉还没落盘的写入
+        #   · (*sql.Rows).Close       丢掉 = 连接泄漏
+        # 这两类今天仍在基线里被点名(daemonize.go:37、fk_ensure.go)。
+        # scripts/check-lint.sh 的验证步骤会确认它们没被这条排除带走。
+        - (io.ReadCloser).Close
+
+  exclusions:
+    generated: lax
+    # ⛔ 只要这三个 preset。**不许加 std-error-handling** —— 它会让
+    # `os.Remove("/tmp/x")` 静默通过,而那正是本门禁要抓的东西。
+    # (它出现在几乎每一篇「Go 严格 linter 配置」文章里。)
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+    paths:
+      # 第三方 JS 依赖里带着 .go 文件(flatted/golang/…)。不是本仓库的债。
+      # ⚠️ 和 scripts/lib/arch.sh 的 arch_go_src 排除 node_modules 是同一个坑:
+      # 那里有一条门禁曾因为漏了这个排除,把第三方代码算进了自己的计数。
+      - node_modules

@@ -23,6 +23,7 @@ cd "$(dirname "$0")/.."
 # 每项:`名字|命令`。**最慢的排前面** —— 并发度有限时先启动的先占核。
 STEPS=(
     "staticcheck|staticcheck ./... 2>&1 | head -40"
+    "lint|./scripts/check-lint.sh"
     "vet|go vet ./... && go vet -tags integration ./internal/... && go vet -tags e2e ./e2e/..."
     "tests-struct|./scripts/check-tests.sh"
     "arch|./scripts/check-arch.sh"

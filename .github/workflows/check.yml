@@ -37,5 +37,19 @@ jobs:
       # 那是有意的,因为 staticcheck 没装时 `staticcheck ./...` 的绿是假绿。
       - name: Install staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      # ⛔ 同上,check-prereqs.sh 会断言它存在**并且版本相符**。
+      #
+      # ⚠️ 版本从 `.golangci-version` 读,不在这里写死 —— golangci-lint 的发现集
+      # 随版本变,而门禁 ⑫ 是计数棘轮:CI 和本地装不同版本 = 同一棵树两个数字,
+      # 于是棘轮会在一边红。那种红人会当成噪声。
+      #
+      # ⚠️ 用官方安装脚本(预编译二进制,几秒)而不是 `go install`:后者要从源码
+      # 编译整个 golangci-lint(≈1 分钟),而这个 job 的**全部意义**是秒级。
+      - name: Install golangci-lint (pinned by .golangci-version)
+        run: |
+          v=$(tr -d 'v \t\r\n' < .golangci-version)
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" "v${v}"
+          golangci-lint --version
       - name: make check
         run: make check
