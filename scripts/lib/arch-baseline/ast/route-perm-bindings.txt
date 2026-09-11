@@ -112,17 +112,45 @@
 # 那是**第一次被看见**的既有债,不是这次改出来的 —— 前缀不带 method,那条门禁
 # 一个字都说不出来。⛔ 修它是安全决定,见该基线文件里写下的理由。
 
+# 2026-09-11 · 提案 S6 后半(templates 的 id 子树):**72 → 77 行**。
+# ⛔ 没有任何一条路由的权限变了。落空的两行 / 新增的七行,逐条对得上 ——
+# 七条**全部**是 read_templates,和它们出自的那两条前缀逐字一致:
+#
+#   /api/v1/templates   read_templates  →  GET    /api/v1/templates                    read_templates
+#                                          POST   /api/v1/templates                    read_templates
+#   /api/v1/templates/  read_templates  →  GET    /api/v1/templates/{id}               read_templates
+#                                          PATCH  /api/v1/templates/{id}               read_templates
+#                                          DELETE /api/v1/templates/{id}               read_templates
+#                                          POST   /api/v1/templates/{id}/instantiate   read_templates
+#                                          POST   /api/v1/templates/{id}/validate      read_templates
+#
+# ⭐ 这次 diff 最该被人看一眼的是「七行权限全一样」这件事本身。两条前缀都不带
+# method,所以它们身后建/改/删/实例化四个写操作与三个读操作**共用**同一个
+# read_templates —— 拆开之后这不再是一句可以含糊过去的话,而是七行白纸黑字。
+# ⚠️ route-mutating-perm 因此 **9 → 14**(新增 create / update / delete /
+# instantiate / validate 五行)。那是**第一次被看见**的既有债,不是这次改出来的。
+# ⛔ 而且真正的检查**不在别处**:router.go 原先的注释写着「mutate:
+# PermInstantiateTemplate checked in handler」,那是假的 ——
+# PermInstantiateTemplate 有定义有授权,全仓**没有一处检查**。那条假注释已在本次
+# 改动里改掉,⛔ 改掉的是注释,不是权限。收紧权限单独走一个 PR(提案 §2.5)。
+#
+# ⚠️ 这一步与前面五步都不同的地方:它**不是**纯粹的内部重构。拆开之前,
+# `GET /api/v1/templates/evm/erc20`(未编码的 '/')是一次能成功的调用;拆开之后
+# 它匹配不到任何 pattern。前置条件(所有客户端改发 %2F)是**上一个提交**单独落的,
+# 落在未改动的服务端上 —— 老服务端两种形式都收,所以那一步向后兼容,而这一步
+# 之后只收编码形式。⛔ 已发布的 npm remote-signer-client 0.0.5 仍发未编码形式,
+# 那是这个决定明知的代价,写在 internal/api/module_templates.go 上。
+
 /api/v1/evm/guard/resume resume_guard
 /api/v1/evm/requests list_own_requests
 /api/v1/evm/rules list_rules
 /api/v1/evm/rules/ list_rules
 /api/v1/evm/simulations sign_request
-/api/v1/templates read_templates
-/api/v1/templates/ read_templates
 DELETE /api/v1/api-keys/{id} manage_api_keys
 DELETE /api/v1/evm/budgets/ manage_budgets
 DELETE /api/v1/evm/signers/{address} read_signers
 DELETE /api/v1/evm/signers/{address}/access/{keyID} read_signers
+DELETE /api/v1/templates/{id} read_templates
 DELETE /api/v1/wallets/{id} manage_wallets
 DELETE /api/v1/wallets/{id}/members/{signerAddress} manage_wallets
 GET /api/v1/acls/ip-whitelist read_acls
@@ -146,11 +174,14 @@ GET /api/v1/evm/signers/{address}/access read_signers
 GET /api/v1/evm/simulate/status sign_request
 GET /api/v1/presets read_presets
 GET /api/v1/presets/{id} read_presets
+GET /api/v1/templates read_templates
+GET /api/v1/templates/{id} read_templates
 GET /api/v1/wallets manage_wallets
 GET /api/v1/wallets/{id} manage_wallets
 GET /api/v1/wallets/{id}/members manage_wallets
 PATCH /api/v1/evm/budgets/ manage_budgets
 PATCH /api/v1/evm/signers/{address} read_signers
+PATCH /api/v1/templates/{id} read_templates
 PATCH /api/v1/wallets/{id} manage_wallets
 POST /api/v1/api-keys manage_api_keys
 POST /api/v1/evm/broadcast sign_request
@@ -171,7 +202,10 @@ POST /api/v1/evm/simulate/batch sign_request
 POST /api/v1/presets/{id}/apply apply_preset
 POST /api/v1/presets/{id}/validate apply_preset
 POST /api/v1/registry/refresh apply_preset
+POST /api/v1/templates read_templates
 POST /api/v1/templates/instances/{ruleID}/revoke read_templates
+POST /api/v1/templates/{id}/instantiate read_templates
+POST /api/v1/templates/{id}/validate read_templates
 POST /api/v1/wallets manage_wallets
 POST /api/v1/wallets/{id}/members manage_wallets
 PUT /api/v1/admin/settings/audit_monitor manage_settings

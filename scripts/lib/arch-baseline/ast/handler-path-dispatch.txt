@@ -140,7 +140,6 @@
 
 internal/api/handler.ACLHandler.ServeHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
-internal/api/handler.TemplateHandler.ServeHTTP
 internal/api/handler/evm.ApprovalHandler.ServeHTTP
 internal/api/handler/evm.BudgetItemHandler.ServeHTTP
 internal/api/handler/evm.PreviewRuleHandler.ServeHTTP

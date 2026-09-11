@@ -28,13 +28,56 @@
 | S4 signers 拆 11 条 | ✅ 已落地 | `2daf1f0` |
 | （插入）blackbox 层吃缓存的假绿 | ✅ 已修 | `2daf1f0` |
 | S5 settings 拆 18 条 | ✅ 已落地 | `0c660bd` |
-| S6 presets 拆 4 条 + instances 闭包拆 1 条 | 🟡 **一半落地** | |
-| S6 余下：templates 的 id 子树（7 个端点） | ⛔ **卡在一个决定**，见下 | |
+| S6 presets 拆 4 条 + instances 闭包拆 1 条 | ✅ 已落地 | `2200459` |
+| （插入）所有客户端改发 `%2F`（**先于**下一行落，打在未改动的服务端上） | ✅ 已落地 | |
+| S6 余下：templates 的 id 子树 → templates 共 8 条具名路由 | ✅ 已落地 | |
 | S7 requests 闭包 | ⬜ 未开始 | |
 | S8 rule.go 12 条（⛔ 切 3 个 PR） | ⬜ 未开始 | |
 | S9 起（swag / SDK 生成 / 门禁 C） | ⬜ 未开始 | |
 
-### ⛔ S6 停在哪里(2026-09-11,实测)
+### ✅ S6 已经走完(2026-09-11,实测)
+
+**决定已拍板:选 (a) —— 所有客户端 percent-encode。** 落地方式是**两个提交**,
+顺序不可交换:
+
+1. **客户端改口**(`pkg/js-client/src/templates/index.ts` 五处 + instance 一处、
+   `extension/background.js` 六处、`e2e/e2e_validation_test.go`、
+   `e2e/e2e_polymarket_test.go` 各一处 → `encodeURIComponent` / `url.PathEscape`)。
+   ⭐ 打在**未改动的服务端**上,全绿 —— 老服务端两种形式都收(`ServeHTTP` 用
+   `EscapedPath()` + 一串 TrimSuffix),Go SDK 一直发 `%2F`。⛔ 反过来做会开出一个
+   「客户端还在发裸斜杠、服务端已经不收」的窗口。
+2. **服务端拆解**:两条不带 method 的前缀 → **7 条具名路由**(collection 的
+   GET/POST、`{id}` 的 GET/PATCH/DELETE、instantiate、validate),与既有的 revoke
+   合计 **templates 8 条**。`TemplateHandler.ServeHTTP` 删除。
+
+基线移动(实测):`handler-path-dispatch` 13 → 12,`route-perm-binding` 72 → 77,
+`route-mutating-perm` 9 → 14(新**看见**的既有债:create/update/delete/instantiate
+/validate 五条挂 `read_templates`),`manual_method_checks` **7 → 6**(§0 订正 10 说的
+那一处随 ServeHTTP 一起消失)。
+
+⛔ **顺手查出来的一件事,比 S6 本身重要**:`router.go` 的注释一直写着
+「mutate: `PermInstantiateTemplate` checked in handler」—— **假的**。
+`PermInstantiateTemplate` 在 `middleware/rbac.go:42` 有定义、`:103`/`:153` 有授权,
+**全仓没有任何一处检查它**。也就是说建/改/删模板与实例化模板一直只要
+`read_templates` 就能打。本次只改掉了那条假注释,⛔ **没有改权限**(提案 §2.5)。
+收紧它单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
+
+⚠️ **这一步不是纯内部重构**,它**收回了一个能用的调用**:
+`GET /api/v1/templates/evm/erc20`(未编码)以前回 200 带模板,现在匹配不到任何
+pattern,落到 `/api/v1/` 的 JSON 404。已发布的 npm `remote-signer-client@0.0.5`
+(`pkg/mcp-server/node_modules/` 里那份 vendored 拷贝,`pkg/mcp-server` 走它)
+和本次之前构建的扩展 bundle 仍发未编码形式,会坏掉 —— 那是 (a) 明知的代价。
+
+⚠️ `manual_method_checks` 的判据是对生产文件的一次 `grep 'r.Method != http.Method'`,
+**注释也算**。第一版把这串字面量写进了 `template.go` 的说明散文里,于是棘轮一声不响
+地停在 7。⛔ 别在生产文件里写出那串字面量。
+
+---
+
+### ⛔（历史）S6 当时停在哪里(2026-09-11,实测)
+
+> ⚠️ 以下是决定拍板**之前**的分析,保留是为了让后来的人看得出判断怎么下的。
+> 结论已经执行:选 (a)。
 
 **落地的**:presets 三条 pattern → 四条具名路由(`internal/api/module_presets.go`);
 templates 的 instances 闭包 → 一条具名路由(`internal/api/module_templates.go`)。
@@ -107,11 +150,14 @@ pattern(`GET /api/v1/templates/{a}/{b}` …)—— 谁都不坏,代价是把今�
 
 9. ⚠️ **§2.3 的「405 语义不变」在 S1② 之后有一处例外**：method 不匹配的请求会落到 `/api/v1/` 拿到 404 而不是 405。⭐ 但只在**没有 `SettingsManager` 的 Router** 上可见 —— 有 Web UI 的部署里 `/` 早就把这类请求接走并回 HTML 200 了，本来就没有 405 可丢。
 
-10. ⛔ **§5 表里 S6 的收益「`manual_method_checks` 7 → 6」不成立**,实测仍是 7。那一处
-   (`handler/template.go:146`,validate 分支的 `r.Method != http.MethodPost`)在
-   `TemplateHandler.ServeHTTP` 里,而 ServeHTTP 这一步拆不掉(见上)。presets 那边
+10. ⛔ **§5 表里 S6 的收益「`manual_method_checks` 7 → 6」当时不成立**,实测仍是 7。那一处
+   (`handler/template.go:146`,validate 分支的手写 method 比较)在
+   `TemplateHandler.ServeHTTP` 里,而 ServeHTTP 那一步拆不掉(见上)。presets 那边
    一处 `!=` 都没有(它用的是「GET/POST 分开注册」那套错误假设),instances 闭包用的是
-   `==` 而判据只数 `!=`。⭐ 它会随 templates 的 id 子树一起消失,不会更早。
+   `==` 而判据只数 `!=`。
+   ⭐ **2026-09-11 已兑现:7 → 6**,随 templates 的 id 子树一起消失,一天都没提前。
+   ⚠️ 而且踩到一个附带的坑:判据是对生产文件的 `grep`,**注释也算** ——
+   第一版把那串字面量写进 `template.go` 的说明散文里,棘轮一声不响停在 7。
 
 ---
 
@@ -465,7 +511,7 @@ lingxiao 的原话：**「松判据比没判据更糟：它让人以为有人在
 | **S3** | `walletsModule`：8 条路由 + `PathValue` + 导出 7 个 DTO | 基线 −1 文件 |
 | **S4** | hd-wallets / signers-access / api-keys | 基线 −3 |
 | **S5** | `settings` 拆 18 条 | ⭐ 消灭 group 变体 |
-| **S6** | templates + instances 闭包 | ⛔ 实测订正:`manual_method_checks` **仍是 7**,见 §0 订正 10 |
+| **S6** | presets 4 条 + templates 8 条（含 instances 闭包） | ✅ `manual_method_checks` 7 → 6（§0 订正 10 兑现）；⛔ 前置是「客户端先改发 `%2F`」那个**单独提交** |
 | **S7** | requests 闭包 | 6 → 2 |
 | **S8** | `rule.go` 拆 12 条 | ⛔ 建议切 3 个 PR |
 | **S9** | swag spike + 注解 + `make openapi` + 子命令 + 门禁 B | |
@@ -552,3 +598,11 @@ lingxiao 的原话：**「松判据比没判据更糟：它让人以为有人在
 ### 9.5 `manual_method_checks` 能不能归零
 
 实测 7 处分布在 **5 个文件**，比 `api-layer-counts.txt:27-31` 注释描述的范围广。S6/S7 之后应该能到 1–2。⚠️ **注释本身略微漂了**，顺手修。
+
+⭐ **2026-09-11 更新（S6 之后实测 6 处，全在 `internal/api/handler/evm/`）**：
+`approval.go:76`、`approval.go:244`、`request.go:222`、`request_simulation.go:58`、
+`signer_wallet.go:43`、`simulation_history.go:62`。注释与基线已按 6 更新。
+⚠️ 其中 `signer_wallet.go:43` 在 `HandleWalletSigners` 里 —— 那是 §0「已挂起」表里
+**没有任何路由注册**的那个函数，所以它归零的前提是「把它接上路由」，不是拆解。
+⛔ 而且判据是对生产文件的 `grep 'r.Method != http.Method'`，**注释也算**：在生产
+文件里把这串字面量写进散文会让棘轮停在旧值上而一个字不报（2026-09-11 撞过一次）。

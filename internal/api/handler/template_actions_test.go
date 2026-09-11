@@ -55,7 +55,7 @@ func doValidateRequest(t *testing.T, h *TemplateHandler, tmplID string, body any
 		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	}
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	callTemplate(h.ValidateTemplate, rr, req)
 	return rr
 }
 
@@ -325,7 +325,7 @@ func TestInstantiateTemplate_RBACOwnershipError(t *testing.T) {
 	agentKey := &types.APIKey{ID: "agent-1", Role: types.RoleAgent, Enabled: true}
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-err-rbac/instantiate", reqBody, agentKey)
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-err-rbac/instantiate", reqBody, agentKey)
 	// Agent self-scoping should succeed (no error from RBAC)
 	assert.Equal(t, http.StatusCreated, rr.Code)
 }
@@ -348,7 +348,7 @@ func TestInstantiateTemplate_SubstitutionErrorInValidation(t *testing.T) {
 
 	// Don't provide the required variable
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-sub-err/instantiate", reqBody, testAPIKey())
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-sub-err/instantiate", reqBody, testAPIKey())
 	// Should fail due to substitution error OR missing required variable
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
@@ -380,7 +380,7 @@ func TestInstantiateTemplate_TestCaseValidationFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-val-fail/instantiate", reqBody, testAPIKey())
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-val-fail/instantiate", reqBody, testAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	var errResp ErrorResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
@@ -414,7 +414,7 @@ func TestInstantiateTemplate_SkipValidationForbidden(t *testing.T) {
 		"variables":       map[string]string{},
 		"skip_validation": true,
 	}
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-skip-val/instantiate", reqBody, testAPIKey())
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-skip-val/instantiate", reqBody, testAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	var errResp ErrorResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
@@ -430,7 +430,7 @@ func TestInstantiateTemplate_ReadOnlyBlocks(t *testing.T) {
 	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-1/instantiate", map[string]interface{}{}, testAPIKey())
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-1/instantiate", map[string]interface{}{}, testAPIKey())
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 	var errResp ErrorResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
@@ -450,7 +450,7 @@ func TestInstantiateTemplate_InvalidJSONBody(t *testing.T) {
 	req = req.WithContext(contextWithAPIKey(req.Context(), testAPIKey()))
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	callTemplate(h.InstantiateTemplate, rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	var errResp ErrorResponse
@@ -482,7 +482,7 @@ func TestInstantiateTemplate_SolidityForgeUnavailable(t *testing.T) {
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-sol/instantiate", reqBody, testAPIKey())
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-sol/instantiate", reqBody, testAPIKey())
 	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 	assert.Contains(t, rr.Body.String(), "forge not available")
 }
@@ -522,7 +522,7 @@ func TestInstantiateTemplate_SolidityForgeUnavailable_Bundle(t *testing.T) {
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-bundle-sol/instantiate", reqBody, testAPIKey())
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-bundle-sol/instantiate", reqBody, testAPIKey())
 	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 	assert.Contains(t, rr.Body.String(), "forge not available")
 }
@@ -540,7 +540,7 @@ func TestInstantiateTemplate_ResolveTemplateError(t *testing.T) {
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
-	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/nonexistent/instantiate", reqBody, testAPIKey())
+	rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/nonexistent/instantiate", reqBody, testAPIKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	var errResp ErrorResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))

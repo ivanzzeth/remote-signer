@@ -27,7 +27,7 @@ func TestTemplateHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	req = req.WithContext(contextWithAPIKey(req.Context(), adminAPIKey()))
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	callTemplate(h.CreateTemplate, w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")
@@ -58,7 +58,7 @@ func TestTemplateHandler_ReadOnly_UpdateBlocked(t *testing.T) {
 	r = r.WithContext(contextWithAPIKey(r.Context(), adminAPIKey()))
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, r)
+	callTemplate(h.UpdateTemplate, w, r)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")
@@ -88,7 +88,7 @@ func TestTemplateHandler_ReadOnly_DeleteBlocked(t *testing.T) {
 	r = r.WithContext(contextWithAPIKey(r.Context(), adminAPIKey()))
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, r)
+	callTemplate(h.DeleteTemplate, w, r)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")
@@ -108,7 +108,7 @@ func TestTemplateHandler_ReadOnly_InstantiateBlocked(t *testing.T) {
 	r = r.WithContext(contextWithAPIKey(r.Context(), adminAPIKey()))
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, r)
+	callTemplate(h.InstantiateTemplate, w, r)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")
@@ -147,7 +147,7 @@ func TestTemplateHandler_ReadOnly_GetAllowed(t *testing.T) {
 	r = r.WithContext(contextWithAPIKey(r.Context(), adminAPIKey()))
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, r)
+	callTemplate(h.ListTemplates, w, r)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }

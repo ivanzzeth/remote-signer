@@ -231,7 +231,12 @@ func newErrHandler(t *testing.T, tmplRepo *errTemplateRepo) *TemplateHandler {
 	return h
 }
 
-func doErrRequest(t *testing.T, h *TemplateHandler, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
+// doErrRequest is doRequest with its own name (this file predates the shared
+// helper) — one named template endpoint, with {id} filled in by callTemplate.
+//
+// ⚠️ It used to take the handler and call h.ServeHTTP; proposal S6 removed that
+// method.
+func doErrRequest(t *testing.T, endpoint http.HandlerFunc, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	t.Helper()
 	var bodyReader *bytes.Buffer
 	if body != nil {
@@ -250,7 +255,7 @@ func doErrRequest(t *testing.T, h *TemplateHandler, method, path string, body an
 		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	}
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	callTemplate(endpoint, rr, req)
 	return rr
 }
 
@@ -264,7 +269,7 @@ func TestListTemplates_ListRepoError(t *testing.T) {
 	repo.listErr = fmt.Errorf("connection refused")
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates", nil, apiKey)
+	rr := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates", nil, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -279,7 +284,7 @@ func TestListTemplates_CountRepoError(t *testing.T) {
 	repo.countErr = fmt.Errorf("count query timeout")
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates", nil, apiKey)
+	rr := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates", nil, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -293,23 +298,23 @@ func TestListTemplates_LimitClamping(t *testing.T) {
 	h := newErrHandler(t, repo)
 
 	// limit > 1000 should be clamped to 1000
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates?limit=5000", nil, apiKey)
+	rr := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?limit=5000", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	// Invalid limit (non-numeric) should use default
-	rr2 := doErrRequest(t, h, http.MethodGet, "/api/v1/templates?limit=abc", nil, apiKey)
+	rr2 := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?limit=abc", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr2.Code)
 
 	// Negative limit should use default
-	rr3 := doErrRequest(t, h, http.MethodGet, "/api/v1/templates?limit=-1", nil, apiKey)
+	rr3 := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?limit=-1", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr3.Code)
 
 	// Invalid offset (non-numeric) should use default (0)
-	rr4 := doErrRequest(t, h, http.MethodGet, "/api/v1/templates?offset=abc", nil, apiKey)
+	rr4 := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?offset=abc", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr4.Code)
 
 	// Negative offset should use default (0)
-	rr5 := doErrRequest(t, h, http.MethodGet, "/api/v1/templates?offset=-1", nil, apiKey)
+	rr5 := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?offset=-1", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr5.Code)
 }
 
@@ -323,7 +328,7 @@ func TestGetTemplate_InternalError(t *testing.T) {
 	repo.getErr = fmt.Errorf("database corruption")
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates/some-id", nil, apiKey)
+	rr := doErrRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/some-id", nil, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -347,7 +352,7 @@ func TestCreateTemplate_InvalidType(t *testing.T) {
 		Config: map[string]any{"key": "value"},
 	}
 
-	rr := doErrRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+	rr := doErrRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp ErrorResponse
@@ -369,7 +374,7 @@ func TestCreateTemplate_RepoCreateError(t *testing.T) {
 		Enabled: true,
 	}
 
-	rr := doErrRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+	rr := doErrRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -391,7 +396,7 @@ func TestCreateTemplate_WithTestVariables(t *testing.T) {
 		Enabled:       true,
 	}
 
-	rr := doErrRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+	rr := doErrRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 	assert.Equal(t, http.StatusCreated, rr.Code)
 
 	var resp TemplateResponse
@@ -413,7 +418,7 @@ func TestUpdateTemplate_InternalGetError(t *testing.T) {
 		Name: "Updated",
 	}
 
-	rr := doErrRequest(t, h, http.MethodPatch, "/api/v1/templates/some-id", reqBody, apiKey)
+	rr := doErrRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/some-id", reqBody, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -433,7 +438,7 @@ func TestUpdateTemplate_RepoUpdateError(t *testing.T) {
 		Name: "New Name",
 	}
 
-	rr := doErrRequest(t, h, http.MethodPatch, "/api/v1/templates/tmpl-upd-fail", reqBody, apiKey)
+	rr := doErrRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/tmpl-upd-fail", reqBody, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -451,7 +456,7 @@ func TestDeleteTemplate_InternalGetError(t *testing.T) {
 	repo.getErr = fmt.Errorf("storage unavailable")
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodDelete, "/api/v1/templates/some-id", nil, apiKey)
+	rr := doErrRequest(t, h.DeleteTemplate, http.MethodDelete, "/api/v1/templates/some-id", nil, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -467,7 +472,7 @@ func TestDeleteTemplate_RepoDeleteError(t *testing.T) {
 	repo.deleteErr = fmt.Errorf("foreign key constraint")
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodDelete, "/api/v1/templates/tmpl-del-fail", nil, apiKey)
+	rr := doErrRequest(t, h.DeleteTemplate, http.MethodDelete, "/api/v1/templates/tmpl-del-fail", nil, apiKey)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp ErrorResponse
@@ -485,7 +490,7 @@ func TestDeleteTemplate_RepoDeleteNotFoundRace(t *testing.T) {
 	repo.deleteErr = types.ErrNotFound
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodDelete, "/api/v1/templates/tmpl-del-race", nil, apiKey)
+	rr := doErrRequest(t, h.DeleteTemplate, http.MethodDelete, "/api/v1/templates/tmpl-del-race", nil, apiKey)
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 
 	var errResp ErrorResponse
@@ -497,15 +502,11 @@ func TestDeleteTemplate_RepoDeleteNotFoundRace(t *testing.T) {
 // Tests: instantiateTemplate - invalid body via raw bytes
 // ---------------------------------------------------------------------------
 
-func TestInstantiateTemplate_MethodNotAllowedOnInstantiate(t *testing.T) {
-	apiKey := testAPIKey()
-	repo := newErrTemplateRepo()
-	h := newErrHandler(t, repo)
-
-	// PUT on /instantiate should be method not allowed
-	rr := doErrRequest(t, h, http.MethodPut, "/api/v1/templates/some-id/instantiate", nil, apiKey)
-	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
-}
+// ⚠️ TestInstantiateTemplate_MethodNotAllowedOnInstantiate (PUT on instantiate →
+// 405) was removed here in proposal S6, not deleted: it asserted
+// TemplateHandler.ServeHTTP's own method check, and the method is part of the
+// route pattern now — a PUT on that path matches nothing. Its replacement is
+// TestTemplateRoutes_UnclaimedShapesReachNoEndpoint.
 
 // ---------------------------------------------------------------------------
 // Tests: toTemplateResponse with budget metering
@@ -519,7 +520,7 @@ func TestTemplateResponse_WithBudgetMetering(t *testing.T) {
 	repo.seed(tmpl)
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-bm", nil, apiKey)
+	rr := doErrRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/tmpl-bm", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp TemplateResponse
@@ -550,7 +551,7 @@ func TestCreateTemplate_WithDescriptionField(t *testing.T) {
 		Enabled:     true,
 	}
 
-	rr := doErrRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+	rr := doErrRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 	assert.Equal(t, http.StatusCreated, rr.Code)
 
 	var resp TemplateResponse
@@ -572,7 +573,7 @@ func TestUpdateTemplate_InvalidBodyPatch(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	callTemplate(h.UpdateTemplate, rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	var errResp ErrorResponse
@@ -597,7 +598,7 @@ func TestListTemplates_HighLimitClampedTo1000(t *testing.T) {
 	}
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates?limit=9999", nil, apiKey)
+	rr := doErrRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?limit=9999", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp ListTemplatesResponse
@@ -620,7 +621,7 @@ func TestTemplateResponse_VariablesWithInvalidJSON(t *testing.T) {
 	repo.seed(tmpl)
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-bad-vars", nil, apiKey)
+	rr := doErrRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/tmpl-bad-vars", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp TemplateResponse
@@ -638,7 +639,7 @@ func TestTemplateResponse_EmptyVariables(t *testing.T) {
 	repo.seed(tmpl)
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-no-vars", nil, apiKey)
+	rr := doErrRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/tmpl-no-vars", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp TemplateResponse
@@ -654,7 +655,7 @@ func TestTemplateResponse_EmptyBudgetMetering(t *testing.T) {
 	repo.seed(tmpl)
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-no-bm", nil, apiKey)
+	rr := doErrRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/tmpl-no-bm", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp TemplateResponse
@@ -689,7 +690,7 @@ func TestCreateTemplate_AllValidRuleTypes(t *testing.T) {
 				Enabled: true,
 			}
 
-			rr := doErrRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+			rr := doErrRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 			assert.Equal(t, http.StatusCreated, rr.Code, "rule type %s should be accepted", ruleType)
 		})
 	}
@@ -710,7 +711,7 @@ func TestUpdateTemplate_DescriptionOnly(t *testing.T) {
 		Description: "New description only",
 	}
 
-	rr := doErrRequest(t, h, http.MethodPatch, "/api/v1/templates/tmpl-upd-desc", reqBody, apiKey)
+	rr := doErrRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/tmpl-upd-desc", reqBody, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp TemplateResponse
@@ -734,7 +735,7 @@ func TestTemplateResponse_TimeFieldsFormatted(t *testing.T) {
 	repo.seed(tmpl)
 	h := newErrHandler(t, repo)
 
-	rr := doErrRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-time", nil, apiKey)
+	rr := doErrRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/tmpl-time", nil, apiKey)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp TemplateResponse

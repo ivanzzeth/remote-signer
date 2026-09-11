@@ -73,3 +73,33 @@ POST /api/v1/evm/signers/{address}/access
 # 「拆解顺手改权限」列为唯一语义不可逆的风险,失败方向不对称(过严会在 e2e 里
 # 显形,过松不会)。单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
 POST /api/v1/templates/instances/{ruleID}/revoke
+
+# ⭐ 2026-09-11,提案 S6 的后半(templates 的 id 子树拆解):**同一形状的第四批**,
+# 也是最后一批来自 templates 的。上面那一行来自 `/api/v1/templates/` 前缀;这五行
+# 来自**同两个不带 method 的前缀**(`/api/v1/templates` 与 `/api/v1/templates/`)
+# 背后剩下的七个端点 —— 建模板、改模板、删模板、实例化,以及 validate。
+#
+# ⛔ 它们不是这次改出来的债。那两个前缀本来就注册着 PermReadTemplates,这四个写
+# 操作一直在它们后面;前缀没有 method 前缀,这条判据对它一个字都说不出来
+# (见上面「它看不见的那一半」)。拆解把它们从两条糊掉的记录变成五个有名字的条目。
+#
+# ⛔ 而且**不要以为真正的检查在别处**:router.go 的注释一直写着
+# 「mutate: PermInstantiateTemplate checked in handler」,那是**假的**。
+# PermInstantiateTemplate 在 middleware/rbac.go:42 有定义、:103 与 :153 有授权,
+# 但**全仓没有任何一处检查它**(grep 得到的只有定义、授权和那条注释本身)。
+# 也就是说 create / update / delete / instantiate 一直只要 read_templates 就能打。
+# 那条假注释已在本次改动里改掉 —— ⛔ 改掉的是注释,不是权限。
+#
+# ⚠️ validate 这一行的方向相反,和 presets 的 validate 一样:它其实是只读的
+# (跑模板自带的 test case),只是动词是 POST,所以这条判据把它算作写操作。
+# 它另有一道 handler 内的 admin **角色**检查(template.go 的 ValidateTemplate,
+# 逐字照抄自 ServeHTTP),RouteAuth 表达不了角色,所以那道检查留在 handler 里。
+#
+# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**:提案 §2.5 把
+# 「拆解顺手改权限」列为唯一语义不可逆的风险,失败方向不对称(过严会在 e2e 里
+# 显形,过松不会)。单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
+DELETE /api/v1/templates/{id}
+PATCH /api/v1/templates/{id}
+POST /api/v1/templates
+POST /api/v1/templates/{id}/instantiate
+POST /api/v1/templates/{id}/validate

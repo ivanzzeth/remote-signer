@@ -621,7 +621,15 @@ func (r *Router) setupRoutes() error {
 		r.mountModules(settingsMod)
 	}
 
-	// Template routes (read: PermReadTemplates; mutate: PermInstantiateTemplate checked in handler)
+	// Template routes. ⛔ The permission on every one of the eight is
+	// PermReadTemplates, which is what the two prefixes this replaced declared —
+	// see templatesModule.Routes. ⚠️ This comment used to say "mutate:
+	// PermInstantiateTemplate checked in handler"; that was never true.
+	// PermInstantiateTemplate is defined and granted (middleware/rbac.go:42) but
+	// grep finds no check of it anywhere, so create/update/delete/instantiate have
+	// always been reachable with read_templates alone. The decomposition makes
+	// four of them visible to route-mutating-perm for the first time; ⛔ fixing
+	// them is a security decision and its own PR (proposal §2.5).
 	if r.config.Template != nil && r.config.Template.TemplateRepo != nil && r.config.Template.TemplateService != nil {
 		templateHandler, err := handler.NewTemplateHandler(
 			r.config.Template.TemplateRepo,
@@ -637,18 +645,11 @@ func (r *Router) setupRoutes() error {
 			return err
 		}
 
-		// ⚠️ These two prefixes are what is LEFT of the templates surface after
-		// proposal S6: the collection and everything under an id. They stay
-		// because a template id is a file stem containing '/' and half the
-		// clients send it unencoded, which makes those paths ambiguous and
-		// therefore unnameable — the measurement and the three ways out are
-		// written up on templatesModule (module_templates.go). ⛔ The next step
-		// here is that decision, not another closure.
-		r.handle("/api/v1/templates", Permitted(middleware.PermReadTemplates), templateHandler)
-		r.handle("/api/v1/templates/", Permitted(middleware.PermReadTemplates), templateHandler)
-
-		// The instances sub-tree, which used to be an inline closure in front of
-		// these two, is a named route now.
+		// ⭐ The two method-less prefixes that used to be here —
+		// "/api/v1/templates" and "/api/v1/templates/", one handler, eight
+		// endpoints, a suffix ladder inside it — are gone. All eight are named
+		// routes in templatesModule now, which is why this branch registers a
+		// module and nothing else.
 		templatesMod, tModErr := NewTemplatesModule(templateHandler)
 		if tModErr != nil {
 			return fmt.Errorf("failed to create templates module: %w", tModErr)

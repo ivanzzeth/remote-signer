@@ -52,7 +52,7 @@ func TestCoverage_ValidateTemplate_NonJS_BundleConfig(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/evm%2Fsimple/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ValidateTemplate, w, req)
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	var resp validateTemplateResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -66,7 +66,7 @@ func TestCoverage_ValidateTemplate_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/nonexistent/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ValidateTemplate, w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -75,18 +75,16 @@ func TestCoverage_ValidateTemplate_NonAdminForbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/some/validate",
 		strings.NewReader(`{}`)).WithContext(contextWithKey(t, types.RoleDev, "dev"))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ValidateTemplate, w, req)
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
-func TestCoverage_ValidateTemplate_MethodNotAllowed(t *testing.T) {
-	handler, _ := setupValidateHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates/some/validate",
-		nil).WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// ⚠️ TestCoverage_ValidateTemplate_MethodNotAllowed (GET on validate → 405) was
+// removed here in proposal S6, not deleted: it asserted
+// TemplateHandler.ServeHTTP's `r.Method != http.MethodPost` — the last entry
+// api-layer-counts.txt attributed to a path-dispatching closure — and the method
+// is part of the route pattern now, so a GET on that path matches nothing. Its
+// replacement is TestTemplateRoutes_UnclaimedShapesReachNoEndpoint.
 
 func TestCoverage_ValidateTemplate_NoJSEvaluator(t *testing.T) {
 	repo := newMockTemplateRepo()
@@ -102,7 +100,7 @@ func TestCoverage_ValidateTemplate_NoJSEvaluator(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/evm%2Fjs/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ValidateTemplate, w, req)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), "evaluator")
 }
@@ -118,7 +116,7 @@ func TestCoverage_ValidateTemplate_VariableSubstitutionFailure(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/evm%2Fbadvar/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ValidateTemplate, w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "variable substitution failed")
 }
@@ -135,7 +133,7 @@ func TestCoverage_ValidateTemplate_InvalidTestVariables(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/evm%2Fbadtest/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ValidateTemplate, w, req)
 	assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	var resp validateTemplateResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -154,20 +152,31 @@ func TestCoverage_ValidateTemplate_InvalidVariablesJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/evm%2Fbadvars/validate",
 		strings.NewReader(`{}`)).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ValidateTemplate, w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Contains(t, w.Body.String(), "failed to parse template variables")
 }
 
-func TestCoverage_Template_ServeHTTP_Unauthorized(t *testing.T) {
+// ⚠️ Renamed from TestCoverage_Template_ServeHTTP_Unauthorized in proposal S6:
+// TemplateHandler.ServeHTTP no longer exists, and a test named after a function
+// that is gone is a test nobody can find. The nil-API-key guard it asserts was
+// copied verbatim into each of the seven endpoints.
+func TestCoverage_Template_ListTemplates_Unauthorized(t *testing.T) {
 	handler, _ := setupValidateHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates", nil)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.ListTemplates, w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-func TestCoverage_Template_ServeHTTP_EscapedID(t *testing.T) {
+// ⚠️ Renamed from TestCoverage_Template_ServeHTTP_EscapedID in proposal S6, and
+// it now asserts something different in kind. Before, it proved ServeHTTP
+// PathUnescape'd the id itself; now there is no unescaping in the handler at
+// all — callTemplate stands in for the mux, which splits the escaped path and
+// unescapes each segment, so what is pinned is that GetTemplate reads a decoded
+// id out of {id}. The routing half is
+// TestTemplateRoutes_EncodedSlashedIDReachesTheEndpoint.
+func TestCoverage_Template_GetTemplate_EncodedSlashedID(t *testing.T) {
 	handler, repo := setupValidateHandler(t)
 	require.NoError(t, repo.Create(context.TODO(), &types.RuleTemplate{
 		ID: "evm/erc20", Name: "ERC20", Type: types.RuleTypeSignTypeRestriction,
@@ -182,7 +191,7 @@ func TestCoverage_Template_ServeHTTP_EscapedID(t *testing.T) {
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/templates/evm%2Ferc20", nil).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	callTemplate(handler.GetTemplate, w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "evm/erc20")
 }

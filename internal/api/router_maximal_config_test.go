@@ -274,7 +274,12 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 		// the module block below proves that *all* of them reached the mux.
 		{"SettingsManager", "GET /api/v1/admin/settings/security"},
 		{"SettingsManager (SPA catch-all)", "/"},
-		{"Template", "/api/v1/templates"},
+		// ⛔ This row used to be the literal "/api/v1/templates" — a method-less
+		// pattern that answered every verb and, with its "/api/v1/templates/"
+		// sibling, stood for seven endpoints. S6's second half replaced both, so
+		// the row names one of the eight (enough to prove the branch fired) and
+		// the module block below proves that *all eight* reached the mux.
+		{"Template", "GET /api/v1/templates"},
 		// ⛔ This row used to be the literal "/api/v1/presets" — a method-less
 		// pattern that answered every verb. S6 replaced the preset branch's three
 		// patterns with four named routes, so the row names one of them (enough to
@@ -392,10 +397,12 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 		}
 	}))
 
-	// ⚠️ templatesModule registers one route today — the instances sub-tree that
-	// used to be an inline closure. The rest of the templates surface is still
-	// two prefixes in setupRoutes (module_templates.go says why), and the
-	// "Template" row above covers those.
+	// ⛔ And templates, which S6 finished: eight routes where two method-less
+	// prefixes and one closure stood. It matters here for a reason none of the
+	// others have — the templates branch is the one whose patterns carry a
+	// wildcard that a *client* must percent-encode, so a route lost to a
+	// conditional would strand the Web UI's template page on the /api/v1/ JSON
+	// 404 while the reader believes it is served.
 	templatesMod, err := NewTemplatesModule(maximalTemplateHandler(t))
 	if err != nil {
 		t.Fatalf("building the templates module: %v", err)

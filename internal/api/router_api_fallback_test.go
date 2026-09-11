@@ -590,6 +590,140 @@ func TestAPIFallback_SettingsStrandedPaths(t *testing.T) {
 	}
 }
 
+// TestAPIFallback_TemplateStrandedPaths is where the behaviour-change table on
+// templatesModule.Routes is *measured* rather than reasoned about, and it is the
+// only one of the six where a shape being stranded is a call some client really
+// makes rather than a shape nobody sends.
+//
+// ⛔ The first three rows are the point of the whole step. Until the clients
+// changed, "/api/v1/templates/evm/erc20" was a working call — measured on the
+// old handler: 200 with the template, because ServeHTTP took the entire
+// remainder of the path as an id and a suffix ladder told "template evm/erc20"
+// apart from "template evm, sub-action erc20". That ambiguity is what no route
+// table can express. Every in-repo client now percent-encodes; a published npm
+// remote-signer-client 0.0.5 does not and lands here.
+//
+// ⚠️ Unlike presets, signers and hd-wallets, none of these rows closes a verb
+// hole. ServeHTTP checked the method before every mutation — all three of its
+// branches had a 405 default — so the wrong-verb rows below were already refused
+// and are status changes, not defects. What is closed is the ambiguity and the
+// depth swallow (POST /api/v1/templates/a/b/c/instantiate reached
+// instantiateTemplate with templateID "a/b/c").
+//
+// ⚠️ The handler-package tests for this module run against a bare mux with no
+// fallback, so they see the mux's own 404 and 405. Here the real
+// registerAPIFallback stands next to the real module, which is the only place
+// the daemon's answer is visible: "/api/v1/" matches every path and every
+// method, so ⛔ the daemon never answers 405 for these — every stranded shape,
+// wrong-verb ones included, lands on the JSON 404 fallback. What must never
+// happen is that it lands on the SPA and comes back text/html to a JSON client.
+func TestAPIFallback_TemplateStrandedPaths(t *testing.T) {
+	templatesMod, err := NewTemplatesModule(maximalTemplateHandler(t))
+	if err != nil {
+		t.Fatalf("building the templates module: %v", err)
+	}
+
+	var patterns []string
+	templatesMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		patterns = append(patterns, pattern)
+	}))
+	if len(patterns) != 8 {
+		t.Fatalf("templatesModule registered %d patterns, want 8 — the rows below would pass for the wrong reason",
+			len(patterns))
+	}
+
+	r := newChainedTestRouter()
+	r.mountModules(templatesMod)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<!doctype html><html>spa</html>"))
+	r.registerAPIFallback()
+
+	// ⭐ The encoded form of a shipped registry id. This is the string that has to
+	// keep resolving to its own route, and it is the reason the id sub-tree could
+	// be named at all.
+	const encodedID = "evm%2Ferc20"
+
+	// Each real endpoint still resolves to its own pattern: the fallback shadows
+	// none of them, and the decomposition left none of them behind.
+	for _, pattern := range patterns {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("template pattern %q has no method — the rows below assume method+path patterns", pattern)
+		}
+		target := strings.NewReplacer("{id}", encodedID, "{ruleID}", "inst_0123456789abcdef").Replace(path)
+		if strings.Contains(target, "{") {
+			t.Fatalf("template pattern %q has a wildcard this test does not know how to fill: %q", pattern, target)
+		}
+		if _, got := r.mux.Handler(httptest.NewRequest(method, target, nil)); got != pattern {
+			t.Errorf("%s %s dispatches to %q, want its own route %q", method, target, got, pattern)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+	}{
+		// ⛔ The three rows this whole step exists for: an unencoded id was a
+		// working call and is not one any more.
+		{"an unencoded id, which returned the template", http.MethodGet, "/api/v1/templates/evm/erc20"},
+		{"an unencoded id on instantiate, which instantiated", http.MethodPost, "/api/v1/templates/evm/erc20/instantiate"},
+		{"an unencoded id on validate, which validated", http.MethodPost, "/api/v1/templates/evm/agent/validate"},
+		// ---- what the two prefixes used to swallow (measured, see module_templates.go) ----
+		// ⚠️ Trailing slash in the *forgiving* direction: TrimPrefix twice left the
+		// empty string, so "/api/v1/templates/" WAS the collection — a GET listed
+		// and a POST created a template.
+		{"the collection with a trailing slash, which listed", http.MethodGet, "/api/v1/templates/"},
+		{"the collection with a trailing slash, which created", http.MethodPost, "/api/v1/templates/"},
+		{"an item with a trailing slash, which answered 404 template not found", http.MethodGet, "/api/v1/templates/" + encodedID + "/"},
+		{"instantiate with a trailing slash, which answered 405", http.MethodPost, "/api/v1/templates/" + encodedID + "/instantiate/"},
+		{"validate with a trailing slash, which answered 405", http.MethodPost, "/api/v1/templates/" + encodedID + "/validate/"},
+		// ⚠️ The depth swallow, and the only row here that was a real defect:
+		// TrimPrefix + TrimSuffix accepted any depth, so this reached
+		// instantiateTemplate with templateID "a/b/c".
+		{"instantiate three segments deep, which ran on \"a/b/c\"", http.MethodPost, "/api/v1/templates/a/b/c/instantiate"},
+		{"a deep path, which answered 404 template not found", http.MethodGet, "/api/v1/templates/a/b/c/d"},
+		{"an unknown sub-action, which answered 404 template not found", http.MethodGet, "/api/v1/templates/" + encodedID + "/unknown"},
+		// ⚠️ This one read as a template whose id was "instances/{id}", so it
+		// answered "template not found" — a message about the wrong resource.
+		{"an instance with no revoke suffix", http.MethodGet, "/api/v1/templates/instances/inst_0123456789abcdef"},
+		// ---- verbs no route declares; all of these were the handler's own 405 ----
+		// ⛔ Stated as status changes, not as a hole being closed: every one of
+		// them was already refused before it could mutate anything.
+		{"PUT on the collection, which answered 405", http.MethodPut, "/api/v1/templates"},
+		{"POST on an item, which answered 405", http.MethodPost, "/api/v1/templates/" + encodedID},
+		{"GET on instantiate, which answered 405", http.MethodGet, "/api/v1/templates/" + encodedID + "/instantiate"},
+		{"GET on validate, which answered 405", http.MethodGet, "/api/v1/templates/" + encodedID + "/validate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pattern := r.mux.Handler(httptest.NewRequest(tc.method, tc.target, nil))
+			if pattern != "/api/v1/" {
+				t.Fatalf("%s %s dispatches to %q, want the /api/v1/ fallback — "+
+					"a template pattern is still claiming more than one endpoint's worth of paths",
+					tc.method, tc.target, pattern)
+			}
+
+			rec := httptest.NewRecorder()
+			r.Handler().ServeHTTP(rec, httptest.NewRequest(tc.method, tc.target, nil))
+			if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+				t.Fatalf("%s %s answered HTML (%d, content-type %q) — a JSON client would break on it",
+					tc.method, tc.target, rec.Code, rec.Header().Get("Content-Type"))
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s answered %d, want 401: the request carries no credential and the fallback is "+
+					"AuthenticatedOnly, so the chain must refuse before the 404 body", tc.method, tc.target, rec.Code)
+			}
+		})
+	}
+
+	// ⚠️ HEAD on the collection is the one answer that got *more* permissive, and
+	// it is pinned here rather than left to be discovered: Go's mux matches HEAD
+	// against a GET pattern, so it reaches the route instead of the fallback.
+	if _, got := r.mux.Handler(httptest.NewRequest(http.MethodHead, "/api/v1/templates", nil)); got != "GET /api/v1/templates" {
+		t.Errorf("HEAD /api/v1/templates dispatches to %q, want the GET route — the HEAD widening "+
+			"recorded in module_templates.go's table no longer holds", got)
+	}
+}
+
 // TestAPIFallback_HDWalletAndAPIKeyStrandedPaths is the S4 twin of
 // TestAPIFallback_WalletDeepPathAndWrongMethod, and it is where the
 // behaviour-change tables on hdWalletsModule.Routes and apiKeysModule.Routes are

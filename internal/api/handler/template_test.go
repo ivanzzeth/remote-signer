@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -468,9 +469,40 @@ func newHandler(t *testing.T, tmplRepo *mockTemplateRepo, ruleRepo *mockRuleRepo
 	return h
 }
 
-// doRequest builds an HTTP request, injects the API key into context,
-// and calls the handler's ServeHTTP. Returns the recorded response.
-func doRequest(t *testing.T, h *TemplateHandler, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
+// callTemplate invokes one template endpoint function on a request the caller
+// built, after filling in the {id} wildcard a matching route pattern would have
+// filled in.
+//
+// ⚠️ It is NOT a dispatcher and must not become one. The endpoint is named at
+// the call site — that is the point of the decomposition, and it is what makes
+// these tests say which endpoint they are about. All this does is populate {id},
+// which httptest.NewRequest cannot know about because no mux matched. Routing
+// itself is asserted in template_routes_test.go against the production patterns;
+// nothing here proves a path reaches a handler.
+//
+// ⚠️ It unescapes because it is standing in for the mux, which splits the escaped
+// path and unescapes each segment — the call sites write
+// "/api/v1/templates/evm%2Ferc20" because that is what a client sends, and the
+// handler must receive "evm/erc20". ⛔ Taking the id as an argument instead would
+// put a second copy of it next to the one already inside the path expression,
+// which is a place for the two to disagree.
+func callTemplate(fn http.HandlerFunc, rec *httptest.ResponseRecorder, req *http.Request) {
+	rest := strings.TrimPrefix(req.URL.EscapedPath(), "/api/v1/templates/")
+	rest = strings.TrimSuffix(rest, "/instantiate")
+	rest = strings.TrimSuffix(rest, "/validate")
+	if id, err := url.PathUnescape(rest); err == nil && id != "" && id != "/api/v1/templates" {
+		req.SetPathValue("id", id)
+	}
+	fn(rec, req)
+}
+
+// doRequest builds an HTTP request, injects the API key into context, and calls
+// one named template endpoint. Returns the recorded response.
+//
+// ⚠️ It used to take the handler and call h.ServeHTTP; proposal S6 removed that
+// method, so the endpoint is now named by the caller and the {id} wildcard is
+// filled in by callTemplate above.
+func doRequest(t *testing.T, endpoint http.HandlerFunc, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	t.Helper()
 	var bodyReader *bytes.Buffer
 	if body != nil {
@@ -490,7 +522,7 @@ func doRequest(t *testing.T, h *TemplateHandler, method, path string, body any, 
 	}
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	callTemplate(endpoint, rr, req)
 	return rr
 }
 
@@ -512,7 +544,56 @@ func doRequest(t *testing.T, h *TemplateHandler, method, path string, body any, 
 type TemplateInstanceFixture struct {
 	Handler *TemplateHandler
 
-	rules *mockRuleRepo
+	rules     *mockRuleRepo
+	templates *mockTemplateRepo
+}
+
+// SlashedTemplateID is the id the route tests use wherever the point is that a
+// template id contains a '/'.
+//
+// ⭐ It is not a curiosity: every template shipped under rules/templates has this
+// shape, because the registry derives an id from the file's path relative to the
+// templates root (internal/core/registry/file_source.go relPathIdentity). It is
+// the whole reason proposal S6's second half waited for the clients to start
+// percent-encoding.
+const SlashedTemplateID = "evm/erc20"
+
+// PlainTemplateID is a single-segment id — the shape an API-created template has
+// — so that a test can tell "the route refused because of the slash" apart from
+// "the route refused everything".
+const PlainTemplateID = "tmpl-1"
+
+// TemplateExists reports whether a template is still in the repository.
+//
+// ⛔ The route tests assert on this and not only on the status code: a handler
+// that deletes and then writes 405 would satisfy a status-only check, which is
+// the assertion weakness 6d30ba1 called out by name.
+func (f *TemplateInstanceFixture) TemplateExists(t *testing.T, id string) bool {
+	t.Helper()
+	_, err := f.templates.Get(context.Background(), id)
+	return err == nil
+}
+
+// TemplateCount is how many templates the repository holds — the observable
+// effect of a create that should not have run.
+func (f *TemplateInstanceFixture) TemplateCount(t *testing.T) int {
+	t.Helper()
+	all, err := f.templates.List(context.Background(), storage.TemplateFilter{})
+	if err != nil {
+		t.Fatalf("listing templates: %v", err)
+	}
+	return len(all)
+}
+
+// TemplateName reads a template's name back, which is updateTemplate's whole
+// observable effect.
+func (f *TemplateInstanceFixture) TemplateName(t *testing.T, id string) string {
+	t.Helper()
+	tmpl, err := f.templates.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("seeded template %q disappeared: %v", id, err)
+	}
+	return tmpl.Name
 }
 
 // NewTemplateInstanceFixture builds the handler and seeds one revocable
@@ -535,7 +616,16 @@ func NewTemplateInstanceFixture(t *testing.T, ruleID string) *TemplateInstanceFi
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	})
-	return &TemplateInstanceFixture{Handler: newHandler(t, tmplRepo, ruleRepo, budgetRepo), rules: ruleRepo}
+	// ⚠️ Two templates, one id shape each: the slashed one is what the registry
+	// ships and what the route tests aim the encoded/unencoded rows at, the plain
+	// one is what an API-created template looks like.
+	seedTemplate(t, tmplRepo, makeAPITemplate(SlashedTemplateID, "ERC20 under route test"))
+	seedTemplate(t, tmplRepo, makeAPITemplate(PlainTemplateID, "Plain under route test"))
+	return &TemplateInstanceFixture{
+		Handler:   newHandler(t, tmplRepo, ruleRepo, budgetRepo),
+		rules:     ruleRepo,
+		templates: tmplRepo,
+	}
 }
 
 // Revoked reports whether the seeded instance has been switched off —
@@ -743,7 +833,7 @@ func TestUnauthorized(t *testing.T) {
 
 	t.Run("ServeHTTP_without_api_key", func(t *testing.T) {
 		// No API key in context
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates", nil, nil)
+		rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates", nil, nil)
 		if rr.Code != http.StatusUnauthorized {
 			t.Errorf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
 		}
@@ -778,7 +868,7 @@ func TestListTemplates(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates", nil, apiKey)
+		rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -805,7 +895,7 @@ func TestListTemplates(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates", nil, apiKey)
+		rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -837,7 +927,7 @@ func TestListTemplates(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates?type=evm_value_limit", nil, apiKey)
+		rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?type=evm_value_limit", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -864,7 +954,7 @@ func TestListTemplates(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates?source=api", nil, apiKey)
+		rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?source=api", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -896,7 +986,7 @@ func TestListTemplates(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates?enabled=true", nil, apiKey)
+		rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?enabled=true", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -927,7 +1017,7 @@ func TestListTemplates(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates?limit=2&offset=1", nil, apiKey)
+		rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates?limit=2&offset=1", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -946,17 +1036,13 @@ func TestListTemplates(t *testing.T) {
 		}
 	})
 
-	t.Run("method_not_allowed", func(t *testing.T) {
-		tmplRepo := newMockTemplateRepo()
-		ruleRepo := newMockRuleRepo()
-		budgetRepo := newMockBudgetRepo()
-		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
-
-		rr := doRequest(t, h, http.MethodPut, "/api/v1/templates", nil, apiKey)
-		if rr.Code != http.StatusMethodNotAllowed {
-			t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
-		}
-	})
+	// ⚠️ "method_not_allowed" (PUT on the collection → 405) was removed here in
+	// proposal S6, not deleted. It asserted ServeHTTP's own `switch r.Method`
+	// default, and that switch is gone: the collection is two per-method routes,
+	// so a PUT matches no pattern at all. Its replacement is
+	// TestTemplateRoutes_UnclaimedShapesReachNoEndpoint, which drives the
+	// production patterns and asserts no endpoint ran — strictly stronger than a
+	// status check on a handler that could have mutated first.
 }
 
 // ---------------------------------------------------------------------------
@@ -977,7 +1063,7 @@ func TestGetTemplate(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-get-1", nil, apiKey)
+		rr := doRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/tmpl-get-1", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -1025,7 +1111,7 @@ func TestGetTemplate(t *testing.T) {
 
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-get-vars", nil, apiKey)
+		rr := doRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/tmpl-get-vars", nil, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
 		}
@@ -1054,7 +1140,7 @@ func TestGetTemplate(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates/nonexistent", nil, apiKey)
+		rr := doRequest(t, h.GetTemplate, http.MethodGet, "/api/v1/templates/nonexistent", nil, apiKey)
 		if rr.Code != http.StatusNotFound {
 			t.Errorf("expected status %d, got %d", http.StatusNotFound, rr.Code)
 		}
@@ -1064,17 +1150,10 @@ func TestGetTemplate(t *testing.T) {
 		}
 	})
 
-	t.Run("method_not_allowed_on_single_template", func(t *testing.T) {
-		tmplRepo := newMockTemplateRepo()
-		ruleRepo := newMockRuleRepo()
-		budgetRepo := newMockBudgetRepo()
-		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
-
-		rr := doRequest(t, h, http.MethodPut, "/api/v1/templates/tmpl-1", nil, apiKey)
-		if rr.Code != http.StatusMethodNotAllowed {
-			t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
-		}
-	})
+	// ⚠️ "method_not_allowed_on_single_template" (PUT on an item → 405) was
+	// removed here in proposal S6 for the same reason as the collection's twin
+	// above: the item is three per-method routes now, so a PUT matches nothing.
+	// See TestTemplateRoutes_UnclaimedShapesReachNoEndpoint.
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,7 +1177,7 @@ func TestCreateTemplate(t *testing.T) {
 			Enabled: true,
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1153,7 +1232,7 @@ func TestCreateTemplate(t *testing.T) {
 			Enabled: true,
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1185,7 +1264,7 @@ func TestCreateTemplate(t *testing.T) {
 			Enabled:        true,
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1211,7 +1290,7 @@ func TestCreateTemplate(t *testing.T) {
 			Config: map[string]any{},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1233,7 +1312,7 @@ func TestCreateTemplate(t *testing.T) {
 			Config: map[string]any{},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1255,7 +1334,7 @@ func TestCreateTemplate(t *testing.T) {
 			Config: map[string]any{},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1278,7 +1357,7 @@ func TestCreateTemplate(t *testing.T) {
 			Config: map[string]any{},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1300,7 +1379,7 @@ func TestCreateTemplate(t *testing.T) {
 		req = req.WithContext(contextWithAPIKey(req.Context(), apiKey))
 
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		callTemplate(h.CreateTemplate, rr, req)
 
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
@@ -1325,7 +1404,7 @@ func TestCreateTemplate(t *testing.T) {
 			Enabled: true,
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
+		rr := doRequest(t, h.CreateTemplate, http.MethodPost, "/api/v1/templates", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1360,7 +1439,7 @@ func TestUpdateTemplate(t *testing.T) {
 			Description: "Updated Description",
 		}
 
-		rr := doRequest(t, h, http.MethodPatch, "/api/v1/templates/tmpl-upd-1", reqBody, apiKey)
+		rr := doRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/tmpl-upd-1", reqBody, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rr.Code, rr.Body.String())
 		}
@@ -1390,7 +1469,7 @@ func TestUpdateTemplate(t *testing.T) {
 			Config: newConfig,
 		}
 
-		rr := doRequest(t, h, http.MethodPatch, "/api/v1/templates/tmpl-upd-cfg", reqBody, apiKey)
+		rr := doRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/tmpl-upd-cfg", reqBody, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rr.Code, rr.Body.String())
 		}
@@ -1423,7 +1502,7 @@ func TestUpdateTemplate(t *testing.T) {
 			Enabled: &disabled,
 		}
 
-		rr := doRequest(t, h, http.MethodPatch, "/api/v1/templates/tmpl-upd-en", reqBody, apiKey)
+		rr := doRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/tmpl-upd-en", reqBody, apiKey)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rr.Code, rr.Body.String())
 		}
@@ -1449,7 +1528,7 @@ func TestUpdateTemplate(t *testing.T) {
 			Name: "Should Fail",
 		}
 
-		rr := doRequest(t, h, http.MethodPatch, "/api/v1/templates/tmpl-cfg-upd", reqBody, apiKey)
+		rr := doRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/tmpl-cfg-upd", reqBody, apiKey)
 		if rr.Code != http.StatusForbidden {
 			t.Errorf("expected status %d, got %d", http.StatusForbidden, rr.Code)
 		}
@@ -1469,7 +1548,7 @@ func TestUpdateTemplate(t *testing.T) {
 			Name: "Should Fail",
 		}
 
-		rr := doRequest(t, h, http.MethodPatch, "/api/v1/templates/nonexistent", reqBody, apiKey)
+		rr := doRequest(t, h.UpdateTemplate, http.MethodPatch, "/api/v1/templates/nonexistent", reqBody, apiKey)
 		if rr.Code != http.StatusNotFound {
 			t.Errorf("expected status %d, got %d", http.StatusNotFound, rr.Code)
 		}
@@ -1490,7 +1569,7 @@ func TestUpdateTemplate(t *testing.T) {
 		req = req.WithContext(contextWithAPIKey(req.Context(), apiKey))
 
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		callTemplate(h.UpdateTemplate, rr, req)
 
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
@@ -1513,7 +1592,7 @@ func TestDeleteTemplate(t *testing.T) {
 		seedTemplate(t, tmplRepo, makeAPITemplate("tmpl-del-1", "Delete Me"))
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodDelete, "/api/v1/templates/tmpl-del-1", nil, apiKey)
+		rr := doRequest(t, h.DeleteTemplate, http.MethodDelete, "/api/v1/templates/tmpl-del-1", nil, apiKey)
 		if rr.Code != http.StatusNoContent {
 			t.Errorf("expected status %d, got %d; body: %s", http.StatusNoContent, rr.Code, rr.Body.String())
 		}
@@ -1533,7 +1612,7 @@ func TestDeleteTemplate(t *testing.T) {
 		seedTemplate(t, tmplRepo, makeConfigTemplate("tmpl-cfg-del", "Config Sourced"))
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodDelete, "/api/v1/templates/tmpl-cfg-del", nil, apiKey)
+		rr := doRequest(t, h.DeleteTemplate, http.MethodDelete, "/api/v1/templates/tmpl-cfg-del", nil, apiKey)
 		if rr.Code != http.StatusForbidden {
 			t.Errorf("expected status %d, got %d", http.StatusForbidden, rr.Code)
 		}
@@ -1555,7 +1634,7 @@ func TestDeleteTemplate(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-		rr := doRequest(t, h, http.MethodDelete, "/api/v1/templates/nonexistent", nil, apiKey)
+		rr := doRequest(t, h.DeleteTemplate, http.MethodDelete, "/api/v1/templates/nonexistent", nil, apiKey)
 		if rr.Code != http.StatusNotFound {
 			t.Errorf("expected status %d, got %d", http.StatusNotFound, rr.Code)
 		}
@@ -1587,7 +1666,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-1/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-1/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1632,7 +1711,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-name/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-name/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1672,7 +1751,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-budget/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-budget/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1713,7 +1792,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			ExpiresIn: &expiresIn,
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-exp/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-exp/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1754,7 +1833,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-sched/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-sched/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1797,7 +1876,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			SignerAddress: &signerAddr,
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-scope/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-scope/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("expected status %d, got %d; body: %s", http.StatusCreated, rr.Code, rr.Body.String())
 		}
@@ -1837,7 +1916,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/nonexistent/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/nonexistent/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1860,7 +1939,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			Variables: map[string]string{},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-req/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-req/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1886,7 +1965,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			ExpiresIn: &badDuration,
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-badexp/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-badexp/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1913,7 +1992,7 @@ func TestInstantiateTemplate(t *testing.T) {
 			},
 		}
 
-		rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-inst-badperiod/instantiate", reqBody, apiKey)
+		rr := doRequest(t, h.InstantiateTemplate, http.MethodPost, "/api/v1/templates/tmpl-inst-badperiod/instantiate", reqBody, apiKey)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
@@ -1936,24 +2015,22 @@ func TestInstantiateTemplate(t *testing.T) {
 		req = req.WithContext(contextWithAPIKey(req.Context(), apiKey))
 
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		callTemplate(h.InstantiateTemplate, rr, req)
 
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
 	})
 
-	t.Run("method_not_allowed_on_instantiate", func(t *testing.T) {
-		tmplRepo := newMockTemplateRepo()
-		ruleRepo := newMockRuleRepo()
-		budgetRepo := newMockBudgetRepo()
-		h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
-
-		rr := doRequest(t, h, http.MethodGet, "/api/v1/templates/tmpl-1/instantiate", nil, apiKey)
-		if rr.Code != http.StatusMethodNotAllowed {
-			t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
-		}
-	})
+	// ⚠️ "method_not_allowed_on_instantiate" (GET on instantiate → 405) was
+	// removed here in proposal S6. ⛔ Read this one carefully, because the
+	// equivalent row on presets, signers and hd-wallets *was* a live defect: on
+	// templates it was not. ServeHTTP's instantiate branch really did check
+	// `r.Method == http.MethodPost` before calling instantiateTemplate, so a GET
+	// answered 405 and created nothing — measured before the change. The route
+	// makes that unrepresentable instead of merely written down; the assertion
+	// lives on in TestTemplateRoutes_UnclaimedShapesReachNoEndpoint, which also
+	// asserts that nothing was created.
 }
 
 // ---------------------------------------------------------------------------
@@ -2105,7 +2182,7 @@ func TestResponseContentType(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 	h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 
-	rr := doRequest(t, h, http.MethodGet, "/api/v1/templates", nil, apiKey)
+	rr := doRequest(t, h.ListTemplates, http.MethodGet, "/api/v1/templates", nil, apiKey)
 	contentType := rr.Header().Get("Content-Type")
 	if contentType != "application/json" {
 		t.Errorf("expected Content-Type 'application/json', got %q", contentType)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/respond"
@@ -89,83 +88,139 @@ func NewTemplateHandler(
 	return h, nil
 }
 
-// ServeHTTP handles /api/v1/templates and /api/v1/templates/{id}
-func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Get API key from context (for audit)
+// ---------------------------------------------------------------------------
+// The seven named template endpoints (proposal S6)
+// ---------------------------------------------------------------------------
+//
+// # What these replaced
+//
+// TemplateHandler.ServeHTTP: one function behind two method-less patterns
+// ("/api/v1/templates" and "/api/v1/templates/") that cut r.URL.EscapedPath()
+// apart, stripped a known sub-action suffix ("/instantiate", "/validate"),
+// PathUnescape'd the remainder into an id and then dispatched on r.Method with a
+// 405 default in each of its three branches. It was the last entry in
+// scripts/lib/arch-baseline/ast/handler-path-dispatch.txt for this package, and
+// its validate branch held the last hand-written method comparison that
+// api-layer-counts.txt attributes to a path-dispatching closure (that count goes
+// 7 → 6 here).
+//
+// ⚠️ Do not write that comparison out literally anywhere in this tree, comment
+// or not: scripts/arch/70-api-layer-duplication.sh counts it with a plain grep
+// over production files, so a mention in prose is indistinguishable from the
+// thing itself and silently holds the ratchet at its old value.
+//
+// ⛔ WHY THIS COULD NOT BE DONE UNTIL THE CLIENTS CHANGED. A template id is a
+// file stem under the registry's templates directory
+// (internal/core/registry/file_source.go relPathIdentity), so shipped ids are
+// "evm/erc20", "evm/polymarket_v2" — the '/' is part of the id. While half the
+// clients sent it unencoded, "/api/v1/templates/a/b" was equally "template a/b"
+// and "template a, sub-action b", and only the suffix ladder above could tell
+// them apart. `GET /api/v1/templates/{id}` does not truncate such an id, it
+// stops matching it. Measured on the old handler: GET
+// /api/v1/templates/evm/erc20 answered 200 with the template. That path is
+// unmatched now and lands on the /api/v1/ JSON 404.
+//
+// The decision recorded on templatesModule was option (a): every client
+// percent-encodes. pkg/client (url.PathEscape) and pkg/rs-client
+// (urlencoding::encode) always did; pkg/js-client, the extension bundle and the
+// two e2e call sites were changed to encodeURIComponent / url.PathEscape in the
+// commit before this one, against the *unchanged* server — which accepted both
+// forms — so that no window exists in which a client sends a raw slash to a
+// daemon that no longer takes it.
+//
+// ⚠️ The cost, stated rather than buried: a published remote-signer-client
+// (npm 0.0.5, vendored under pkg/mcp-server/node_modules) and any extension
+// bundle deployed from before that commit still send the raw form and will get
+// a 404 from a daemon built from this commit. That is the accepted price of (a).
+//
+// ⚠️ The nil-API-key guard is repeated verbatim in each endpoint rather than
+// hoisted. In a daemon it is unreachable — AuthMiddleware runs first — but it is
+// what the "unauthorized" tests assert, and dropping a 401 on the way past
+// would be a behaviour change smuggled inside a routing change. Same reasoning
+// as RevokeInstance below.
+//
+// ⚠️ No endpoint checks a method any more: the pattern carries it, so a verb no
+// route declares matches no pattern. ⛔ And there was no verb hole here to
+// close — unlike presets (GET applied a preset), signers (GET unlocked) and
+// hd-wallets (GET derived), every one of ServeHTTP's three branches did check
+// the method before mutating. Measured against the real registrations: POST on
+// an item answered 405, GET on instantiate answered 405, GET on validate
+// answered 405. What this step closes is the *ambiguity* and the deep-path
+// swallow, not a reachability defect.
+
+// ListTemplates serves GET /api/v1/templates.
+func (h *TemplateHandler) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetAPIKey(r.Context()) == nil {
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
+		return
+	}
+	h.listTemplates(w, r)
+}
+
+// CreateTemplate serves POST /api/v1/templates.
+func (h *TemplateHandler) CreateTemplate(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetAPIKey(r.Context()) == nil {
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
+		return
+	}
+	h.createTemplate(w, r)
+}
+
+// GetTemplate serves GET /api/v1/templates/{id}.
+func (h *TemplateHandler) GetTemplate(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetAPIKey(r.Context()) == nil {
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
+		return
+	}
+	h.getTemplate(w, r, r.PathValue("id"))
+}
+
+// UpdateTemplate serves PATCH /api/v1/templates/{id}.
+func (h *TemplateHandler) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetAPIKey(r.Context()) == nil {
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
+		return
+	}
+	h.updateTemplate(w, r, r.PathValue("id"))
+}
+
+// DeleteTemplate serves DELETE /api/v1/templates/{id}.
+func (h *TemplateHandler) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetAPIKey(r.Context()) == nil {
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
+		return
+	}
+	h.deleteTemplate(w, r, r.PathValue("id"))
+}
+
+// InstantiateTemplate serves POST /api/v1/templates/{id}/instantiate.
+func (h *TemplateHandler) InstantiateTemplate(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetAPIKey(r.Context()) == nil {
+		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
+		return
+	}
+	h.instantiateTemplate(w, r, r.PathValue("id"))
+}
+
+// ValidateTemplate serves POST /api/v1/templates/{id}/validate.
+//
+// ⚠️ The admin check stays in the handler and is copied verbatim. It is a *role*
+// test (apiKey.IsAdmin()), not a permission, so the route layer cannot express
+// it: RouteAuth carries one permission and the route's is PermReadTemplates,
+// exactly as the prefix declared. ⛔ Moving it would be a security change, and
+// deleting it would widen the endpoint to every key holding read_templates.
+func (h *TemplateHandler) ValidateTemplate(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
-
-	// Path: /api/v1/templates or /api/v1/templates/{id} or /api/v1/templates/{id}/instantiate.
-	// EscapedPath instead of Path so file-stem IDs containing '/'
-	// (v0.3 Registry: "evm/erc20") round-trip through the SDK's
-	// encodeURIComponent unchanged.
-	rawPath := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/templates")
-	rawPath = strings.TrimPrefix(rawPath, "/")
-
-	if rawPath == "" {
-		switch r.Method {
-		case http.MethodGet:
-			h.listTemplates(w, r)
-		case http.MethodPost:
-			h.createTemplate(w, r)
-		default:
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		}
+	// Validate is admin-only (RBAC via role check)
+	if !apiKey.IsAdmin() {
+		respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
 		return
 	}
-
-	encodedID := rawPath
-	sub := ""
-	if strings.HasSuffix(rawPath, "/instantiate") {
-		encodedID = strings.TrimSuffix(rawPath, "/instantiate")
-		sub = "instantiate"
-	}
-	if strings.HasSuffix(rawPath, "/validate") {
-		encodedID = strings.TrimSuffix(rawPath, "/validate")
-		sub = "validate"
-	}
-	templateID, err := url.PathUnescape(encodedID)
-	if err != nil {
-		respond.Error(w, "invalid template id", http.StatusBadRequest, h.logger)
-		return
-	}
-
-	if sub == "instantiate" {
-		if r.Method == http.MethodPost {
-			h.instantiateTemplate(w, r, templateID)
-		} else {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		}
-		return
-	}
-
-	if sub == "validate" {
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
-		// Validate is admin-only (RBAC via role check)
-		if !apiKey.IsAdmin() {
-			respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
-			return
-		}
-		h.validateTemplate(w, r, templateID)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		h.getTemplate(w, r, templateID)
-	case http.MethodDelete:
-		h.deleteTemplate(w, r, templateID)
-	case http.MethodPatch:
-		h.updateTemplate(w, r, templateID)
-	default:
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-	}
+	h.validateTemplate(w, r, r.PathValue("id"))
 }
 
 // RevokeInstance serves POST /api/v1/templates/instances/{ruleID}/revoke.

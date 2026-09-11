@@ -17,15 +17,25 @@ router_config_fields     29   # RouterConfig 的字段;它是服务定位器,不
                                # ⭐ 新功能加 Module,不要加字段。剩下 29 个字段里每一个都是
                                # 「router 得知道它才能决定某条路由存不存在」,这正是读
                                # setupRoutes 判定不了线上服务什么的原因。
-manual_method_checks      7   # 手写 r.Method != http.MethodX
+manual_method_checks      6   # 手写的 method 比较(判据是对生产文件的一次 grep)
                                # ✅ 2026-09-10:35 → 7。二十余条路由改成按方法注册
                                # (`GET /api/v1/audit`、`POST /api/v1/evm/sign`、
                                # `POST /api/v1/evm/signers/{address}/unlock` …),
                                # Go 的 ServeMux 自己回 405,handler 里那些判断随之
                                # 变成死代码。忘了写一条 mux 做不到。
                                #
-                               # 剩下 7 处都在**按路径分发的闭包**里
-                               # (/api/v1/evm/requests/ 与 /api/v1/templates/ 各自
-                               # 在一个 handler 内部再按子路径分派),要消掉它们得先把
-                               # 那两个闭包拆成按子路径注册的路由 —— 那是 feature
-                               # module 那一步的一部分,见 router_config_fields。
+                               # ✅ 2026-09-11:7 → 6。提案 S6 后半把
+                               # `/api/v1/templates` 与 `/api/v1/templates/` 两条
+                               # 不带 method 的前缀拆成八条具名路由,
+                               # TemplateHandler.ServeHTTP 连同它 validate 分支里
+                               # 那一处比较一起消失。
+                               #
+                               # 剩下 6 处都在**按路径分发的闭包**里
+                               # (/api/v1/evm/requests/ 在一个 handler 内部再按
+                               # 子路径分派),要消掉它们得先把那个闭包拆成按子路径
+                               # 注册的路由 —— 那是提案 S7,见 router_config_fields。
+                               #
+                               # ⛔ 判据是 `grep 'r.Method != http.Method'`,**注释也算**。
+                               # 在生产文件里把这串字面量写进散文(比如解释「这里以前有
+                               # 一处」)会让这个棘轮停在旧值上,而且一个字的红都不报 ——
+                               # 2026-09-11 实测撞到过一次。
