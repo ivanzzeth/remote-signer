@@ -48,7 +48,7 @@ func TestValidateRule_BodyParseErrorPath(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test that configs without test_cases return valid:true
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp ValidateRuleResponse
@@ -81,7 +81,7 @@ func TestValidateRulesFullEngine(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/validate?full=true", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRules, http.MethodPost, "/api/v1/evm/rules/validate?full=true", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var resp BatchValidateResponse
@@ -126,7 +126,7 @@ func TestValidateRulesFullEngine(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/validate?full=true", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRules, http.MethodPost, "/api/v1/evm/rules/validate?full=true", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
 		var resp BatchValidateResponse
@@ -232,7 +232,7 @@ func TestApproveRule_UpdateError(t *testing.T) {
 	h, err := NewRuleHandler(failRepo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -263,7 +263,7 @@ func TestRejectRule_UpdateError(t *testing.T) {
 	h, err := NewRuleHandler(failRepo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.RejectRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -276,7 +276,7 @@ func TestRejectRule_Unauthorized(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, nil)
+	rec := doRuleEndpoint(t, h.RejectRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, nil)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
@@ -289,7 +289,7 @@ func TestRejectRule_NotAdmin(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.RejectRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -307,7 +307,7 @@ func TestListBudgets(t *testing.T) {
 			WithBudgetRepo(&mockBudgetRepo{}))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID)+"/budgets", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ListBudgets, http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID)+"/budgets", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var budgets []*types.RuleBudget
@@ -447,7 +447,7 @@ func TestCreateRule_ReadOnly(t *testing.T) {
 		Type: "evm_address_list",
 		Mode: "whitelist",
 	}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "readonly")
 }
@@ -462,7 +462,7 @@ func TestCreateRule_Unauthorized(t *testing.T) {
 		Type: "evm_address_list",
 		Mode: "whitelist",
 	}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, nil)
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, nil)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
@@ -471,7 +471,7 @@ func TestCreateRule_InvalidBody(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", "bad json", ruleAdminKey())
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", "bad json", ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -482,28 +482,28 @@ func TestCreateRule_MissingFields(t *testing.T) {
 
 	t.Run("missing_name", func(t *testing.T) {
 		body := CreateRuleRequest{Type: "evm_address_list", Mode: "whitelist"}
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		assert.Contains(t, rec.Body.String(), "name is required")
 	})
 
 	t.Run("missing_type", func(t *testing.T) {
 		body := CreateRuleRequest{Name: "test", Mode: "whitelist"}
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		assert.Contains(t, rec.Body.String(), "type is required")
 	})
 
 	t.Run("missing_mode", func(t *testing.T) {
 		body := CreateRuleRequest{Name: "test", Type: "evm_address_list"}
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		assert.Contains(t, rec.Body.String(), "mode is required")
 	})
 
 	t.Run("invalid_mode", func(t *testing.T) {
 		body := CreateRuleRequest{Name: "test", Type: "evm_address_list", Mode: "invalid"}
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		assert.Contains(t, rec.Body.String(), "mode must be")
 	})
@@ -523,7 +523,7 @@ func TestCreateRule_EVMJS_InvalidConfig(t *testing.T) {
 		},
 		Enabled: true,
 	}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -541,7 +541,7 @@ func TestCreateRule_EVMJS_Success(t *testing.T) {
 		},
 		Enabled: true,
 	}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 	assert.Equal(t, http.StatusCreated, rec.Code)
 }
 
@@ -559,7 +559,7 @@ func TestCreateRule_AgentBlockedType(t *testing.T) {
 		},
 		Enabled: true,
 	}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -577,7 +577,7 @@ func TestCreateRule_AgentBlockedSolidity(t *testing.T) {
 		},
 		Enabled: true,
 	}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -595,7 +595,7 @@ func TestCreateRule_SolidityForgeUnavailable(t *testing.T) {
 		},
 		Enabled: true,
 	}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Contains(t, rec.Body.String(), "forge not available")
 }
@@ -620,7 +620,7 @@ func TestUpdateRule_SolidityForgeUnavailable(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"updated-sol"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Contains(t, rec.Body.String(), "forge not available")
 }
@@ -643,7 +643,7 @@ func TestCreateRule_MaxRulesExceeded(t *testing.T) {
 		},
 		Enabled: true,
 	}
-	rec1 := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body1, ruleAgentKey())
+	rec1 := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body1, ruleAgentKey())
 	assert.Equal(t, http.StatusAccepted, rec1.Code) // Pending approval
 
 	// Second rule - should fail with limit exceeded
@@ -656,7 +656,7 @@ func TestCreateRule_MaxRulesExceeded(t *testing.T) {
 		},
 		Enabled: true,
 	}
-	rec2 := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body2, ruleAgentKey())
+	rec2 := doRuleEndpoint(t, h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body2, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec2.Code)
 	assert.Contains(t, rec2.Body.String(), "rule limit exceeded")
 }
@@ -695,7 +695,7 @@ func TestUpdateRule_ReadOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "readonly")
 }
@@ -710,7 +710,7 @@ func TestUpdateRule_ConfigSource(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "config-sourced")
 }
@@ -725,7 +725,7 @@ func TestUpdateRule_AgentChangeType(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"type":"evm_js"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -739,7 +739,7 @@ func TestUpdateRule_NonAdminChangeAppliedTo(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"applied_to":["key-1"]}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "applied_to")
 }
@@ -764,7 +764,7 @@ func TestUpdateRule_EVMJS_EmptyScript(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"config":{"script":""}}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -778,7 +778,7 @@ func TestUpdateRule_InvalidChainType(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"chain_type":"invalid"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -792,7 +792,7 @@ func TestUpdateRule_InvalidSignerAddress(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"signer_address":"invalid"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -1145,7 +1145,7 @@ func TestValidateRules_ListError(t *testing.T) {
 	h, err := NewRuleHandler(&mockRuleRepoListError{}, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ValidateRules, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 

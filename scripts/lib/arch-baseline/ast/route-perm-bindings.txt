@@ -161,13 +161,72 @@
 #
 # ⚠️ route-mutating-perm **一行都没加**,那是算过的而不是碰巧:approve_request 与
 # preview_rule 都不在 cmd/archcheck/routeauth.go 的 readPermissions 表里。
+#
+# ⭐ 2026-09-11,提案 S8 第 1 刀(rule.go 的三个审批动作):**79 → 82 行,只加不减**。
+#
+#   POST /api/v1/evm/rules/{id}/approve   list_rules
+#   POST /api/v1/evm/rules/{id}/reject    list_rules
+#   POST /api/v1/evm/rules/{id}/propose   list_rules
+#
+# ⛔ 三条**逐字照抄** `/api/v1/evm/rules/` 这条前缀声明的 PermListRules,一个字节
+# 都没改。⚠️ 这一刀**没有**减行:那两条不带 method 的前缀还在 setupRoutes 里 ——
+# rule.go 剩下的九个端点仍然走它们。⛔ 而且它们必须最后走:一旦把
+# `/api/v1/evm/rules`(精确、不带 method)换成按方法注册、而 `/api/v1/evm/rules/`
+# 还在,Go 的 mux 会对其余动词回 **301 重定向**到带斜杠的形式(实测 PUT / DELETE
+# 从 405 变 301)。所以集合路由与前缀同刀,放在最后。
+#
+# ⚠️ 与 S7 相反,这三行**同时**进了 route-mutating-perm:list_rules 在
+# readPermissions 表里,而这三条都是写操作。那是既有债第一次被看见,不是新债
+# —— 见那个文件里的理由。
+#
+# ⭐ 2026-09-11,提案 S8 第 2 刀(两条 validate + 两条 budget):**82 → 85 行,仍然只加不减**。
+#
+#   POST /api/v1/evm/rules/validate        list_rules
+#   POST /api/v1/evm/rules/{id}/validate   list_rules
+#   GET  /api/v1/evm/rules/{id}/budgets    list_rules
+#
+# ⛔ 三条全部**逐字照抄**前缀的 PermListRules。
+# ⚠️ 第四条 `POST /api/v1/evm/rules/{id}/budgets/reset manage_budgets` **这张表
+# 没有动** —— 它本来就是一条具名路由(在 router.go 里单独注册),这一刀只是把它
+# 挪进 rulesModule,pattern 与权限一个字节都没变,所以 key 不动。⭐ 这正是 key
+# 取 `pattern + 权限` 的用处:搬家不报红,改权限才报红。
+#
+# ⚠️ 两条 validate 同时进了 route-mutating-perm(14 → 16)。⛔ 别以为「真正的检查
+# 在别处」这句话在这里也是假的 —— 和 templates 那次不同,这两条**确实**另有一道
+# handler 内的 admin **角色**检查(rule.go 的 requireAdmin,逐字抄自 ServeHTTP 的
+# 分支)。RouteAuth 表达不了角色,所以它留在 handler 里,而这张表只能记录
+# list_rules 这件事。两者都是真的,缺一不可。
+#
+# ⚠️ 两条 budget 路由是**条件注册**的(`RouterConfig.BudgetRepo != nil`),与它们
+# 替换掉的那两个 ServeHTTP 分支的条件逐字相同。archcheck 读注册调用点,不管
+# `if`,所以它们照样各占一行 —— 那是对的:它们是这套代码能提供的端点。
+#
+# ⭐ 2026-09-11,提案 S8 第 3 刀(集合与 item):**85 → 88 行,五加两减**。
+#
+#   /api/v1/evm/rules  list_rules   →  GET    /api/v1/evm/rules        list_rules
+#                                      POST   /api/v1/evm/rules        list_rules
+#   /api/v1/evm/rules/ list_rules   →  GET    /api/v1/evm/rules/{id}   list_rules
+#                                      PATCH  /api/v1/evm/rules/{id}   list_rules
+#                                      DELETE /api/v1/evm/rules/{id}   list_rules
+#
+# ⛔ 减的两行是那两条**不带 method 的前缀**,它们没了;五条新行权限一个字节没动。
+# ⭐ 这次 diff 的读法与 S4/S5 一样:permission 那一列**十二行全是 list_rules**
+# (只有 budgets/reset 是 manage_budgets,它本来就单独注册),那就是这次拆解没有
+# 顺手改权限的证据。
+#
+# ⚠️ 这一步与 templates 那次不同:它**不收回任何一次能用的调用**。rule id 由
+# ruleIDPattern 限定,没有任何一种形式含 '/',所以不存在 templates 那个编码陷阱;
+# 十二条路由与 pkg/client、pkg/rs-client、pkg/js-client、extension、web/src、
+# pkg/mcp-server、e2e 实际发的 method+path 逐条对齐,一个都没坏。
+# ⛔ 唯一被收回的是**没人写下来过的形状**:`POST /api/v1/evm/rules/`(带尾斜杠)
+# 以前 201 建一条规则,`DELETE /api/v1/evm/rules/{id}/` 以前 204 真删 ——
+# 见 internal/api/module_rules.go 上的表。
 
 /api/v1/evm/guard/resume resume_guard
-/api/v1/evm/rules list_rules
-/api/v1/evm/rules/ list_rules
 /api/v1/evm/simulations sign_request
 DELETE /api/v1/api-keys/{id} manage_api_keys
 DELETE /api/v1/evm/budgets/ manage_budgets
+DELETE /api/v1/evm/rules/{id} list_rules
 DELETE /api/v1/evm/signers/{address} read_signers
 DELETE /api/v1/evm/signers/{address}/access/{keyID} read_signers
 DELETE /api/v1/templates/{id} read_templates
@@ -190,6 +249,9 @@ GET /api/v1/audit/requests/ read_audit
 GET /api/v1/evm/budgets read_budgets
 GET /api/v1/evm/budgets/ read_budgets
 GET /api/v1/evm/requests list_own_requests
+GET /api/v1/evm/rules list_rules
+GET /api/v1/evm/rules/{id} list_rules
+GET /api/v1/evm/rules/{id}/budgets list_rules
 GET /api/v1/evm/signers read_signers
 GET /api/v1/evm/signers/{address}/access read_signers
 GET /api/v1/evm/simulate/status sign_request
@@ -201,6 +263,7 @@ GET /api/v1/wallets manage_wallets
 GET /api/v1/wallets/{id} manage_wallets
 GET /api/v1/wallets/{id}/members manage_wallets
 PATCH /api/v1/evm/budgets/ manage_budgets
+PATCH /api/v1/evm/rules/{id} list_rules
 PATCH /api/v1/evm/signers/{address} read_signers
 PATCH /api/v1/templates/{id} read_templates
 PATCH /api/v1/wallets/{id} manage_wallets
@@ -211,7 +274,13 @@ POST /api/v1/evm/budgets/ manage_budgets
 POST /api/v1/evm/requests/batch-approve approve_request
 POST /api/v1/evm/requests/{id}/approve approve_request
 POST /api/v1/evm/requests/{id}/preview-rule preview_rule
+POST /api/v1/evm/rules list_rules
+POST /api/v1/evm/rules/validate list_rules
+POST /api/v1/evm/rules/{id}/approve list_rules
 POST /api/v1/evm/rules/{id}/budgets/reset manage_budgets
+POST /api/v1/evm/rules/{id}/propose list_rules
+POST /api/v1/evm/rules/{id}/reject list_rules
+POST /api/v1/evm/rules/{id}/validate list_rules
 POST /api/v1/evm/sign sign_request
 POST /api/v1/evm/sign/batch sign_request
 POST /api/v1/evm/signers create_signers

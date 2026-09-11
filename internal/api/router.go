@@ -371,13 +371,24 @@ func (r *Router) setupRoutes() error {
 	r.mountModules(requestsMod)
 
 	// Rule management routes (RBAC: PermListRules covers GET for admin/dev/agent)
-	r.handle("/api/v1/evm/rules", Permitted(middleware.PermListRules), ruleHandler)
-	r.handle("/api/v1/evm/rules/", Permitted(middleware.PermListRules), ruleHandler)
-	// /rules/{id}/budgets/reset changes budgets, so it is gated on
-	// PermManageBudgets rather than reached on PermListRules and re-checked
-	// inside the handler. Registered after the prefix pattern above; Go's mux
-	// prefers the more specific one.
-	r.handle("POST /api/v1/evm/rules/{id}/budgets/reset", Permitted(middleware.PermManageBudgets), ruleHandler)
+	//
+	// ⭐ The three registrations that used to be here — "/api/v1/evm/rules" and
+	// "/api/v1/evm/rules/" without a method, plus the one named
+	// POST .../{id}/budgets/reset — are gone. All twelve endpoints are named
+	// routes in rulesModule now (proposal S8), and RuleHandler.ServeHTTP, which
+	// re-derived the endpoint from r.URL.Path through seven HasSuffix branches,
+	// is deleted.
+	//
+	// ⛔ Measured before the change, not reasoned about: the trailing-slash forms
+	// of both prefixes were live and two of them mutated —
+	// `POST /api/v1/evm/rules/` created a rule and
+	// `DELETE /api/v1/evm/rules/{id}/` deleted one. See rulesModule.Routes for
+	// the full before/after table.
+	rulesMod, rulesModErr := NewRulesModule(ruleHandler, r.config.BudgetRepo != nil)
+	if rulesModErr != nil {
+		return fmt.Errorf("failed to create rules module: %w", rulesModErr)
+	}
+	r.mountModules(rulesMod)
 
 	// Budget routes:
 	//   GET    /api/v1/evm/budgets         list (PermReadBudgets)

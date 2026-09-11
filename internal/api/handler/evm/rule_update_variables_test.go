@@ -37,7 +37,7 @@ func TestUpdateRule_VariablesTakeEffectWithoutRerender(t *testing.T) {
 	require.NoError(t, err)
 
 	newSafe := "0x8faE526C4cfE0b799003d2110F92C40499c6609f"
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{"allowed_safe_addresses": newSafe + ",0xOLD"},
 		}, ruleAdminKey())

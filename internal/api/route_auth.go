@@ -49,11 +49,22 @@ import (
 // # ⛔ Known limit, and it is not small
 //
 // A prefix pattern serving many endpoints can only declare ONE permission.
-// `/api/v1/evm/rules/` declares PermListRules for all twelve endpoints behind
-// it, and handler/evm/rule.go separately checks admin inside the handler for
-// `validate`. So "every route declares a permission" is satisfiable today while
-// the per-endpoint permissions are still wrong, and this mechanism cannot see
-// that: it counts patterns, and a pattern is not an endpoint.
+//
+// ⚠️ The example this paragraph used to give — `/api/v1/evm/rules/` declaring
+// PermListRules for all twelve endpoints behind it — is gone: proposal S8 named
+// those twelve, and the eight mutating ones are now eight lines of
+// route-mutating-perm.txt rather than one invisible fact. ⛔ That is the shape of
+// the fix, not the end of it: the permissions did not change, they became
+// *visible*, and handler/evm/rule.go still checks admin inside the handler for
+// both validate endpoints. So "every route declares a permission" remains
+// satisfiable while the per-endpoint permissions are still wrong, and this
+// mechanism still cannot see that: it counts patterns and reads the permission
+// each one declares, and neither tells it whether that permission is the right
+// one.
+//
+// ⚠️ Method-less prefixes that still serve more than one endpoint:
+// `/api/v1/evm/simulations` and `/api/v1/evm/guard/resume`. The remaining
+// wildcards (`GET /api/v1/evm/budgets/` and friends) at least carry a method.
 //
 // ⭐ Its value before the handler decomposition (proposal S3–S8) is therefore
 // narrower than it sounds, and worth stating plainly: it does not make today's

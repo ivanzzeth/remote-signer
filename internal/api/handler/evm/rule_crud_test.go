@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +22,46 @@ import (
 
 // --- Helpers ---
 
-func doRuleRequest(t *testing.T, h *RuleHandler, method, path string, body interface{}, apiKey *types.APIKey) *httptest.ResponseRecorder {
+// doRuleEndpoint drives one named rule endpoint function (proposal S8).
+//
+// ⚠️ It is NOT a dispatcher and must not become one. The endpoint is named at
+// the call site — that is the point of the decomposition, and it is what makes
+// these tests say which endpoint they are about. All this does is populate
+// {id}, which httptest.NewRequest cannot know about because no mux matched.
+// Routing itself is asserted in rule_routes_test.go against the production
+// patterns; nothing here proves a path reaches a handler.
+//
+// ⛔ Deriving {id} from the URL rather than taking it as an argument is
+// deliberate, and copied from callSigner in signer_action_test.go: every call
+// site already spells the id inside the path expression, and a second copy is a
+// place for the two to disagree.
+func doRuleEndpoint(t *testing.T, handler http.HandlerFunc, method, path string, body interface{}, apiKey *types.APIKey) *httptest.ResponseRecorder {
+	t.Helper()
+	req := newRuleRequest(t, method, path, body, apiKey)
+	rest := strings.TrimPrefix(req.URL.Path, "/api/v1/evm/rules/")
+	if id, _, _ := strings.Cut(rest, "/"); id != "" {
+		req.SetPathValue("id", id)
+	}
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	return rec
+}
+
+// ruleReq is httptest.NewRequest plus the {id} a matching route pattern would
+// have filled in — for the tests that build their own request rather than going
+// through doRuleEndpoint. ⚠️ Not a dispatcher either: the caller still names the
+// endpoint function it invokes.
+func ruleReq(method, path string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, path, body)
+	rest := strings.TrimPrefix(req.URL.Path, "/api/v1/evm/rules/")
+	if id, _, _ := strings.Cut(rest, "/"); id != "" {
+		req.SetPathValue("id", id)
+	}
+	return req
+}
+
+// newRuleRequest builds the request both rule test helpers send.
+func newRuleRequest(t *testing.T, method, path string, body interface{}, apiKey *types.APIKey) *http.Request {
 	t.Helper()
 	var buf *bytes.Buffer
 	if body != nil {
@@ -40,9 +81,7 @@ func doRuleRequest(t *testing.T, h *RuleHandler, method, path string, body inter
 	if apiKey != nil {
 		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	return rec
+	return req
 }
 
 func ruleAdminKey() *types.APIKey {
@@ -81,7 +120,7 @@ func TestRuleHandler_Unauthorized(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules", nil, nil)
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules", nil, nil)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
@@ -91,7 +130,7 @@ func TestRuleHandler_ListRules_Empty(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp ListRulesResponse
@@ -108,7 +147,7 @@ func TestRuleHandler_ListRules_WithData(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp ListRulesResponse
@@ -121,7 +160,7 @@ func TestRuleHandler_ListRules_InvalidType(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules?type=invalid_type", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules?type=invalid_type", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -135,7 +174,7 @@ func TestRuleHandler_GetRule_Success(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.GetRule, http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -148,7 +187,7 @@ func TestRuleHandler_GetRule_NotFound(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules/nonexistent", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.GetRule, http.MethodGet, "/api/v1/evm/rules/nonexistent", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -162,7 +201,7 @@ func TestRuleHandler_GetRule_AgentRedacted(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.GetRule, http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAgentKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -181,7 +220,7 @@ func TestRuleHandler_DeleteRule_Success(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.DeleteRule, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	// Verify deleted
@@ -205,7 +244,7 @@ func TestRuleHandler_DeleteRule_SyntheticSimulationPlaceholder(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodDelete, "/api/v1/evm/rules/"+string(simID), nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.DeleteRule, http.MethodDelete, "/api/v1/evm/rules/"+string(simID), nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	_, getErr := repo.Get(context.Background(), simID)
@@ -216,7 +255,7 @@ func TestRuleHandler_DeleteRule_NotFound(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodDelete, "/api/v1/evm/rules/nonexistent", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.DeleteRule, http.MethodDelete, "/api/v1/evm/rules/nonexistent", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -229,7 +268,7 @@ func TestRuleHandler_DeleteRule_Immutable(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.DeleteRule, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil, ruleAdminKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "immutable")
 }
@@ -244,7 +283,7 @@ func TestRuleHandler_DeleteRule_NotOwner(t *testing.T) {
 	require.NoError(t, err)
 
 	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
-	rec := doRuleRequest(t, h, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil, agentKey)
+	rec := doRuleEndpoint(t, h.DeleteRule, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil, agentKey)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "permission denied")
 }
@@ -260,7 +299,7 @@ func TestRuleHandler_ApproveRule_Success(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -277,7 +316,7 @@ func TestRuleHandler_ApproveRule_NotPending(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "not pending approval")
 }
@@ -291,7 +330,7 @@ func TestRuleHandler_ApproveRule_NotAdmin(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", nil, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -299,7 +338,7 @@ func TestRuleHandler_ApproveRule_NotFound(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/nonexistent/approve", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/nonexistent/approve", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -315,7 +354,7 @@ func TestRuleHandler_RejectRule_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	body := map[string]string{"reason": "not needed"}
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.RejectRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -328,7 +367,7 @@ func TestRuleHandler_RejectRule_NotAdmin(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.RejectRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -343,7 +382,7 @@ func TestRuleHandler_RejectRule_NotPending(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.RejectRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "not pending")
 }
@@ -352,7 +391,7 @@ func TestRuleHandler_RejectRule_NotFound(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.RejectRule, http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -387,7 +426,7 @@ func TestRuleHandler_ApproveProposal_Success(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(proposalID)+"/approve", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(proposalID)+"/approve", nil, ruleAdminKey())
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	// Response returns the TARGET rule, not the proposal
@@ -436,7 +475,7 @@ func TestRuleHandler_ApproveProposal_TargetUpdated(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(proposal.ID)+"/approve", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(proposal.ID)+"/approve", nil, ruleAdminKey())
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	// Target config updated
@@ -455,7 +494,7 @@ func TestRuleHandler_ApproveProposal_ProposalNotFound(t *testing.T) {
 	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/nonexistent-proposal/approve", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/nonexistent-proposal/approve", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -471,7 +510,7 @@ func TestRuleHandler_UpdateRule_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"updated-name","description":"updated desc"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -497,7 +536,7 @@ func TestRuleHandler_AgentUpdateActiveRule_TriggersRuleActivatedCallback(t *test
 	require.NoError(t, err)
 
 	body := `{"variables":{"trusted_contracts":"0x1111,0xStargate"}}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	updated, err := repo.Get(t.Context(), rule.ID)
@@ -528,7 +567,7 @@ func TestRuleHandler_AgentUpdatePendingRule_DoesNotTriggerCallback(t *testing.T)
 	require.NoError(t, err)
 
 	body := `{"variables":{"trusted_contracts":"0x1111,0x2222"}}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	select {
@@ -543,7 +582,7 @@ func TestRuleHandler_UpdateRule_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/nonexistent", body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/nonexistent", body, ruleAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -557,7 +596,7 @@ func TestRuleHandler_UpdateRule_Immutable(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"hacked"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "immutable")
 }
@@ -572,7 +611,7 @@ func TestRuleHandler_UpdateRule_NotOwner(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"hacked"}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "permission denied")
 }
@@ -585,7 +624,7 @@ func TestRuleHandler_UpdateRule_InvalidBody(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), "bad json", ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), "bad json", ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -600,7 +639,7 @@ func TestRuleHandler_UpdateRule_EnableDisable(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"enabled":false}`
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -608,15 +647,14 @@ func TestRuleHandler_UpdateRule_EnableDisable(t *testing.T) {
 	assert.False(t, resp.Enabled)
 }
 
-// --- Method not allowed ---
-
-func TestRuleHandler_MethodNotAllowed(t *testing.T) {
-	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
-	require.NoError(t, err)
-
-	rec := doRuleRequest(t, h, http.MethodPut, "/api/v1/evm/rules", nil, ruleAdminKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// ⛔ TestRuleHandler_MethodNotAllowed stood here. It asserted that
+// `PUT /api/v1/evm/rules` came back 405 from ServeHTTP's own method switch —
+// a guard that exists only because a method-less pattern let the verb reach the
+// handler at all. No pattern routes it anywhere now, so the assertion is a row
+// in TestRuleRoutes_UnclaimedShapesReachNoEndpoint
+// (rule_routes_test.go), driven through the production patterns and asserting
+// by effect that no endpoint ran — strictly stronger than a status check, which
+// a handler that writes first and refuses afterwards would pass.
 
 // --- Update with Variables and Matrix ---
 
@@ -635,7 +673,7 @@ func TestRuleHandler_UpdateRule_Variables(t *testing.T) {
 			"max_amount":     "1000000",
 		},
 	}
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -668,7 +706,7 @@ func TestRuleHandler_UpdateRule_Matrix(t *testing.T) {
 			},
 		},
 	}
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -694,7 +732,7 @@ func TestRuleHandler_UpdateRule_ClearMatrix(t *testing.T) {
 	body := map[string]interface{}{
 		"matrix": []map[string]any{},
 	}
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var resp RuleResponse
@@ -784,7 +822,7 @@ func TestRuleHandler_UpdateRule_BudgetMigration(t *testing.T) {
 			"token_address": "0xUSDC",
 		},
 	}
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	// Verify budget was synced: new unit = "137:0xUSDC" via UpsertLimits
@@ -810,7 +848,7 @@ func TestRuleHandler_UpdateRule_BudgetMigrationNoTemplateRepo(t *testing.T) {
 	body := map[string]interface{}{
 		"variables": map[string]string{"chain_id": "137"},
 	}
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 

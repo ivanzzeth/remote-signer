@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,17 +80,27 @@ func phase4CreateBody(name, ruleType, mode string) string {
 	return `{"name":"` + name + `","type":"` + ruleType + `","mode":"` + mode + `","config":{"addresses":["0x0000000000000000000000000000000000000001"]},"enabled":true}`
 }
 
-func phase4Do(h http.Handler, method, path string, body string, ctx context.Context) *httptest.ResponseRecorder {
+// phase4Call drives one named rule endpoint, filling the {id} a matching route
+// pattern would have filled in. ⚠️ Not a dispatcher — see doRuleEndpoint.
+func phase4Call(fn http.HandlerFunc, method, path string, body string, ctx context.Context) *httptest.ResponseRecorder {
+	req := phase4Request(method, path, body, ctx)
+	rest := strings.TrimPrefix(req.URL.Path, "/api/v1/evm/rules/")
+	if id, _, _ := strings.Cut(rest, "/"); id != "" {
+		req.SetPathValue("id", id)
+	}
+	w := httptest.NewRecorder()
+	fn(w, req)
+	return w
+}
+
+func phase4Request(method, path string, body string, ctx context.Context) *http.Request {
 	var req *http.Request
 	if body != "" {
 		req = httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	} else {
 		req = httptest.NewRequest(method, path, nil)
 	}
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	return w
+	return req.WithContext(ctx)
 }
 
 // --- Tests: Agent creates declarative rule ---
@@ -100,7 +111,7 @@ func TestPhase4_AgentCreatesAddressList_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	body := phase4CreateBody("test-whitelist", "evm_address_list", "whitelist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 
@@ -120,7 +131,7 @@ func TestPhase4_AgentCreatesEvmJS_Forbidden(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_js","mode":"whitelist","config":{"script":"function validate(input) { return {valid:true}; }"},"enabled":true}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "evm_js")
@@ -132,7 +143,7 @@ func TestPhase4_AgentCreatesSolidityExpression_Forbidden(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_solidity_expression","mode":"whitelist","config":{"expression":"true"},"enabled":true}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "evm_solidity_expression")
@@ -144,7 +155,7 @@ func TestPhase4_AgentCreatesSignerRestriction_Forbidden(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"signer_restriction","mode":"whitelist","config":{"signers":["0x0000000000000000000000000000000000000001"]},"enabled":true}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "signer_restriction")
@@ -158,7 +169,7 @@ func TestPhase4_AgentAppliedToForcedSelf(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_address_list","mode":"whitelist","config":{"addresses":["0x0000000000000000000000000000000000000001"]},"enabled":true,"applied_to":["*"]}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp RuleResponse
@@ -176,7 +187,7 @@ func TestPhase4_AdminCreatesWithAppliedToValidKey(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_address_list","mode":"whitelist","config":{"addresses":["0x0000000000000000000000000000000000000001"]},"enabled":true,"applied_to":["agent-1"]}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp RuleResponse
@@ -191,7 +202,7 @@ func TestPhase4_AdminCreatesWithAppliedToNonexistentKey_BadRequest(t *testing.T)
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_address_list","mode":"whitelist","config":{"addresses":["0x0000000000000000000000000000000000000001"]},"enabled":true,"applied_to":["nonexistent"]}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "not found")
@@ -210,7 +221,7 @@ func TestPhase4_ImmutableRuleBlocksModify(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
-	w := phase4Do(h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "immutable")
@@ -226,7 +237,7 @@ func TestPhase4_ImmutableRuleBlocksDelete(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	w := phase4Do(h, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), "", phase4AdminCtx("admin-1"))
+	w := phase4Call(h.DeleteRule, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), "", phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "immutable")
@@ -244,7 +255,7 @@ func TestPhase4_AgentCannotModifyOthersRule(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"hacked"}`
-	w := phase4Do(h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "own rules")
@@ -259,7 +270,7 @@ func TestPhase4_AgentCannotDeleteOthersRule(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	w := phase4Do(h, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), "", phase4AgentCtx("agent-1"))
+	w := phase4Call(h.DeleteRule, http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), "", phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "own rules")
@@ -278,7 +289,7 @@ func TestPhase4_ApproveChangesPendingToActive(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AdminCtx("admin-1"))
+	w := phase4Call(h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp RuleResponse
@@ -300,7 +311,7 @@ func TestPhase4_RejectChangesPendingToRejected(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"reason":"too broad"}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.RejectRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", body, phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp RuleResponse
@@ -317,7 +328,7 @@ func TestPhase4_ApproveNonPendingRule_BadRequest(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AdminCtx("admin-1"))
+	w := phase4Call(h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "not pending")
@@ -332,7 +343,7 @@ func TestPhase4_AgentCannotApprove(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AgentCtx("agent-1"))
+	w := phase4Call(h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
@@ -353,7 +364,7 @@ func TestPhase4_RuleCountLimitEnforcedForAgent(t *testing.T) {
 	require.NoError(t, err)
 
 	body := phase4CreateBody("one-too-many", "evm_address_list", "whitelist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rule limit exceeded")
@@ -373,7 +384,7 @@ func TestPhase4_RuleCountLimitNotEnforcedForAdmin(t *testing.T) {
 	require.NoError(t, err)
 
 	body := phase4CreateBody("admin-rule", "evm_address_list", "whitelist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
@@ -386,7 +397,7 @@ func TestPhase4_RequireApproval_AgentWhitelist_PendingApproval(t *testing.T) {
 	require.NoError(t, err)
 
 	body := phase4CreateBody("whitelist-needs-approval", "evm_address_list", "whitelist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusAccepted, w.Code)
 	var resp RuleResponse
@@ -400,7 +411,7 @@ func TestPhase4_RequireApproval_AgentBlocklist_ActiveImmediately(t *testing.T) {
 	require.NoError(t, err)
 
 	body := phase4CreateBody("blocklist-always-active", "evm_address_list", "blocklist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp RuleResponse
@@ -416,7 +427,7 @@ func TestPhase4_DevCannotCreateSignerRestriction(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"signer_restriction","mode":"whitelist","config":{"signers":["0x0000000000000000000000000000000000000001"]},"enabled":true}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4DevCtx("dev-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4DevCtx("dev-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "signer_restriction")
@@ -428,7 +439,7 @@ func TestPhase4_DevAppliedToForcedSelf(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_address_list","mode":"whitelist","config":{"addresses":["0x0000000000000000000000000000000000000001"]},"enabled":true,"applied_to":["*"]}`
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4DevCtx("dev-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4DevCtx("dev-1"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp RuleResponse
@@ -449,7 +460,7 @@ func TestPhase4_AgentCannotModifyRuleToEvmJS(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"type":"evm_js"}`
-	w := phase4Do(h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AgentCtx("agent-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "evm_js")
@@ -463,7 +474,7 @@ func TestPhase4_AdminCreatesWithDefaultAppliedToWildcard(t *testing.T) {
 	require.NoError(t, err)
 
 	body := phase4CreateBody("admin-global", "evm_address_list", "whitelist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp RuleResponse
@@ -480,7 +491,7 @@ func TestPhase4_OwnerAutoSetFromCaller(t *testing.T) {
 	require.NoError(t, err)
 
 	body := phase4CreateBody("test", "evm_address_list", "whitelist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-42"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-42"))
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp RuleResponse
@@ -506,7 +517,7 @@ func TestPhase4_RuleActivatedCallback_OnDirectActiveCreate(t *testing.T) {
 
 	// Admin creates blocklist rule — directly active, should trigger callback.
 	body := phase4CreateBody("blocklist-rule", "evm_address_list", "blocklist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	// Callback should fire asynchronously — wait briefly.
@@ -532,7 +543,7 @@ func TestPhase4_RuleActivatedCallback_NotTriggeredOnPendingApproval(t *testing.T
 
 	// Agent creates whitelist rule — goes to pending_approval, no callback.
 	body := phase4CreateBody("needs-approval", "evm_address_list", "whitelist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
 	assert.Equal(t, http.StatusAccepted, w.Code)
 
 	// Callback should NOT fire.
@@ -564,7 +575,7 @@ func TestPhase4_RuleActivatedCallback_OnApprove(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AdminCtx("admin-1"))
+	w := phase4Call(h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AdminCtx("admin-1"))
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	select {
@@ -596,7 +607,7 @@ func TestPhase4_RuleActivatedCallback_OnActiveRuleUpdate(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"variables":{"trusted_contracts":"0x1111,0x2222"}}`
-	w := phase4Do(h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AgentCtx("agent-1"))
+	w := phase4Call(h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AgentCtx("agent-1"))
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	select {
@@ -642,7 +653,7 @@ func TestPhase4_RuleActivatedCallback_OnApproveProposal(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(proposalID)+"/approve", "", phase4AdminCtx("admin-1"))
+	w := phase4Call(h.ApproveRule, http.MethodPost, "/api/v1/evm/rules/"+string(proposalID)+"/approve", "", phase4AdminCtx("admin-1"))
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	select {
@@ -663,6 +674,6 @@ func TestPhase4_RuleActivatedCallback_NilCallbackNoPanic(t *testing.T) {
 
 	// Should not panic when onRuleActivated is nil.
 	body := phase4CreateBody("no-callback", "evm_address_list", "blocklist")
-	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	w := phase4Call(h.CreateRule, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
 	assert.Equal(t, http.StatusCreated, w.Code)
 }

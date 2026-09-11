@@ -31,7 +31,7 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/some-rule/validate", nil, nil)
+		rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/some-rule/validate", nil, nil)
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 
@@ -40,7 +40,7 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/some-rule/validate", nil, ruleAgentKey())
+		rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/some-rule/validate", nil, ruleAgentKey())
 		assert.Equal(t, http.StatusForbidden, rec.Code)
 	})
 
@@ -49,7 +49,7 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/nonexistent/validate", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/nonexistent/validate", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusNotFound, rec.Code)
 	})
 
@@ -61,7 +61,7 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		assert.Contains(t, rec.Body.String(), "only supported for evm_js")
 	})
@@ -84,7 +84,7 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var resp ValidateRuleResponse
@@ -128,7 +128,7 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var resp ValidateRuleResponse
@@ -174,7 +174,7 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var resp ValidateRuleResponse
@@ -197,7 +197,7 @@ func TestRuleValidate_Batch(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/validate", nil, nil)
+		rec := doRuleEndpoint(t, h.ValidateRules, http.MethodPost, "/api/v1/evm/rules/validate", nil, nil)
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 
@@ -206,7 +206,7 @@ func TestRuleValidate_Batch(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAgentKey())
+		rec := doRuleEndpoint(t, h.ValidateRules, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAgentKey())
 		assert.Equal(t, http.StatusForbidden, rec.Code)
 	})
 
@@ -215,7 +215,7 @@ func TestRuleValidate_Batch(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRules, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var resp BatchValidateResponse
@@ -293,7 +293,7 @@ func TestRuleValidate_Batch(t *testing.T) {
 		h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 		require.NoError(t, err)
 
-		rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAdminKey())
+		rec := doRuleEndpoint(t, h.ValidateRules, http.MethodPost, "/api/v1/evm/rules/validate", nil, ruleAdminKey())
 		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var resp BatchValidateResponse

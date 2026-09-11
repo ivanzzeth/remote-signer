@@ -229,7 +229,7 @@ func TestRuleHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.CreateRule(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")
@@ -244,11 +244,11 @@ func TestRuleHandler_ReadOnly_UpdateBlocked(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), bytes.NewBufferString(body))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), bytes.NewBufferString(body))
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.UpdateRule(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")
@@ -262,11 +262,11 @@ func TestRuleHandler_ReadOnly_DeleteBlocked(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil)
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.DeleteRule(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "rules_api_readonly")
@@ -280,11 +280,11 @@ func TestRuleHandler_ReadOnly_GetAllowed(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID), nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID), nil)
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.GetRule(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
@@ -298,7 +298,7 @@ func TestRuleHandler_ReadOnly_ListAllowed(t *testing.T) {
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.ListRules(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
@@ -315,11 +315,11 @@ func TestRuleHandler_ConfigSourced_UpdateBlocked(t *testing.T) {
 	require.NoError(t, err)
 
 	body := `{"name":"hacked"}`
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), bytes.NewBufferString(body))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), bytes.NewBufferString(body))
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.UpdateRule(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "config-sourced")
@@ -334,11 +334,11 @@ func TestRuleHandler_ConfigSourced_DeleteBlocked(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil)
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.DeleteRule(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "config-sourced")
@@ -382,11 +382,11 @@ func TestRuleHandler_ListBudgets(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default(), WithBudgetRepo(budgetRepo))
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID)+"/budgets", nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID)+"/budgets", nil)
 	req = req.WithContext(adminCtx())
 	w := httptest.NewRecorder()
 
-	h.ServeHTTP(w, req)
+	h.ListBudgets(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var budgets []*types.RuleBudget

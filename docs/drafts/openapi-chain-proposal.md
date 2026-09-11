@@ -169,6 +169,53 @@ pattern(`GET /api/v1/templates/{a}/{b}` …)—— 谁都不坏,代价是把今�
 
 ⛔ 这是一个决定,不是重构的执行细节 —— 等人拍板,别在下一个 PR 里顺手选一个。
 
+### ✅ S8 已经走完(2026-09-11,实测,分三刀)
+
+`/api/v1/evm/rules`(不带 method)+ `/api/v1/evm/rules/`(不带 method、不带子路径、
+任意深度)+ 一条具名的 `POST .../{id}/budgets/reset` → **十二条具名路由**
+(`internal/api/module_rules.go`),`RuleHandler.ServeHTTP` 删除。
+
+三刀的边界(每刀自成一体、全绿):① approve / reject / propose;
+② 两条 validate + 两条 budget;③ 集合 + item + **两条前缀一并删掉**。
+
+⛔ **顺序不可交换,而且理由是实测的**:把 `/api/v1/evm/rules`(精确、不带 method)
+换成按方法注册、而 `/api/v1/evm/rules/` 还在时,Go 的 mux 对其余动词回
+**301 重定向**到带斜杠的形式(PUT / DELETE 实测 405 → 301)。所以集合与前缀必须同刀,
+而且放最后 —— 前两刀因此对「前缀还claims的形状」一个答案都没改。
+
+基线移动(实测):`handler-path-dispatch` 8 → 7(删掉 `evm.RuleHandler.ServeHTTP`,
+背后 12 个端点),`route-perm-binding` 79 → 88(减两条前缀、加十一条具名;
+`POST .../{id}/budgets/reset manage_budgets` 那一行**没动** —— 它只是换了声明的文件),
+`route-mutating-perm` 14 → **22**(八条写操作挂 `list_rules`,既有债第一次逐条可见),
+`manual_method_checks` **2 → 2** —— §9.5 / §6 预测的「S8 不会动这个数字」兑现,
+判据只数 `!=`,rule.go 用的是 `switch r.Method` 与 `== http.MethodPost`。
+
+⭐ **最重要的一条发现是负的**:rule.go **既没有动词洞,也没有吞路径**。
+拿三条真注册 + 每次请求后读回仓库的行实测:`GET /rules/{id}/approve` 回 400 且
+一次服务调用都没发生;`POST /rules/a/{id}/approve` 同样 400 —— 那正是 S7 在
+requests 上批准错行的形状。原因是 rule.go 每个子动作分支都多一道守卫
+`ruleID != "" && !strings.Contains(ruleID, "/")`(提案「教训 4」问的那一道),
+别的 handler 没有它,所以别的 handler 有洞。⛔ S6/S7 如实报告「没找到洞」是对的,
+这一步同样如实报告。
+
+⛔ **真正的洞在尾斜杠,而且落在两个会改状态的端点上**:ServeHTTP 先
+TrimPrefix 掉 `/api/v1/evm/rules` 再 TrimPrefix 掉开头的 `/`,于是空余量 = **集合**,
+`POST /api/v1/evm/rules/` 实测 **201 并真的写了一行规则**;item 形式修剪成干净的 id,
+`DELETE /api/v1/evm/rules/{id}/` 实测 **204 并真的删掉了那一行**。
+这是「教训 3」那个形状(`DELETE /signers/{addr}/`、`POST /templates/`)的第三次出现。
+
+⚠️ **教训 4 的答案**:`!strings.Contains(ruleID, "/")` 与 `{id}` 通配段**等价**,
+因为 `ruleIDPattern` 接受的任何一种形式都不含 '/'(`rule_<uuid>` / `cfg_<hex>` /
+`[a-zA-Z0-9][0-9A-Za-z_-]{0,63}`,外加合成的 `sim:0x…`)。⛔ 所以 templates 那个
+「一半客户端不编码」的陷阱在这里**不存在**,七个客户端面逐条核对过,一个都没坏。
+唯一改掉的答案是 `POST /rules/a%2Fb/approve`:400 → 404,而没有客户端能发出它。
+
+⚠️ **两条守卫 `{id}` 复制不了,必须手搬**:budget 两条分支的 `len(id) <= 128`
+(通配段限一段、不限长度),以及 item 的 `isRulePathID`(400 而不是 404)。
+另有三道**不是路由能表达**的:顶部那道「没有 API key 回 401」(十二个端点共用,
+其中五个自己不查)、validate 的 admin **角色**检查(§2.1 点名的那一处,
+⛔ 逐字留在 handler,**没有**变成路由权限)、PATCH 对合成 `sim:` id 的 403。
+
 ### ⏸ 已挂起、**不要顺手清理**的东西
 
 | 项 | 状态 |

@@ -210,7 +210,7 @@ func TestB3CreateRule_InvalidBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid request body")
 }
@@ -226,7 +226,7 @@ func TestB3CreateRule_MissingType(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "type is required")
 }
@@ -242,7 +242,7 @@ func TestB3CreateRule_MissingMode(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "mode is required")
 }
@@ -258,7 +258,7 @@ func TestB3CreateRule_InvalidMode(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "mode must be")
 }
@@ -279,7 +279,7 @@ func TestB3CreateRule_EvmJSMissingScript(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "config.script is required for evm_js rules")
 }
@@ -300,7 +300,7 @@ func TestB3CreateRule_RepoCreateFails(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "failed to create rule")
 }
@@ -322,7 +322,7 @@ func TestB3CreateRule_InvalidChainType(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid chain_type")
 }
@@ -344,7 +344,7 @@ func TestB3CreateRule_InvalidSignerAddress(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	// Error message may vary depending on validation order
 }
@@ -360,11 +360,11 @@ func TestB3UpdateRule_GetNotFound(t *testing.T) {
 
 	body := map[string]interface{}{"name": "Updated"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/nonexistent", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/nonexistent", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Contains(t, rec.Body.String(), "rule not found")
 }
@@ -376,11 +376,11 @@ func TestB3UpdateRule_GetRepoError(t *testing.T) {
 
 	body := map[string]interface{}{"name": "Updated"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "failed to get rule")
 }
@@ -395,11 +395,11 @@ func TestB3UpdateRule_RepoUpdateFails(t *testing.T) {
 
 	body := map[string]interface{}{"name": "Updated"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -414,11 +414,11 @@ func TestB3UpdateRule_AgentBlockedTypeChange(t *testing.T) {
 	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
 	body := map[string]interface{}{"type": "evm_js"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, agentKey))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "agent role cannot change rule type")
 }
@@ -433,11 +433,11 @@ func TestB3UpdateRule_InvalidChainType(t *testing.T) {
 
 	body := map[string]interface{}{"chain_type": "invalid"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -451,11 +451,11 @@ func TestB3UpdateRule_InvalidSignerAddress(t *testing.T) {
 
 	body := map[string]interface{}{"signer_address": "bad"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -469,11 +469,11 @@ func TestB3UpdateRule_AdminChangesAppliedTo(t *testing.T) {
 
 	body := map[string]interface{}{"applied_to": []string{"other-key"}}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule_test", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -538,10 +538,10 @@ func TestB3DeleteRule_GetRepoError(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/rule_test", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/rule_test", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -550,10 +550,10 @@ func TestB3DeleteRule_NotFound(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/nonexistent", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/nonexistent", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -569,7 +569,7 @@ func TestB3ListRules_CountError2(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "failed to count rules")
 }
@@ -583,12 +583,12 @@ func TestB3ListBudgets_NoBudgetRepo(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/rule_test/budgets", nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/rule_test/budgets", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	// Without WithBudgetRepo, the route falls through to ruleID matching
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	h.ListBudgets(rec, req)
+	// ⚠️ Was 400, a routing fact — see TestRuleRoutes_BudgetRoutesAreConditional.
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 // ---------------------------------------------------------------------------
@@ -1739,7 +1739,7 @@ func TestB3ListRules_InvalidChainType(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules?chain_type=invalid", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules?chain_type=invalid", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -1747,7 +1747,7 @@ func TestB3ListRules_InvalidSignerAddress(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules?signer_address=0xbad", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules?signer_address=0xbad", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -1755,7 +1755,7 @@ func TestB3ListRules_InvalidType(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules?type=invalid_type", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules?type=invalid_type", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -1763,7 +1763,7 @@ func TestB3ListRules_InvalidSource(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules?source=invalid", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules?source=invalid", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -1771,7 +1771,7 @@ func TestB3ListRules_ListError(t *testing.T) {
 	repo := &FailRuleRepoNoList{}
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -1779,7 +1779,7 @@ func TestB3ListRules_CountError(t *testing.T) {
 	repo := &FailRuleRepoNoCount{}
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -1798,7 +1798,7 @@ func TestB3ListBudgets_RepoError(t *testing.T) {
 
 	// Without budgetRepo, the route falls through to validate or approve
 	// Just verify listing rules themselves works
-	rec := doRuleRequest(t, h, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ListRules, http.MethodGet, "/api/v1/evm/rules", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -2419,10 +2419,10 @@ func TestB3ListBudgets_ListError(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default(), WithBudgetRepo(budgetRepo))
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/rule_1/budgets", nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/rule_1/budgets", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.ListBudgets(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -2433,10 +2433,10 @@ func TestB3ListBudgets_NilBudgets(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default(), WithBudgetRepo(budgetRepo))
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/rule_1/budgets", nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/rule_1/budgets", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.ListBudgets(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -2553,7 +2553,7 @@ func TestB3CreateRule_EVMJSEmptyScript(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2636,11 +2636,11 @@ func TestB3UpdateRule_EVMJSEmptyScript(t *testing.T) {
 		},
 	}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule_js", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule_js", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "config.script must not be empty")
 }
@@ -2664,11 +2664,11 @@ func TestB3UpdateRule_ChainTypeInvalid(t *testing.T) {
 
 	body := map[string]interface{}{"chain_type": "invalid"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule-ct", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule-ct", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2691,11 +2691,11 @@ func TestB3UpdateRule_InvalidSignerAddress2(t *testing.T) {
 
 	body := map[string]interface{}{"signer_address": "not-an-address"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule-sa", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule-sa", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -2719,11 +2719,11 @@ func TestB3UpdateRule_AgentBlockedType(t *testing.T) {
 
 	body := map[string]interface{}{"type": "evm_js"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule-ag", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule-ag", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -2748,11 +2748,11 @@ func TestB3UpdateRule_Immutable(t *testing.T) {
 
 	body := map[string]interface{}{"name": "new-name"}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/rule-im", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/rule-im", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -3256,10 +3256,10 @@ func TestB3GetRule_NotFound(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/nonexistent", nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/nonexistent", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.GetRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -3271,10 +3271,10 @@ func TestB3GetRule_GetError(t *testing.T) {
 	h, err := NewRuleHandler(&FailRuleRepoNoGet{}, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/rule_test", nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/rule_test", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.GetRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -3289,11 +3289,11 @@ func TestB3ApproveRule_NotFound(t *testing.T) {
 
 	body := map[string]interface{}{}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/nonexistent/approve", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/nonexistent/approve", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.ApproveRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -3308,11 +3308,11 @@ func TestB3RejectRule_NotFound(t *testing.T) {
 
 	body := map[string]interface{}{}
 	data, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.RejectRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -3328,11 +3328,11 @@ func TestB3ApproveRule_InvalidBody(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/rule-approve-body/approve", bytes.NewBufferString("bad json"))
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/rule-approve-body/approve", bytes.NewBufferString("bad json"))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.ApproveRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -3523,8 +3523,8 @@ func TestB3DeleteRule_Unauthorized(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/rule_00000000-0000-0000-0000-000000000001", nil)
-	h.ServeHTTP(rec, req)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/rule_00000000-0000-0000-0000-000000000001", nil)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
@@ -3533,10 +3533,10 @@ func TestB3DeleteRule_RepoGetError(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/rule_00000000-0000-0000-0000-000000000001", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/rule_00000000-0000-0000-0000-000000000001", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -3557,10 +3557,10 @@ func TestB3GetRule_ScopedForAgent(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/"+string(rules[0].ID), nil)
+	req := ruleReq(http.MethodGet, "/api/v1/evm/rules/"+string(rules[0].ID), nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.GetRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -3845,7 +3845,7 @@ func TestB3ListRules_InvalidAddressFilter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules?signer_address=not-an-address", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -3861,7 +3861,7 @@ func TestB3ListRules_InvalidTypeFilter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules?type=invalid_type", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -3877,7 +3877,7 @@ func TestB3ListRules_InvalidSourceFilter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules?source=invalid_source", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -3895,7 +3895,7 @@ func TestB3ListRules_OwnerFilter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules?owner=owner-key", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "owner-key", Role: types.RoleAgent, Enabled: true}))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -3912,7 +3912,7 @@ func TestB3ListRules_SignerAddressFilter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules?signer_address="+addr, nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -3928,9 +3928,9 @@ func TestB3RejectRule_NonAdminForbidden(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/rej-rule/reject", nil)
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/rej-rule/reject", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}))
-	h.ServeHTTP(rec, req)
+	h.RejectRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -3946,9 +3946,9 @@ func TestB3ApproveRule_NonAdminForbidden(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/app-rule/approve", nil)
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/app-rule/approve", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}))
-	h.ServeHTTP(rec, req)
+	h.ApproveRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -3964,9 +3964,9 @@ func TestB3DeleteRule_ReadOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-ro-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-ro-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -3982,9 +3982,9 @@ func TestB3DeleteRule_Immutable(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-im-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-im-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4000,9 +4000,9 @@ func TestB3DeleteRule_NonOwnerForbidden(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-own-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-own-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4018,9 +4018,9 @@ func TestB3DeleteRule_ConfigSource(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-cfg-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-cfg-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4044,9 +4044,9 @@ func TestB3DeleteRule_RepoDeleteError(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-err-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-err-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -4065,7 +4065,7 @@ func TestB3CreateRule_ReadOnly(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4083,10 +4083,10 @@ func TestB3UpdateRule_ReadOnly(t *testing.T) {
 	body := map[string]interface{}{"name": "updated"}
 	data, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/upd-ro-rule", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/upd-ro-rule", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4104,10 +4104,10 @@ func TestB3UpdateRule_ConfigSource(t *testing.T) {
 	body := map[string]interface{}{"name": "updated"}
 	data, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/upd-cfg-rule", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/upd-cfg-rule", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4125,10 +4125,10 @@ func TestB3UpdateRule_Immutable2(t *testing.T) {
 	body := map[string]interface{}{"name": "updated"}
 	data, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/upd-im-rule", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/upd-im-rule", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4146,10 +4146,10 @@ func TestB3UpdateRule_NonOwner(t *testing.T) {
 	body := map[string]interface{}{"name": "updated"}
 	data, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/upd-own-rule", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/upd-own-rule", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}))
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4167,10 +4167,10 @@ func TestB3UpdateRule_AgentCantChangeAppliedTo(t *testing.T) {
 	body := map[string]interface{}{"name": "updated", "applied_to": []string{"other-key"}}
 	data, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/upd-at-rule", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/upd-at-rule", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}))
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
@@ -4187,7 +4187,7 @@ func TestB3CreateRule_DecodeError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules", bytes.NewBufferString("not json"))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -4328,7 +4328,7 @@ func TestB3CreateRule_NameRequired(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -4347,7 +4347,7 @@ func TestB3CreateRule_TypeRequired(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -4384,9 +4384,9 @@ func TestB3ApproveRule_NotFound2(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/nonexistent/approve", nil)
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/nonexistent/approve", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ApproveRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -4400,9 +4400,9 @@ func TestB3RejectRule_NotFound2(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", nil)
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.RejectRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -4420,7 +4420,7 @@ func TestB3ListRules_EnabledFilter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules?enabled=true", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -4438,7 +4438,7 @@ func TestB3ListRules_LimitOffset(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules?limit=10&offset=0", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -4454,9 +4454,9 @@ func TestB3ApproveRule_NotPending(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/app-act-rule/approve", nil)
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/app-act-rule/approve", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ApproveRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -4472,9 +4472,9 @@ func TestB3RejectRule_NotPending(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/rej-act-rule/reject", nil)
+	req := ruleReq(http.MethodPost, "/api/v1/evm/rules/rej-act-rule/reject", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.RejectRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -4493,7 +4493,7 @@ func TestB3CreateRule_InvalidChainType2(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.CreateRule(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
@@ -4509,7 +4509,7 @@ func TestB3ListRules_ListRepoError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.ListRules(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -4533,9 +4533,9 @@ func TestB3DeleteRule_DeleteNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-nf-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-nf-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
@@ -4553,10 +4553,10 @@ func TestB3UpdateRule_RepoUpdateError(t *testing.T) {
 	body := map[string]interface{}{"name": "updated"}
 	data, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/rules/upd-err-rule", bytes.NewBuffer(data))
+	req := ruleReq(http.MethodPatch, "/api/v1/evm/rules/upd-err-rule", bytes.NewBuffer(data))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.UpdateRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -4620,9 +4620,9 @@ func TestB3DeleteRule_BudgetCleanup(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-budget-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-budget-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	// Verify the rule was deleted
@@ -4647,9 +4647,9 @@ func TestB3DeleteRule_BudgetCleanupOnDeleteError(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-err-budget-rule", nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/del-err-budget-rule", nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 
 	// Repo delete error should dominate — budget cleanup is NOT called because
 	// deleteRule returns early before reaching the budget cleanup block

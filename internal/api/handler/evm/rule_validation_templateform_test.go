@@ -61,7 +61,7 @@ func TestRuleValidate_TemplateFormConfig(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default(), WithJSEvaluator(eval))
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
+	rec := doRuleEndpoint(t, h.ValidateRule, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/validate", nil, ruleAdminKey())
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 
 	var resp ValidateRuleResponse

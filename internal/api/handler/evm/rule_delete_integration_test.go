@@ -59,9 +59,9 @@ func TestRuleHandler_DeleteRule_AtomicBudgetCleanup(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/"+string(ruleID), nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/"+string(ruleID), nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, ruleAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	_, err = ruleRepo.Get(ctx, ruleID)
@@ -102,9 +102,9 @@ func TestRuleHandler_DeleteRule_BudgetCleanupFailureRollsBack(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/"+string(ruleID), nil)
+	req := ruleReq(http.MethodDelete, "/api/v1/evm/rules/"+string(ruleID), nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, ruleAdminKey()))
-	h.ServeHTTP(rec, req)
+	h.DeleteRule(rec, req)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 
 	_, err = ruleRepo.Get(ctx, ruleID)

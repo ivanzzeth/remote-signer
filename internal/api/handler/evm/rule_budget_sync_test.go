@@ -63,7 +63,7 @@ func TestResolveAndSyncBudgetLimits_DynamicTemplate(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{"enabled": true}, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
@@ -123,7 +123,7 @@ func TestResolveAndSyncBudgetLimits_VariableChangeSyncsLimits(t *testing.T) {
 	require.NoError(t, err)
 
 	// PATCH variables: change max_sign_count from 500 to 250, max_tx_count from 1000 to 100
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{
 				"max_sign_count":    "250",
@@ -205,7 +205,7 @@ func TestResolveAndSyncBudgetLimits_NoVariablesChangeNoSync(t *testing.T) {
 	require.NoError(t, err)
 
 	// PATCH name only (no variables)
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{"name": "New Name"}, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.False(t, budgetSynced, "name-only update should NOT trigger budget sync")
@@ -244,7 +244,7 @@ func TestResolveAndSyncBudgetLimits_StaticTemplate(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{
 				"chain_id":      "137",
@@ -269,7 +269,7 @@ func TestResolveAndSyncBudgetLimits_NoTemplateRepoSkipsSync(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{"max_sign_count": "250"},
 		}, ruleAdminKey())
@@ -304,7 +304,7 @@ func TestResolveAndSyncBudgetLimits_TemplateGetError(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{"chain_id": "137"},
 		}, ruleAdminKey())
@@ -343,7 +343,7 @@ func TestResolveAndSyncBudgetLimits_EmptyBudgetMetering(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{"chain_id": "137"},
 		}, ruleAdminKey())
@@ -398,7 +398,7 @@ func TestResolveAndSyncBudgetLimits_UnknownDefaultNotPresynced(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{"max_sign_count": "250"},
 		}, ruleAdminKey())
@@ -448,7 +448,7 @@ func TestResolveAndSyncBudgetLimits_UnresolvedCapIsRejected(t *testing.T) {
 	h, err := NewRuleHandler(repo, slog.Default(), WithTemplateRepo(tmplRepo), WithBudgetRepo(budgetRepo))
 	require.NoError(t, err)
 
-	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
+	rec := doRuleEndpoint(t, h.UpdateRule, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{"variables": map[string]string{"max_native_total": "20"}}, ruleAdminKey())
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "an unresolved spending cap must be refused")

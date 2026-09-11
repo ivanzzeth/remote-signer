@@ -11,9 +11,13 @@
 #
 # ---------- ⚠️ 它看不见的那一半 ----------
 #
-# 只有带 method 前缀的 pattern 才判得了。`/api/v1/evm/rules/` 没有 method 前缀,
-# 它背后 12 个端点里的 POST/DELETE 全都挂在 PermListRules 上,而这条门禁
-# 一个字都说不出来 —— 那正是 handler 拆解(提案 S3–S8)要解决的形状。
+# 只有带 method 前缀的 pattern 才判得了。最典型的例子是 `/api/v1/evm/rules/`:
+# 它不带 method,背后 12 个端点里的 POST/DELETE 全都挂在 PermListRules 上,而这条
+# 门禁对它一个字都说不出来。
+# ⭐ 2026-09-11(提案 S8)那条前缀没了,那 12 个端点成了 12 条具名路由,其中
+# **八个写操作**在这份清单末尾各占一行 —— 从「看不见」变成「看得见但没改」。
+# ⚠️ 仍然看不见的:`/api/v1/evm/simulations` 与 `/api/v1/evm/guard/resume`
+# 这两条不带 method 的注册。
 #
 # ---------- 清单 ----------
 
@@ -103,3 +107,64 @@ PATCH /api/v1/templates/{id}
 POST /api/v1/templates
 POST /api/v1/templates/{id}/instantiate
 POST /api/v1/templates/{id}/validate
+
+# ⭐ 2026-09-11,提案 S8 第 1 刀(rule.go 的三个审批动作):**同一形状的第五批**,
+# 而且是这份文件开头「⚠️ 它看不见的那一半」点名的那一条终于开口说话。
+#
+# 那段话写着:「`/api/v1/evm/rules/` 没有 method 前缀,它背后 12 个端点里的
+# POST/DELETE 全都挂在 PermListRules 上,而这条门禁一个字都说不出来」。
+# ⛔ 这三行就是其中三个,第一次以自己的名字出现。route_auth.go 的
+# ⛔ KNOWN LIMIT 段落说的也是同一件事(「declares PermListRules for all twelve
+# endpoints behind it」)。
+#
+# ⛔ 它们不是这次改出来的债,权限是**逐字照抄**前缀的。⚠️ 而且与 signers 那八行
+# 不同:这三条的真实判断**不是**资源域的 —— approve 与 reject 在 handler 里
+# 另有一道 `apiKey.IsAdmin()`(rule_query.go,注释写着 "defense in depth"),
+# propose 检查 agent-or-admin。那是**角色**检查,RouteAuth 表达不了角色,所以
+# 它留在 handler 里;⛔ 但角色检查不是权限检查,拿着 list_rules 的 admin 依然
+# 能 approve,而「approve 该不该只要 list_rules」正是这张表在问的问题。
+#
+# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**:提案 §2.5 把
+# 「拆解顺手改权限」列为唯一语义不可逆的风险,失败方向不对称(过严会在 e2e 里
+# 显形,过松不会)。单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
+POST /api/v1/evm/rules/{id}/approve
+POST /api/v1/evm/rules/{id}/propose
+POST /api/v1/evm/rules/{id}/reject
+
+# ⭐ 2026-09-11,提案 S8 第 2 刀(两条 validate):同一条前缀身后的第二批。
+#
+# ⚠️ 和 presets / templates 的 validate 一样,**方向是反的**:它们其实是只读的
+# (跑规则自带的 test case、跑批量校验),只是动词是 POST,所以这条判据把它们
+# 算作写操作。⛔ 留着它们是对的 —— 判据不猜语义,而「POST 到底改不改东西」
+# 只有读了 handler 才知道,那正是判据不该做的事。
+#
+# ⭐ 它们与 templates 那五行有一处**关键的不同**,值得写下来:templates 那边
+# router.go 的注释写着「PermInstantiateTemplate checked in handler」而那是假的;
+# 这两条的 handler 内检查是**真的存在**的 —— rule.go 的 requireAdmin
+# (`apiKey.IsAdmin()` → 403 "forbidden: admin role required"),逐字抄自
+# ServeHTTP 的分支,由 TestRuleRoutes_ValidateAdminCheckIsStillInTheHandler 钉住。
+# ⛔ 但那是**角色**检查,不是权限检查:RouteAuth 表达不了角色,所以路由上只能
+# 是 list_rules,而这张表记录的就是这件事。两者都真,谁也代替不了谁。
+#
+# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**(提案 §2.5)。
+POST /api/v1/evm/rules/validate
+POST /api/v1/evm/rules/{id}/validate
+
+# ⭐ 2026-09-11,提案 S8 第 3 刀(集合与 item,两条前缀一并删掉):最后三行,
+# 也是这条前缀身后**全部**八个写端点到齐的那一刻。
+#
+# ⛔ 三条权限**逐字照抄**那两条不带 method 的前缀声明的 PermListRules,一个字节
+# 都没改。文件开头「⚠️ 它看不见的那一半」写的就是这件事:
+# 「`/api/v1/evm/rules/` 没有 method 前缀,它背后 12 个端点里的 POST/DELETE 全都
+# 挂在 PermListRules 上,而这条门禁一个字都说不出来」—— 现在它说得出来了,
+# 八行白纸黑字。⛔ 那段话可以在收紧权限的那个 PR 里改写,⛔ 不是现在。
+#
+# ⚠️ 这三条的真实判断**是资源域的**,和 signers 那八行同类而与 templates 不同:
+# createRule / updateRule / deleteRule 都拿 owner 与 source 去判(config 来源的
+# 规则任何人都改不了删不了、非 admin 只能动自己的),路由做不了这个判断。
+# ⛔ 但那仍然不等于 list_rules 是对的门:一把只该「看规则」的 key 今天能建能删。
+#
+# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**(提案 §2.5)。
+DELETE /api/v1/evm/rules/{id}
+PATCH /api/v1/evm/rules/{id}
+POST /api/v1/evm/rules

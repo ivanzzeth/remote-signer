@@ -68,9 +68,17 @@ func TestAPIFallback_DoesNotShadowRegisteredRoutes(t *testing.T) {
 
 	// Copies of live registrations (router.go), one of each shape.
 	r.handle("POST /api/v1/evm/sign", Public("test fixture"), okHandler("sign"))
-	r.handle("/api/v1/evm/rules", Public("test fixture"), okHandler("rules"))
-	r.handle("/api/v1/evm/rules/", Public("test fixture"), okHandler("rules-prefix"))
+	// ⚠️ These used to be `/api/v1/evm/rules` and `/api/v1/evm/rules/` — the
+	// method-less pair that carried twelve endpoints and matched every verb at
+	// every depth. S8 replaced them with named routes; what is kept here is the
+	// collection/item/sub-action trio, because between them they are every shape
+	// the fallback could shadow.
+	r.handle("GET /api/v1/evm/rules", Public("test fixture"), okHandler("rules"))
+	r.handle("GET /api/v1/evm/rules/{id}", Public("test fixture"), okHandler("rule-item"))
 	r.handle("POST /api/v1/evm/rules/{id}/budgets/reset", Public("test fixture"), okHandler("budget-reset"))
+	// ⭐ A still-live method-scoped prefix, so the "a prefix route is not
+	// shadowed" shape stays covered now that the rules prefixes are gone.
+	r.handle("GET /api/v1/evm/budgets/", Public("test fixture"), okHandler("budget-item"))
 	r.handle("GET /api/v1/evm/signers", Public("test fixture"), okHandler("signers"))
 	r.handle("POST /api/v1/evm/signers/{address}/unlock", Public("test fixture"), okHandler("unlock"))
 	r.handle("POST /api/v1/evm/signers/{address}/transfer", Public("test fixture"), okHandler("transfer"))
@@ -101,9 +109,9 @@ func TestAPIFallback_DoesNotShadowRegisteredRoutes(t *testing.T) {
 		want   string
 	}{
 		{"literal method-scoped route", http.MethodPost, "/api/v1/evm/sign", "POST /api/v1/evm/sign"},
-		{"collection route", http.MethodGet, "/api/v1/evm/rules", "/api/v1/evm/rules"},
-		{"prefix route keeps deep paths", http.MethodGet, "/api/v1/evm/rules/a/b/c/d", "/api/v1/evm/rules/"},
-		{"prefix route keeps one segment", http.MethodGet, "/api/v1/evm/rules/rule-1", "/api/v1/evm/rules/"},
+		{"collection route", http.MethodGet, "/api/v1/evm/rules", "GET /api/v1/evm/rules"},
+		{"item route", http.MethodGet, "/api/v1/evm/rules/rule-1", "GET /api/v1/evm/rules/{id}"},
+		{"prefix route keeps deep paths", http.MethodGet, "/api/v1/evm/budgets/a/b/c/d", "GET /api/v1/evm/budgets/"},
 		{"wildcard sub-path", http.MethodPost, "/api/v1/evm/rules/rule-1/budgets/reset", "POST /api/v1/evm/rules/{id}/budgets/reset"},
 		{"signer collection", http.MethodGet, "/api/v1/evm/signers", "GET /api/v1/evm/signers"},
 		{"signer action unlock", http.MethodPost, "/api/v1/evm/signers/0xabc/unlock", "POST /api/v1/evm/signers/{address}/unlock"},
@@ -430,54 +438,196 @@ func TestAPIFallback_SignerStrandedPaths(t *testing.T) {
 	}
 }
 
-// TestAPIFallback_RulesPrefixStillAnswersItsOwn400 is the one the task calls
-// for by name, and it runs the real handler/evm/rule.go — not a marker — behind
-// the real patterns, with the fallback registered.
+// TestAPIFallback_RulesStrandedPaths is where the behaviour-change table on
+// rulesModule.Routes is *measured* rather than reasoned about, with the real
+// handler/evm/rule.go behind the real patterns and the real fallback beside
+// them.
 //
-// ⚠️ Registered as Public here purely so the request reaches the handler without
-// a signed API key; the live registration is Permitted(PermListRules) and this
-// test says nothing about that. What it pins is that a deep path still reaches
-// RuleHandler and still comes back 400 JSON, and that a real endpoint next to it
-// still reaches its handler and answers 200.
-func TestAPIFallback_RulesPrefixStillAnswersItsOwn400(t *testing.T) {
-	ruleHandler, err := evmhandler.NewRuleHandler(storage.NewMemoryRuleRepository(), fallbackTestLogger())
+// ⛔ Two rows are the point of the whole step, and they are the only rows in any
+// of these fallback tests where the *before* answer was a successful mutation
+// reached through a trailing slash: "/api/v1/evm/rules/" trimmed its own prefix
+// and then trimmed the leading "/", so the empty remainder was the *collection*
+// — `POST /api/v1/evm/rules/` created a rule (201) — and "/api/v1/evm/rules/{id}/"
+// trimmed to a clean id, so `DELETE /api/v1/evm/rules/{id}/` deleted the row
+// (204). Measured on the real registrations by reading the repository back, not
+// read off the source.
+//
+// ⚠️ What this step did NOT find, and it is worth stating because the four steps
+// before it all did: **no verb hole and no depth swallow**. Every sub-action
+// branch required POST *and* an id containing no '/', so `GET .../{id}/approve`
+// and `POST .../a/{id}/approve` both fell through to 400 having called nothing.
+// See TestRuleRoutes_NoVerbOrDepthReachesTheseMutations.
+//
+// ⚠️ This test also replaces TestAPIFallback_RulesPrefixStillAnswersItsOwn400,
+// whose subject — proposal §2.3 row 1, "the prefix keeps answering its own 400
+// for /rules/a/b/c/d" — is gone with the prefix. ⛔ Not dropped: the row is here,
+// asserting what that path answers now (the /api/v1/ JSON 404) and, critically,
+// that it is still JSON and not the SPA's HTML. That was the actual worry §2.3
+// recorded; the 400 was only the mechanism of the day.
+func TestAPIFallback_RulesStrandedPaths(t *testing.T) {
+	repo := storage.NewMemoryRuleRepository()
+	ruleHandler, err := evmhandler.NewRuleHandler(repo, fallbackTestLogger())
 	if err != nil {
 		t.Fatalf("building the real rule handler: %v", err)
 	}
+	rulesMod, err := NewRulesModule(ruleHandler, false)
+	if err != nil {
+		t.Fatalf("building the rules module: %v", err)
+	}
+
+	var patterns []string
+	rulesMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		patterns = append(patterns, pattern)
+	}))
+	if len(patterns) != 10 {
+		t.Fatalf("rulesModule registered %d patterns without a budget repo, want 10 — the rows below "+
+			"would pass for the wrong reason", len(patterns))
+	}
 
 	r := newChainedTestRouter()
-	r.handle("/api/v1/evm/rules", Public("test fixture"), ruleHandler)
-	r.handle("/api/v1/evm/rules/", Public("test fixture"), ruleHandler)
-	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<html>spa</html>"))
+	r.mountModules(rulesMod)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<!doctype html><html>spa</html>"))
 	r.registerAPIFallback()
 
 	admin := &types.APIKey{ID: "admin-key", Name: "Admin", Role: types.RoleAdmin, Enabled: true}
-	do := func(method, target string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, target, nil)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, admin))
 		rec := httptest.NewRecorder()
 		r.Handler().ServeHTTP(rec, req)
 		return rec
 	}
 
-	// ⭐ The behaviour proposal §2.3 row 1 says must not change.
-	deep := do(http.MethodGet, "/api/v1/evm/rules/a/b/c/d")
-	if deep.Code != http.StatusBadRequest {
-		t.Fatalf("deep rules path answered %d %q, want 400 from rule.go — the fallback shadowed the prefix route",
-			deep.Code, deep.Body.String())
-	}
-	var body map[string]string
-	if err := json.Unmarshal(deep.Body.Bytes(), &body); err != nil {
-		t.Fatalf("deep rules path body %q is not JSON: %v", deep.Body.String(), err)
-	}
-	if body["error"] != "invalid rule_id format" {
-		t.Fatalf("deep rules path said %q, want rule.go's own \"invalid rule_id format\"", body["error"])
+	const id = "rule_00000000-0000-0000-0000-000000000001"
+	const createBody = `{"name":"stranded","type":"evm_address_list","mode":"whitelist",` +
+		`"config":{"addresses":["0x0000000000000000000000000000000000000009"]}}`
+
+	seed := func(t *testing.T) {
+		t.Helper()
+		ct := types.ChainTypeEVM
+		if _, err := repo.Get(context.Background(), types.RuleID(id)); err == nil {
+			return
+		}
+		if err := repo.Create(context.Background(), &types.Rule{
+			ID: id, Name: "seed", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist,
+			Source: types.RuleSourceAPI, ChainType: &ct, Owner: "admin-key", Enabled: true,
+		}); err != nil {
+			t.Fatalf("seeding: %v", err)
+		}
 	}
 
-	// A known real endpoint still reaches its handler through the same mux.
-	list := do(http.MethodGet, "/api/v1/evm/rules")
-	if list.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/evm/rules answered %d %q, want 200", list.Code, list.Body.String())
+	// ⭐ Row 1 of the two mutations, asserted by effect: the row count before and
+	// after must be equal.
+	t.Run("POST with a trailing slash, which used to create a rule", func(t *testing.T) {
+		before, _ := repo.Count(context.Background(), storage.RuleFilter{})
+		rec := do(http.MethodPost, "/api/v1/evm/rules/", createBody)
+		after, _ := repo.Count(context.Background(), storage.RuleFilter{})
+		if after != before {
+			t.Fatalf("POST /api/v1/evm/rules/ created a rule (%d → %d); it must reach no endpoint", before, after)
+		}
+		assertStrandedOnAPIFallback(t, r, rec, http.MethodPost, "/api/v1/evm/rules/", "POST /api/v1/evm/rules/")
+	})
+
+	// ⭐ Row 2, also by effect: the seeded row must still be there.
+	t.Run("DELETE an item with a trailing slash, which used to delete it", func(t *testing.T) {
+		seed(t)
+		rec := do(http.MethodDelete, "/api/v1/evm/rules/"+id+"/", "")
+		if _, err := repo.Get(context.Background(), types.RuleID(id)); err != nil {
+			t.Fatalf("DELETE /api/v1/evm/rules/%s/ deleted the rule: %v", id, err)
+		}
+		assertStrandedOnAPIFallback(t, r, rec, http.MethodDelete, "/api/v1/evm/rules/"+id+"/", "DELETE an item with a trailing slash")
+	})
+
+	for _, tc := range []struct {
+		name, method, target string
+	}{
+		// ---- the deep path proposal §2.3 row 1 was about ----
+		{"a deep path, which answered rule.go's own 400", http.MethodGet, "/api/v1/evm/rules/a/b/c/d"},
+		// ---- the reads that the trailing slash forgave ----
+		{"the collection with a trailing slash, which listed", http.MethodGet, "/api/v1/evm/rules/"},
+		{"an item with a trailing slash, which read the rule", http.MethodGet, "/api/v1/evm/rules/" + id + "/"},
+		// ---- verbs no route declares ----
+		{"PUT on the collection, which answered 405", http.MethodPut, "/api/v1/evm/rules"},
+		{"DELETE on the collection, which answered 405", http.MethodDelete, "/api/v1/evm/rules"},
+		{"PUT on an item, which answered 405", http.MethodPut, "/api/v1/evm/rules/" + id},
+		{"GET on approve, which answered 400", http.MethodGet, "/api/v1/evm/rules/" + id + "/approve"},
+		{"POST on an item, which answered 405", http.MethodPost, "/api/v1/evm/rules/" + id},
+		// ---- depth, which the id guard already refused with a 400 ----
+		{"approve one segment deep, which answered 400", http.MethodPost, "/api/v1/evm/rules/a/" + id + "/approve"},
+		// ---- budgets with no budget repository: the route is not registered ----
+		{"budgets with no budget repo, which answered 400", http.MethodGet, "/api/v1/evm/rules/" + id + "/budgets"},
+		{"budgets/reset with no budget repo, which answered 400", http.MethodPost, "/api/v1/evm/rules/" + id + "/budgets/reset"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertStrandedOnAPIFallback(t, r, do(tc.method, tc.target, createBody), tc.method, tc.target, tc.method+" "+tc.target)
+		})
+	}
+
+	// Every real endpoint still resolves to its own pattern: the fallback shadows
+	// none of them, and the decomposition left none of them behind.
+	for _, pattern := range patterns {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("rule pattern %q has no method — every rule route is method-scoped", pattern)
+		}
+		target := strings.ReplaceAll(path, "{id}", id)
+		if strings.Contains(target, "{") {
+			t.Fatalf("rule pattern %q has a wildcard this test does not know how to fill: %q", pattern, target)
+		}
+		if _, got := r.mux.Handler(httptest.NewRequest(method, target, nil)); got != pattern {
+			t.Errorf("%s %s dispatches to %q, want its own route %q", method, target, got, pattern)
+		}
+	}
+
+	// ⚠️ And the row that is deliberately NOT stranded: "validate" is a legal
+	// single segment, so a GET on it resolves to the item route and is a rule
+	// lookup whose id happens to be "validate" — which is exactly what the
+	// prefix's fallthrough made of it (404 "rule not found", measured). ⛔ Asserted
+	// as the pattern rather than the status, because every request in this test
+	// is unsigned and the real chain answers 401 before any handler runs; the
+	// handler's answer is TestRuleRoutes_ValidateIsALiteralOnlyForPost's subject.
+	if _, got := r.mux.Handler(httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/validate", nil)); got != "GET /api/v1/evm/rules/{id}" {
+		t.Errorf("GET /api/v1/evm/rules/validate dispatches to %q, want the item route", got)
+	}
+	if _, got := r.mux.Handler(httptest.NewRequest(http.MethodPost, "/api/v1/evm/rules/validate", nil)); got != "POST /api/v1/evm/rules/validate" {
+		t.Errorf("POST /api/v1/evm/rules/validate dispatches to %q, want the literal batch-validate route — "+
+			"the literal must win over {id} for POST", got)
+	}
+
+	// ⚠️ HEAD is the one answer that got *more* permissive, pinned here rather
+	// than left to be discovered: Go's mux matches HEAD against a GET pattern, so
+	// both of these reach a read route where ServeHTTP's method switch answered
+	// 405. Both are pure reads. The same widening happened to settings in S5 and
+	// to templates, presets and requests in S6/S7.
+	if _, got := r.mux.Handler(httptest.NewRequest(http.MethodHead, "/api/v1/evm/rules", nil)); got != "GET /api/v1/evm/rules" {
+		t.Errorf("HEAD /api/v1/evm/rules dispatches to %q, want the GET route — the HEAD widening "+
+			"recorded in module_rules.go's table no longer holds", got)
+	}
+	if _, got := r.mux.Handler(httptest.NewRequest(http.MethodHead, "/api/v1/evm/rules/"+id, nil)); got != "GET /api/v1/evm/rules/{id}" {
+		t.Errorf("HEAD /api/v1/evm/rules/{id} dispatches to %q, want the GET route", got)
+	}
+}
+
+// assertStrandedOnAPIFallback is the daemon's answer for a stranded API shape,
+// asserted the way the settings / preset / template / request stranded-path
+// tests assert it: the mux resolves the request to "/api/v1/", and the chain —
+// AuthenticatedOnly — refuses an unsigned request with 401 before the 404 body
+// is written. ⛔ The thing that must never happen is HTML from the SPA catch-all
+// reaching a JSON client.
+func assertStrandedOnAPIFallback(t *testing.T, r *Router, rec *httptest.ResponseRecorder, method, target, what string) {
+	t.Helper()
+	if _, pattern := r.mux.Handler(httptest.NewRequest(method, target, nil)); pattern != "/api/v1/" {
+		t.Fatalf("%s dispatches to %q, want the /api/v1/ fallback — a rule pattern is still claiming "+
+			"more than one endpoint's worth of paths", what, pattern)
+	}
+	if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("%s answered HTML (%d, content-type %q) — a JSON client would break on it",
+			what, rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("%s answered %d %q, want 401: the request carries no signed credential and the fallback "+
+			"is AuthenticatedOnly, so the chain refuses before the 404 body", what, rec.Code, rec.Body.String())
 	}
 }
 

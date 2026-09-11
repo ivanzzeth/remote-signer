@@ -1,9 +1,9 @@
 # internal/api/handler/** 里自己路由自己的函数(包.接收者.函数名,⛔ 不含行号)。
 #
 # 一条 mux pattern 注册进去,handler 在函数体里用 TrimPrefix/HasSuffix/SplitN
-# 把 r.URL.Path 再切成好几个逻辑端点。最极端的是
-# internal/api/handler/evm/rule.go:171-289 —— **一条 pattern 背后 12 个端点**;
-# wallet.go 8 个,settings.go 18 个。
+# 把 r.URL.Path 再切成好几个逻辑端点。初始基线里最极端的三个是
+# settings.go 18 个端点、rule.go 12 个、wallet.go 8 个 —— ⭐ 三个都已经拆掉了
+# (提案 S5 / S8 / S3),这份清单现在剩下的每一行都比它们小。
 #
 # ⛔ 这就是 OpenAPI 注解写不下去的原因:一个还在切 URL.Path 的函数,
 # 它的 @Router / @Summary 只能是猜的 —— 没有唯一的 path,也没有唯一的 method。
@@ -159,11 +159,34 @@
 # 这不是越权(approve_request 照样要有),是 id/路径混淆。`{id}` 只吃一段,
 # 所以那些形状现在匹配不到任何 pattern。
 
+# ⭐ 2026-09-11,提案 S8(rule.go 拆解,分三刀):**8 → 7 条**,文件数 8 → 7。
+# 删掉的是 `internal/api/handler/evm.RuleHandler.ServeHTTP` —— 一条,
+# 背后是 **12 个端点**,是这张表里单条含端点数第二多的一行(仅次于 settings 的 18)。
+# 注册侧是 **3 条 pattern(其中两条不带 method)→ 12 条具名路由**。
+#
+# ⛔ 这一步关掉的洞与前几步都不同,值得写清楚:**既没有动词洞,也没有吞路径**。
+# 实测(拿三条真注册 + 每次请求后读回仓库的行,而不是看状态码):
+# `GET /rules/{id}/approve` 回 400 且一次调用都没发生,
+# `POST /rules/a/{id}/approve` 同样 400 —— 那正是 S7 在 requests 上批准错行的形状。
+# ⭐ 原因是 rule.go 每个子动作分支都多一道守卫:`ruleID != "" &&
+# !strings.Contains(ruleID, "/")`。别的 handler 没有这道守卫,所以别的 handler 有洞。
+#
+# ⛔ 真正的洞在**尾斜杠**,而且在两个会改状态的端点上:ServeHTTP 先
+# TrimPrefix 掉 "/api/v1/evm/rules" 再 TrimPrefix 掉开头的 "/",于是空余量 = **集合**,
+# `POST /api/v1/evm/rules/` 实测 **201 并真的写了一行规则**;item 形式同理修剪成干净的
+# id,`DELETE /api/v1/evm/rules/{id}/` 实测 **204 并真的删掉了那一行**。
+# Go 的 mux 不剥尾斜杠,所以这两个形状现在匹配不到任何 pattern。
+#
+# ⚠️ 这一步有几道守卫必须**逐条搬**,它们住在 ServeHTTP 里而不在端点函数里:
+# 顶部那道「没有 API key 回 401」(十二个端点共用,其中五个自己不查)、
+# validate 的 admin **角色**检查(⛔ 留在 handler,不许变成路由权限)、
+# item 的 isRulePathID(400 而不是 404)、PATCH 的合成 sim: id 拒绝(403)、
+# 两条 budget 分支的 `len(id) <= 128`(⛔ {id} 只限一段,不限长度)。
+
 internal/api/handler.ACLHandler.ServeHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
 internal/api/handler/evm.BudgetItemHandler.ServeHTTP
 internal/api/handler/evm.RPCProxyHandler.ServeHTTP
-internal/api/handler/evm.RuleHandler.ServeHTTP
 internal/api/handler/evm.SignHandler.ServeHTTP
 internal/api/handler/evm.SignerHandler.HandleWalletSigners
 internal/api/handler/evm.TransactionsHandler.ServeHTTP
