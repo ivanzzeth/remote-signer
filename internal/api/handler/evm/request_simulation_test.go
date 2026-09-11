@@ -63,6 +63,10 @@ func doSimRequest(t *testing.T, h http.Handler, requestID string, apiKey *types.
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/evm/requests/"+requestID+"/simulation", nil)
+	// ⚠️ What the mux does for GET /api/v1/evm/requests/{id}/simulation: the
+	// handler reads r.PathValue("id") now rather than splitting r.URL.Path
+	// (proposal S7, internal/api/module_requests.go).
+	req.SetPathValue("id", requestID)
 	if apiKey != nil {
 		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	}
@@ -150,14 +154,8 @@ func TestRequestSimulationHandler_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestRequestSimulationHandler_NonGET(t *testing.T) {
-	db := newSimHandlerDB(t)
-	h := newSimHandler(t, db)
-	req := httptest.NewRequest(http.MethodDelete,
-		"/api/v1/evm/requests/req-alice/simulation", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: "admin", Role: types.RoleAdmin}))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestRequestSimulationHandler_NonGET was removed: the route is
+// GET /api/v1/evm/requests/{id}/simulation now, so no pattern routes another verb
+// here and the guard it asserted is gone.
+// TestRequestRoutes_UnclaimedShapesReachNoEndpoint covers the same verbs against
+// the production patterns and asserts the repositories were never read.

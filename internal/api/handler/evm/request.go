@@ -113,7 +113,19 @@ type RuleGenerationHints struct {
 	MaxValue *string `json:"max_value,omitempty"`
 }
 
-// ServeHTTP handles GET /api/v1/evm/requests/{id}
+// ServeHTTP serves GET /api/v1/evm/requests/{id} — one endpoint, one route
+// (internal/api/module_requests.go).
+//
+// ⚠️ It used to be reached through the method-less "/api/v1/evm/requests/"
+// prefix and a closure in setupRoutes, so it had to find its own id and refuse
+// its own verbs: strings.Split(r.URL.Path, "/") then the *last* segment, which
+// accepted any depth — measured before the change, GET /api/v1/evm/requests/a/b/c
+// answered with request "c", and GET /api/v1/evm/requests/{id}/ answered with
+// request "" (404 against a real repository). {id} is exactly one segment, so
+// neither shape is representable now.
+//
+// ⚠️ The caller-scoping check inside getRequest is unchanged and is the reason
+// this route carries no permission — see module_requests.go.
 func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
@@ -121,22 +133,7 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
-
-	// Extract request ID from path
-	// Expected: /api/v1/evm/requests/{id}
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 5 {
-		respond.Error(w, "invalid path", http.StatusBadRequest, h.logger)
-		return
-	}
-	requestID := parts[len(parts)-1]
-
-	if r.Method == http.MethodGet {
-		h.getRequest(w, r, apiKey, requestID)
-		return
-	}
-
-	respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
+	h.getRequest(w, r, apiKey, r.PathValue("id"))
 }
 
 func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey, requestID string) {
@@ -217,13 +214,15 @@ func NewListHandler(signService service.SignServiceAPI, ruleRepo storage.RuleRep
 	}, nil
 }
 
-// ServeHTTP handles GET /api/v1/evm/requests
+// ServeHTTP serves GET /api/v1/evm/requests.
+//
+// ⚠️ The method guard that used to stand here is gone: the route is
+// method-scoped (internal/api/module_requests.go), so no pattern sends this
+// function anything but GET — and HEAD, which Go's mux matches against a GET
+// pattern and net/http answers with the headers alone. The collection used to be
+// registered without a method, which is why the guard existed and why HEAD used
+// to get 405 here.
 func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
-
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {

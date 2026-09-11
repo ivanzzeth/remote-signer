@@ -58,10 +58,25 @@ public /metrics
 # 那对 API 是对的,对它要发的 HTML/JS 是白屏。
 public-unwrapped /
 
-# 一条前缀四个子路径,权限在闭包里逐条装(approve → PermApproveRequest,
-# preview-rule → PermPreviewRule);剩下两支按调用者自己的行过滤,
-# 对陌生 id 回 404 而不是 403,免得 id 空间被枚举。
-authenticated-only /api/v1/evm/requests/
+# ⭐ 2026-09-11 · 提案 S7:这里原本是**一行** `/api/v1/evm/requests/` —— 一条不带
+# method、不带子路径的前缀,背后四个端点。它的理由字符串写着「approve 与
+# preview-rule 的权限在闭包里逐条装,剩下两支按调用者自己的行过滤」;拆解之后
+# 那两个带权限的端点进了 route-perm-bindings.txt(各自具名),留在这里的是真正
+# 没有权限的两个,理由**按端点拆开逐字重写**(internal/api/module_requests.go 的
+# requestDetailRowScope / requestSimulationRowScope)。
+#
+# ⛔ 拆开理由时查出一件事,顺手记在这里:那条前缀的理由说两支都「对陌生 id 回 404
+# 而不是 403」—— simulation 是真的(request_simulation.go 重新取父 request 再比
+# api_key_id,不是自己的回 404),**detail 不是**,它回 403
+#(request.go 的 getRequest,TestB3RequestHandler_NonAdminOwnershipCheck 就在断言
+# 这个)。也就是说 request 的 id 空间一直可以靠状态码枚举。
+# ⛔ 本次**没有改**任何一边的答案:让两者一致是一个关于 id 枚举的安全决定,
+# 单独走一个 PR。两条理由现在各说自己的实情。
+#
+# ⚠️ 两条都是**资源域的判断**:哪些行看得见由 handler 拿 api_key_id 比,
+# 路由做不了这个判断 —— 这不是没人补权限,是权限表达不了。
+authenticated-only GET /api/v1/evm/requests/{id}
+authenticated-only GET /api/v1/evm/requests/{id}/simulation
 
 # ⛔ 已知缺口(四条),不是决定:PermReadHDWallets / PermCreateHDWallet 声明了、
 # 按角色授予了,却没有任何路由引用 —— 任何一把已鉴权的 key(包括本来不持有

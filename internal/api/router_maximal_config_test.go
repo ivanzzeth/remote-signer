@@ -413,6 +413,32 @@ func TestNewRouter_MaximalConfigFiresEveryConditionalBranch(t *testing.T) {
 				"Template registered less than templatesModule.Routes() says it serves", pattern)
 		}
 	}))
+
+	// ⛔ And the module S7 created. It has no row in the table above because five of
+	// its six routes are registered unconditionally; the sixth — the simulation
+	// endpoint — is the one gated by RequestSimulationRepo + RequestRepo, and the
+	// maximal config sets both, so all six must be here. ⚠️ That sixth route is the
+	// reason this block matters more than a single literal row would: a
+	// configuration missing those repos serves five, and the only way to see which
+	// number a given router registered is to ask the module what it serves and check
+	// each one.
+	requestsMod, err := NewRequestsModule(maximalRequestHandlers(t))
+	if err != nil {
+		t.Fatalf("building the requests module: %v", err)
+	}
+	requestPatterns := 0
+	requestsMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		requestPatterns++
+		if _, ok := registered[pattern]; !ok {
+			t.Errorf("request pattern %q is absent from the router, so setupRoutes registered less "+
+				"than requestsModule.Routes() says it serves", pattern)
+		}
+	}))
+	if requestPatterns != 6 {
+		t.Errorf("the requests module registered %d patterns under the maximal config, want 6 — "+
+			"with both RequestSimulationRepo and RequestRepo set, the simulation route must be among them",
+			requestPatterns)
+	}
 }
 
 // maximalPresetHandler and maximalTemplateHandler build the handlers the two S6
@@ -473,6 +499,53 @@ func maximalAPIKeyHandler(t *testing.T) *handler.APIKeyHandler {
 		t.Fatalf("building the api-key handler: %v", err)
 	}
 	return h
+}
+
+// maximalRequestHandlers builds the six handlers the S7 requests module wraps, in
+// the order NewRequestsModule takes them. ⚠️ Same caveat as the four helpers above:
+// only their route patterns are read, never their behaviour, so a zero-valued
+// SignService and the stub repositories are enough — a request that reached one of
+// these would nil-panic, and no test here sends one that gets past AuthMiddleware.
+func maximalRequestHandlers(t *testing.T) (
+	*evmhandler.ListHandler,
+	*evmhandler.RequestHandler,
+	*evmhandler.ApprovalHandler,
+	*evmhandler.BatchApprovalHandler,
+	*evmhandler.PreviewRuleHandler,
+	*evmhandler.RequestSimulationHandler,
+) {
+	t.Helper()
+	signSvc := &service.SignService{}
+	accessSvc, err := service.NewSignerAccessService(
+		&stubSignerOwnershipRepo{}, &stubSignerAccessRepo{}, &stubAPIKeyRepo{}, nil, testLogger())
+	if err != nil {
+		t.Fatalf("building the signer access service: %v", err)
+	}
+	list, err := evmhandler.NewListHandler(signSvc, &stubRuleRepo{}, testLogger())
+	if err != nil {
+		t.Fatalf("building the list handler: %v", err)
+	}
+	detail, err := evmhandler.NewRequestHandler(signSvc, &stubRuleRepo{}, testLogger())
+	if err != nil {
+		t.Fatalf("building the request handler: %v", err)
+	}
+	approval, err := evmhandler.NewApprovalHandler(signSvc, accessSvc, testLogger(), nil)
+	if err != nil {
+		t.Fatalf("building the approval handler: %v", err)
+	}
+	batch, err := evmhandler.NewBatchApprovalHandler(signSvc, accessSvc, testLogger())
+	if err != nil {
+		t.Fatalf("building the batch approval handler: %v", err)
+	}
+	preview, err := evmhandler.NewPreviewRuleHandler(signSvc, testLogger())
+	if err != nil {
+		t.Fatalf("building the preview rule handler: %v", err)
+	}
+	sim, err := evmhandler.NewRequestSimulationHandler(&stubRequestSimulationRepo{}, &stubRequestRepo{}, testLogger())
+	if err != nil {
+		t.Fatalf("building the request simulation handler: %v", err)
+	}
+	return list, detail, approval, batch, preview, sim
 }
 
 // maximalHDWalletHandler builds the handler the hd-wallets module wraps, with

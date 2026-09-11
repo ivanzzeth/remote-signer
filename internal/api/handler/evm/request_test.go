@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,9 +20,21 @@ import (
 
 // --- Helpers ---
 
+// doRequestHandlerReq drives one request endpoint directly.
+//
+// ⚠️ It sets the {id} path value the way the mux would, because the handlers read
+// r.PathValue("id") now instead of cutting r.URL.Path apart (proposal S7,
+// internal/api/module_requests.go). ⛔ This is not a second route table: the id is
+// taken from the path the caller passed, exactly one rule, and *which* path
+// reaches *which* handler is asserted against the production patterns in
+// request_routes_test.go. A test that wants to know what an unrouted shape does
+// belongs there, not here.
 func doRequestHandlerReq(t *testing.T, handler http.Handler, method, path string, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
+	if id := strings.TrimPrefix(path, "/api/v1/evm/requests/"); id != path && id != "" {
+		req.SetPathValue("id", id)
+	}
 	if apiKey != nil {
 		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	}
@@ -81,11 +94,11 @@ func TestRequestHandler_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestRequestHandler_MethodNotAllowed(t *testing.T) {
-	h, _ := NewRequestHandler(&mockSignService{}, newMockRuleRepo(), slog.Default())
-	rec := doRequestHandlerReq(t, h, http.MethodPost, "/api/v1/evm/requests/req-001", reqAdminKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestRequestHandler_MethodNotAllowed was removed: its route is method-scoped now
+// (GET /api/v1/evm/requests/{id}), so no pattern routes another verb here and the
+// guard it asserted is gone. TestRequestRoutes_UnclaimedShapesReachNoEndpoint
+// covers the same verbs against the production patterns, and asserts that the
+// sign service was never asked — which a status-only check would not.
 
 func TestRequestHandler_GetSuccess(t *testing.T) {
 	signReq := makeSignRequest("req-001", types.StatusCompleted)
@@ -161,11 +174,9 @@ func TestListHandler_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestListHandler_MethodNotAllowed(t *testing.T) {
-	h, _ := NewListHandler(&mockSignService{}, newMockRuleRepo(), slog.Default())
-	rec := doRequestHandlerReq(t, h, http.MethodPost, "/api/v1/evm/requests", reqAdminKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestListHandler_MethodNotAllowed was removed for the same reason: the
+// collection is GET /api/v1/evm/requests now, where it used to be registered
+// without a method at all. See TestRequestRoutes_UnclaimedShapesReachNoEndpoint.
 
 func TestListHandler_Success(t *testing.T) {
 	svc := &mockSignService{

@@ -724,6 +724,148 @@ func TestAPIFallback_TemplateStrandedPaths(t *testing.T) {
 	}
 }
 
+// TestAPIFallback_RequestStrandedPaths is where the behaviour-change table on
+// requestsModule.Routes is *measured* rather than reasoned about.
+//
+// ⛔ The first four rows are the point of the whole step, and they are the only
+// rows in any of these five fallback tests where the *before* answer was a
+// successful mutation on the wrong row: "/api/v1/evm/requests/" matched every verb
+// at every depth, the closure picked the approval handler by
+// strings.HasSuffix(path, "/approve"), and the handler read the id as the segment
+// before the action — so POST /api/v1/evm/requests/a/b/approve answered 200 and
+// approved request "b". Measured on the real registrations with a spy on
+// ProcessApproval, not read off the source.
+//
+// ⚠️ The wrong-verb rows are *not* holes being closed. All four closure branches
+// checked their method before doing anything, so each of those answered 405 and
+// called nothing; they are status changes. Unlike presets, signers and hd-wallets,
+// there was no verb that reached a write here.
+//
+// ⚠️ The handler-package tests for this module run against a bare mux with no
+// fallback, so they see the mux's own 404 and 405. Here the real
+// registerAPIFallback stands next to the real module, which is the only place the
+// daemon's answer is visible: "/api/v1/" matches every path and every method, so
+// ⛔ the daemon never answers 405 for these — every stranded shape, wrong-verb ones
+// included, lands on the JSON 404 fallback. What must never happen is that it lands
+// on the SPA and comes back text/html to a JSON client.
+func TestAPIFallback_RequestStrandedPaths(t *testing.T) {
+	requestsMod, err := NewRequestsModule(maximalRequestHandlers(t))
+	if err != nil {
+		t.Fatalf("building the requests module: %v", err)
+	}
+
+	var patterns []string
+	requestsMod.Routes(patternCollector(func(pattern string, _ RouteAuth) {
+		patterns = append(patterns, pattern)
+	}))
+	if len(patterns) != 6 {
+		t.Fatalf("requestsModule registered %d patterns, want 6 — the rows below would pass for the wrong reason",
+			len(patterns))
+	}
+
+	r := newChainedTestRouter()
+	r.mountModules(requestsMod)
+	r.handle("/", PublicUnwrapped("test fixture"), okHandler("<!doctype html><html>spa</html>"))
+	r.registerAPIFallback()
+
+	// ⭐ A request id as the daemon mints them: internal/core/service/sign.go uses
+	// uuid.New().String(), so it is one slash-free segment and needs no encoding.
+	const id = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+	// Each real endpoint still resolves to its own pattern: the fallback shadows
+	// none of them, and the decomposition left none of them behind.
+	for _, pattern := range patterns {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("request pattern %q has no method — the rows below assume method+path patterns", pattern)
+		}
+		target := strings.ReplaceAll(path, "{id}", id)
+		if strings.Contains(target, "{") {
+			t.Fatalf("request pattern %q has a wildcard this test does not know how to fill: %q", pattern, target)
+		}
+		if _, got := r.mux.Handler(httptest.NewRequest(method, target, nil)); got != pattern {
+			t.Errorf("%s %s dispatches to %q, want its own route %q", method, target, got, pattern)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+	}{
+		// ⛔ The four rows this step exists for: the depth swallow. The first three
+		// reached a *mutation* with an id taken from the wrong segment.
+		{"two segments, which approved \"b\"", http.MethodPost, "/api/v1/evm/requests/a/b/approve"},
+		{"four segments, which approved \"d\"", http.MethodPost, "/api/v1/evm/requests/a/b/c/d/approve"},
+		{"no id at all, which approved \"requests\"", http.MethodPost, "/api/v1/evm/requests/approve"},
+		{"preview-rule two segments deep, which previewed for \"b\"", http.MethodPost, "/api/v1/evm/requests/a/b/preview-rule"},
+		// ---- the same swallow on the reads: the last segment won ----
+		{"a deep path, which answered with request \"c\"", http.MethodGet, "/api/v1/evm/requests/a/b/c"},
+		{"an unknown sub-action, which answered with request \"unknown\"", http.MethodGet, "/api/v1/evm/requests/" + id + "/unknown"},
+		{"simulation two segments deep", http.MethodGet, "/api/v1/evm/requests/a/b/simulation"},
+		// ---- trailing slash, which the prefix forgave into an empty id ----
+		{"the collection with a trailing slash, which read request \"\"", http.MethodGet, "/api/v1/evm/requests/"},
+		{"an item with a trailing slash, which read request \"\"", http.MethodGet, "/api/v1/evm/requests/" + id + "/"},
+		{"approve with a trailing slash, which answered 405", http.MethodPost, "/api/v1/evm/requests/" + id + "/approve/"},
+		{"preview-rule with a trailing slash, which answered 405", http.MethodPost, "/api/v1/evm/requests/" + id + "/preview-rule/"},
+		{"simulation with a trailing slash, which answered 404", http.MethodGet, "/api/v1/evm/requests/" + id + "/simulation/"},
+		{"batch-approve with a trailing slash", http.MethodPost, "/api/v1/evm/requests/batch-approve/"},
+		// ---- verbs no route declares; every one was the handler's own 405 ----
+		{"PUT on the collection, which answered 405", http.MethodPut, "/api/v1/evm/requests"},
+		{"POST on the collection, which answered 405", http.MethodPost, "/api/v1/evm/requests"},
+		{"POST on an item, which answered 405", http.MethodPost, "/api/v1/evm/requests/" + id},
+		{"GET on approve, which answered 405", http.MethodGet, "/api/v1/evm/requests/" + id + "/approve"},
+		{"DELETE on approve, which answered 405", http.MethodDelete, "/api/v1/evm/requests/" + id + "/approve"},
+		{"GET on preview-rule, which answered 405", http.MethodGet, "/api/v1/evm/requests/" + id + "/preview-rule"},
+		{"POST on simulation, which answered 405", http.MethodPost, "/api/v1/evm/requests/" + id + "/simulation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pattern := r.mux.Handler(httptest.NewRequest(tc.method, tc.target, nil))
+			if pattern != "/api/v1/" {
+				t.Fatalf("%s %s dispatches to %q, want the /api/v1/ fallback — "+
+					"a request pattern is still claiming more than one endpoint's worth of paths",
+					tc.method, tc.target, pattern)
+			}
+
+			rec := httptest.NewRecorder()
+			r.Handler().ServeHTTP(rec, httptest.NewRequest(tc.method, tc.target, nil))
+			if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+				t.Fatalf("%s %s answered HTML (%d, content-type %q) — a JSON client would break on it",
+					tc.method, tc.target, rec.Code, rec.Header().Get("Content-Type"))
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s answered %d, want 401: the request carries no credential and the fallback is "+
+					"AuthenticatedOnly, so the chain must refuse before the 404 body", tc.method, tc.target, rec.Code)
+			}
+		})
+	}
+
+	// ⚠️ GET on the batch-approve path is *not* in the table above, and measuring it
+	// is why: "batch-approve" is a legal single segment, so it dispatches to the item
+	// route with that id — which is what the closure's default branch made of it too.
+	// ⭐ It is also the one pattern overlap in this set, and the mux resolving it by
+	// specificity is a property worth pinning rather than a reading of the rules.
+	if _, got := r.mux.Handler(httptest.NewRequest(http.MethodGet, "/api/v1/evm/requests/batch-approve", nil)); got != "GET /api/v1/evm/requests/{id}" {
+		t.Errorf("GET /api/v1/evm/requests/batch-approve dispatches to %q, want the item route", got)
+	}
+	if _, got := r.mux.Handler(httptest.NewRequest(http.MethodPost, "/api/v1/evm/requests/batch-approve", nil)); got != "POST /api/v1/evm/requests/batch-approve" {
+		t.Errorf("POST /api/v1/evm/requests/batch-approve dispatches to %q, want the literal batch route", got)
+	}
+
+	// ⚠️ The two HEAD rows are the answers that got *more* permissive, pinned here
+	// rather than left to be discovered: Go's mux matches HEAD against a GET
+	// pattern, so both reads reach their route instead of the fallback.
+	for _, tc := range []struct{ target, want string }{
+		{"/api/v1/evm/requests", "GET /api/v1/evm/requests"},
+		{"/api/v1/evm/requests/" + id, "GET /api/v1/evm/requests/{id}"},
+	} {
+		if _, got := r.mux.Handler(httptest.NewRequest(http.MethodHead, tc.target, nil)); got != tc.want {
+			t.Errorf("HEAD %s dispatches to %q, want the GET route %q — the HEAD widening recorded in "+
+				"module_requests.go's table no longer holds", tc.target, got, tc.want)
+		}
+	}
+}
+
 // TestAPIFallback_HDWalletAndAPIKeyStrandedPaths is the S4 twin of
 // TestAPIFallback_WalletDeepPathAndWrongMethod, and it is where the
 // behaviour-change tables on hdWalletsModule.Routes and apiKeysModule.Routes are

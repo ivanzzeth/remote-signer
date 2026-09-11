@@ -138,14 +138,31 @@
 # 换句话说:这几个端点**在客户端改口之前不可命名**。三条出路写在
 # internal/api/module_templates.go 上,⛔ 那是一个决定,不是重构的执行细节。
 
+# ⭐ 2026-09-11,提案 S7(requests 闭包拆解):**12 → 8 条**,删掉四条:
+# `evm.RequestHandler.ServeHTTP`、`evm.ApprovalHandler.ServeHTTP`、
+# `evm.PreviewRuleHandler.ServeHTTP`、`evm.RequestSimulationHandler.ServeHTTP`。
+# 注册侧是 **3 条 pattern(其中两条不带 method)→ 6 条具名路由**。
+#
+# ⚠️ 这一步和 templates 那次一样,四条里有两条**不只是**在分发,它们还把
+# `r.URL.Path` 写进了 json 解码失败的 warn 日志(基线开头那段「三条只是记日志」
+# 说的就是其中两条)。判据不为记日志开口子,所以那两行同样得改 —— 改成
+# `"pattern", r.Pattern`,它说的是同一件事而且更准:请求匹配的是哪条路由。
+#
+# ⛔ 这一步关掉的洞与 signers(6d30ba1)、presets 的形状不同,值得写清楚:
+# 四个分支**都**检查了自己的 method(拿 ProcessApproval / PreviewRuleForRequest
+# 的 spy 实测过:每一个错动词都回 405 且一个服务调用都没发生),所以没有
+# 「GET 能改状态」那种事。真正的洞是**吞路径**:闭包按 `HasSuffix(path,"/approve")`
+# 挑分支,handler 把 id 读成 `parts[len-2]`,于是前面有几段都收、且一律忽略 ——
+# 实测 `POST /api/v1/evm/requests/a/b/approve` **回 200 并批准了 request "b"**,
+# `.../a/b/c/d/approve` 批准了 "d"。⛔ 一个会改状态的端点,路径上写的 id 和真正被
+# 改的那一行不是同一个 —— 审计日志记下的路径因此是误导的。
+# 这不是越权(approve_request 照样要有),是 id/路径混淆。`{id}` 只吃一段,
+# 所以那些形状现在匹配不到任何 pattern。
+
 internal/api/handler.ACLHandler.ServeHTTP
 internal/api/handler.AuditHandler.ServeRequestHTTP
-internal/api/handler/evm.ApprovalHandler.ServeHTTP
 internal/api/handler/evm.BudgetItemHandler.ServeHTTP
-internal/api/handler/evm.PreviewRuleHandler.ServeHTTP
 internal/api/handler/evm.RPCProxyHandler.ServeHTTP
-internal/api/handler/evm.RequestHandler.ServeHTTP
-internal/api/handler/evm.RequestSimulationHandler.ServeHTTP
 internal/api/handler/evm.RuleHandler.ServeHTTP
 internal/api/handler/evm.SignHandler.ServeHTTP
 internal/api/handler/evm.SignerHandler.HandleWalletSigners

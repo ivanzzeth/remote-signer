@@ -17,7 +17,7 @@ router_config_fields     29   # RouterConfig 的字段;它是服务定位器,不
                                # ⭐ 新功能加 Module,不要加字段。剩下 29 个字段里每一个都是
                                # 「router 得知道它才能决定某条路由存不存在」,这正是读
                                # setupRoutes 判定不了线上服务什么的原因。
-manual_method_checks      6   # 手写的 method 比较(判据是对生产文件的一次 grep)
+manual_method_checks      2   # 手写的 method 比较(判据是对生产文件的一次 grep)
                                # ✅ 2026-09-10:35 → 7。二十余条路由改成按方法注册
                                # (`GET /api/v1/audit`、`POST /api/v1/evm/sign`、
                                # `POST /api/v1/evm/signers/{address}/unlock` …),
@@ -30,10 +30,20 @@ manual_method_checks      6   # 手写的 method 比较(判据是对生产文件
                                # TemplateHandler.ServeHTTP 连同它 validate 分支里
                                # 那一处比较一起消失。
                                #
-                               # 剩下 6 处都在**按路径分发的闭包**里
-                               # (/api/v1/evm/requests/ 在一个 handler 内部再按
-                               # 子路径分派),要消掉它们得先把那个闭包拆成按子路径
-                               # 注册的路由 —— 那是提案 S7,见 router_config_fields。
+                               # ✅ 2026-09-11:6 → 2。提案 S7 把 setupRoutes 里那个
+                               # `/api/v1/evm/requests/` 闭包(不带 method、不带子路径的
+                               # 前缀 + 一串 HasSuffix)拆成六条具名路由,四处比较
+                               #(approval.go 两处、request.go 的 ListHandler、
+                               # request_simulation.go)随之全部消失。
+                               #
+                               # ⛔ 剩下的 2 处**都不是闭包**,也都不是 S8 能消掉的:
+                               #   · signer_wallet.go —— `HandleWalletSigners` 全仓
+                               #     **没有任何路由注册**(见提案 §0「已挂起」表)。
+                               #     它归零的前提是「把它接上路由」,不是拆解。
+                               #   · simulation_history.go —— `/api/v1/evm/simulations`
+                               #     是另一条不带 method 的注册,和 requests 无关;
+                               #     给它加上 `GET ` 前缀就没了,那是它自己的一步。
+                               # ⚠️ 也就是说 S8(rule.go)预期**不会**动这个数字。
                                #
                                # ⛔ 判据是 `grep 'r.Method != http.Method'`,**注释也算**。
                                # 在生产文件里把这串字面量写进散文(比如解释「这里以前有

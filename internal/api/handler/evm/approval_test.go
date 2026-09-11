@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,13 @@ import (
 
 // --- Helpers ---
 
+// doApprovalRequest drives the approval or preview-rule endpoint directly.
+//
+// ⚠️ It sets the {id} path value the way the mux would — the segment before the
+// action — because both handlers read r.PathValue("id") now instead of taking
+// parts[len-2] out of r.URL.Path (proposal S7, internal/api/module_requests.go).
+// ⛔ Not a second route table: which path reaches which handler is asserted
+// against the production patterns in request_routes_test.go.
 func doApprovalRequest(t *testing.T, h http.Handler, method, path string, body interface{}, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf *bytes.Buffer
@@ -34,6 +42,9 @@ func doApprovalRequest(t *testing.T, h http.Handler, method, path string, body i
 	}
 	req := httptest.NewRequest(method, path, buf)
 	req.Header.Set("Content-Type", "application/json")
+	if parts := strings.Split(path, "/"); len(parts) >= 2 {
+		req.SetPathValue("id", parts[len(parts)-2])
+	}
 	if apiKey != nil {
 		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
 	}
@@ -96,12 +107,12 @@ func TestNewApprovalHandler(t *testing.T) {
 
 // --- ApprovalHandler ServeHTTP ---
 
-func TestApprovalHandler_MethodNotAllowed(t *testing.T) {
-	accessSvc := newSignerTestAccessService(t)
-	h, _ := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), nil)
-	rec := doApprovalRequest(t, h, http.MethodGet, "/api/v1/evm/requests/req-001/approve", nil, approvalAdminKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestApprovalHandler_MethodNotAllowed was removed: the route is
+// POST /api/v1/evm/requests/{id}/approve now, so no pattern routes another verb
+// here and the guard it asserted is gone.
+// TestRequestRoutes_ApproveRequiresPostAndOneSegment covers the same verbs
+// against the production patterns and asserts that ProcessApproval was never
+// called — a handler that mutates and then writes 405 passes a status-only check.
 
 func TestApprovalHandler_Unauthorized(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
@@ -345,11 +356,8 @@ func TestNewPreviewRuleHandler(t *testing.T) {
 
 // --- PreviewRuleHandler ServeHTTP ---
 
-func TestPreviewRuleHandler_MethodNotAllowed(t *testing.T) {
-	h, _ := NewPreviewRuleHandler(&mockSignService{}, slog.Default())
-	rec := doApprovalRequest(t, h, http.MethodGet, "/api/v1/evm/requests/req-001/preview-rule", nil, approvalAdminKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestPreviewRuleHandler_MethodNotAllowed was removed for the same reason; see
+// TestRequestRoutes_UnclaimedShapesReachNoEndpoint.
 
 func TestPreviewRuleHandler_Unauthorized(t *testing.T) {
 	h, _ := NewPreviewRuleHandler(&mockSignService{}, slog.Default())

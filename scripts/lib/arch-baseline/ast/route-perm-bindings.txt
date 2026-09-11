@@ -141,8 +141,28 @@
 # 之后只收编码形式。⛔ 已发布的 npm remote-signer-client 0.0.5 仍发未编码形式,
 # 那是这个决定明知的代价,写在 internal/api/module_templates.go 上。
 
+# ⭐ 2026-09-11,提案 S7(requests 闭包拆解):**77 → 79 行**,三加一减。
+#
+# 减的一行是 `/api/v1/evm/requests list_own_requests` —— 不带 method 的集合路由,
+# 它变成了 `GET /api/v1/evm/requests`,**权限一个字节没动**。加的另外两行才是这一步
+# 的意义所在:
+#
+#   POST /api/v1/evm/requests/{id}/approve       approve_request
+#   POST /api/v1/evm/requests/{id}/preview-rule  preview_rule
+#
+# ⛔ 它们**不是新加的权限**。这两个权限一直存在,只是由 setupRoutes 里那个闭包
+# 用 `middleware.RequirePermission(...)` **手工套在 handler 外面**的 —— 注册处看到的
+# 只有一条 `/api/v1/evm/requests/`(不带 method、不带子路径、`AuthenticatedOnly`),
+# 所以这道门禁对这两条一个字都说不出来。拆解把手工套的那两层变成注册处的声明,
+# 于是「approve 挂的是 approve_request」这件事第一次被记录下来、并且改它会红。
+#
+# ⚠️ 另外两个端点(读一条 request、读它的 simulation)**本来就没有权限**,
+# 它们在 route-auth-exemptions.txt 里从一行变成两行 —— 见那个文件。
+#
+# ⚠️ route-mutating-perm **一行都没加**,那是算过的而不是碰巧:approve_request 与
+# preview_rule 都不在 cmd/archcheck/routeauth.go 的 readPermissions 表里。
+
 /api/v1/evm/guard/resume resume_guard
-/api/v1/evm/requests list_own_requests
 /api/v1/evm/rules list_rules
 /api/v1/evm/rules/ list_rules
 /api/v1/evm/simulations sign_request
@@ -169,6 +189,7 @@ GET /api/v1/audit read_audit
 GET /api/v1/audit/requests/ read_audit
 GET /api/v1/evm/budgets read_budgets
 GET /api/v1/evm/budgets/ read_budgets
+GET /api/v1/evm/requests list_own_requests
 GET /api/v1/evm/signers read_signers
 GET /api/v1/evm/signers/{address}/access read_signers
 GET /api/v1/evm/simulate/status sign_request
@@ -188,6 +209,8 @@ POST /api/v1/evm/broadcast sign_request
 POST /api/v1/evm/budgets manage_budgets
 POST /api/v1/evm/budgets/ manage_budgets
 POST /api/v1/evm/requests/batch-approve approve_request
+POST /api/v1/evm/requests/{id}/approve approve_request
+POST /api/v1/evm/requests/{id}/preview-rule preview_rule
 POST /api/v1/evm/rules/{id}/budgets/reset manage_budgets
 POST /api/v1/evm/sign sign_request
 POST /api/v1/evm/sign/batch sign_request

@@ -71,13 +71,18 @@ type PreviewRuleAPIRequest struct {
 	MaxValue string `json:"max_value,omitempty"` // Required for evm_value_limit
 }
 
-// ServeHTTP handles POST /api/v1/evm/requests/{id}/approve
+// ServeHTTP serves POST /api/v1/evm/requests/{id}/approve — one endpoint, one
+// route (internal/api/module_requests.go).
+//
+// ⛔ It used to sit behind the method-less "/api/v1/evm/requests/" prefix and a
+// closure that picked it by strings.HasSuffix(path, "/approve"), so it read
+// parts[len-2] as the id. That accepted *any* depth, and unlike the wrong-verb
+// shapes it was not refused: measured before the change,
+// POST /api/v1/evm/requests/a/b/approve approved request "b" and
+// POST /api/v1/evm/requests/a/b/c/d/approve approved request "d" — a mutation
+// whose path named a different resource than the row it changed. {id} is exactly
+// one segment, so that is unrepresentable now.
 func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
-
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
@@ -85,19 +90,12 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract request ID from path
-	// Expected: /api/v1/evm/requests/{id}/approve
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 6 {
-		respond.Error(w, "invalid path", http.StatusBadRequest, h.logger)
-		return
-	}
-	requestID := parts[len(parts)-2] // {id} is second to last
+	requestID := r.PathValue("id")
 
 	// Parse request body — log details internally, return generic error to client
 	var req ApprovalAPIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Warn("failed to decode approval request", "error", err, "path", r.URL.Path)
+		h.logger.Warn("failed to decode approval request", "error", err, "pattern", r.Pattern)
 		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}
@@ -239,13 +237,15 @@ func NewPreviewRuleHandler(signService service.SignServiceAPI, logger *slog.Logg
 	}, nil
 }
 
-// ServeHTTP handles POST /api/v1/evm/requests/{id}/preview-rule
+// ServeHTTP serves POST /api/v1/evm/requests/{id}/preview-rule — one endpoint,
+// one route (internal/api/module_requests.go).
+//
+// ⚠️ Same shape as ApprovalHandler above and the same depth swallow: the closure
+// picked it by strings.HasSuffix(path, "/preview-rule") and it read parts[len-2],
+// so POST /api/v1/evm/requests/a/b/preview-rule previewed a rule for request "b"
+// (measured). This one only reads, so it was a wrong-answer bug rather than a
+// wrong-mutation one; {id} is one segment and neither is possible now.
 func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
-
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
@@ -253,19 +253,12 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract request ID from path
-	// Expected: /api/v1/evm/requests/{id}/preview-rule
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 6 {
-		respond.Error(w, "invalid path", http.StatusBadRequest, h.logger)
-		return
-	}
-	requestID := parts[len(parts)-2] // {id} is second to last
+	requestID := r.PathValue("id")
 
 	// Parse request body — log details internally, return generic error to client
 	var req PreviewRuleAPIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Warn("failed to decode preview-rule request", "error", err, "path", r.URL.Path)
+		h.logger.Warn("failed to decode preview-rule request", "error", err, "pattern", r.Pattern)
 		respond.Error(w, "invalid request body", http.StatusBadRequest, h.logger)
 		return
 	}

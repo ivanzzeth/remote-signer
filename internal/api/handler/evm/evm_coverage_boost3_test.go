@@ -1100,16 +1100,10 @@ func TestB3ListHandler_NewListHandlerNilRuleRepo(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestB3ListHandler_MethodNotAllowed(t *testing.T) {
-	h, err := NewListHandler(&mockSignService{}, storage.NewMemoryRuleRepository(), slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/requests", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestB3ListHandler_MethodNotAllowed was removed: the collection is
+// GET /api/v1/evm/requests now (it used to be registered without a method at
+// all), so the mux answers before the handler runs — see
+// TestRequestRoutes_UnclaimedShapesReachNoEndpoint.
 
 func TestB3ListHandler_Unauthorized(t *testing.T) {
 	h, err := NewListHandler(&mockSignService{}, storage.NewMemoryRuleRepository(), slog.Default())
@@ -2175,18 +2169,8 @@ func TestB3HandleTransferOwnership_SelfTransfer(t *testing.T) {
 // request_simulation.go: ServeHTTP error paths
 // ---------------------------------------------------------------------------
 
-func TestB3RequestSimulation_MethodNotAllowed(t *testing.T) {
-	simRepo := &mockSimRepo{}
-	reqRepo := &mockRequestRepo{}
-	h, err := NewRequestSimulationHandler(simRepo, reqRepo, slog.Default())
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/requests/req-1/simulation", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestB3RequestSimulation_MethodNotAllowed was removed: its route is method-scoped
+// now and the mux answers 405 before the handler runs.
 
 func TestB3RequestSimulation_Unauthorized(t *testing.T) {
 	simRepo := &mockSimRepo{}
@@ -2201,18 +2185,10 @@ func TestB3RequestSimulation_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestB3RequestSimulation_InvalidPath(t *testing.T) {
-	simRepo := &mockSimRepo{}
-	reqRepo := &mockRequestRepo{}
-	h, err := NewRequestSimulationHandler(simRepo, reqRepo, slog.Default())
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/simulation", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
+// TestB3RequestSimulation_InvalidPath was removed: the shape check it asserted
+// ("the path must end in /simulation and carry an id before it") is the mux's job
+// now — a path that is not GET /api/v1/evm/requests/{id}/simulation reaches this
+// handler from no pattern at all.
 
 func TestB3RequestSimulation_ParentNotFound(t *testing.T) {
 	simRepo := &mockSimRepo{}
@@ -3266,17 +3242,10 @@ func TestB3NewTransactionsHandler_NilLogger(t *testing.T) {
 // request.go: ServeHTTP — invalid path
 // ---------------------------------------------------------------------------
 
-func TestB3RequestHandler_InvalidPath(t *testing.T) {
-	ruleRepo := storage.NewMemoryRuleRepository()
-	h, err := NewRequestHandler(&mockSignService{}, ruleRepo, slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodGet, "/invalid", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
+// TestB3RequestHandler_InvalidPath was removed for the same reason: "/invalid"
+// used to reach this handler and be rejected by its own len(parts) check, because
+// the handler was registered behind a method-less prefix. It reaches no pattern
+// now.
 
 // ---------------------------------------------------------------------------
 // rule_query.go: getRule — not found

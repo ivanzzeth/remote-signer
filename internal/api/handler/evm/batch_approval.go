@@ -66,8 +66,11 @@ type BatchApprovalAPIResponse struct {
 
 // ServeHTTP handles POST /api/v1/evm/requests/batch-approve
 func (h *BatchApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
-	// ServeMux answers 405 before this runs.
+	// ⛔ No method check: the route is method-scoped
+	// (internal/api/module_requests.go) and Go's ServeMux answers 405 before this
+	// runs. ⚠️ It moved into that module in S7 along with the five endpoints the
+	// "/api/v1/evm/requests/" prefix used to hide; the pattern and permission are
+	// unchanged.
 
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {

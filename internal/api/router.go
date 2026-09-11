@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -338,8 +337,6 @@ func (r *Router) setupRoutes() error {
 
 	// EVM routes (with auth)
 	r.handle("POST /api/v1/evm/sign", Permitted(middleware.PermSignRequest), signHandler)
-	r.handle("/api/v1/evm/requests", Permitted(middleware.PermListOwnRequests), listHandler)
-	r.handle("POST /api/v1/evm/requests/batch-approve", Permitted(middleware.PermApproveRequest), batchApprovalHandler)
 	var requestSimHandler *evmhandler.RequestSimulationHandler
 	if r.config.RequestSimulationRepo != nil && r.config.RequestRepo != nil {
 		var rsErr error
@@ -350,41 +347,28 @@ func (r *Router) setupRoutes() error {
 			return fmt.Errorf("failed to create request simulation handler: %w", rsErr)
 		}
 	}
-	r.handle("/api/v1/evm/requests/", AuthenticatedOnly(
-		"one prefix, four sub-paths with different permissions: the closure below installs "+
-			"PermApproveRequest for .../approve and PermPreviewRule for .../preview-rule itself. "+
-			"The two remaining branches carry none by design — .../simulation and the default "+
-			"\"read one request\" are scoped to the caller's own rows inside the handler, and answer 404 "+
-			"rather than 403 for a foreign id so the id space cannot be enumerated. "+
-			"⚠️ This is the KNOWN LIMIT in route_auth.go made concrete: a prefix can declare one permission, "+
-			"so this one declares none and the four real endpoints are invisible to the route table until "+
-			"the closure is decomposed into four patterns (proposal S7)."),
-		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			// Route to approval handler if path ends with /approve (admin only)
-			if strings.HasSuffix(req.URL.Path, "/approve") {
-				middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(approvalHandler).ServeHTTP(w, req)
-				return
-			}
-			// Route to preview-rule handler if path ends with /preview-rule
-			if strings.HasSuffix(req.URL.Path, "/preview-rule") {
-				middleware.RequirePermission(middleware.PermPreviewRule, r.logger, r.config.AlertService)(previewRuleHandler).ServeHTTP(w, req)
-				return
-			}
-			// Route to simulation handler if path ends with /simulation.
-			// Visibility is enforced inside the handler (non-admin only
-			// sees own); 404 on parent-not-found prevents id-pattern
-			// enumeration by foreign callers.
-			if strings.HasSuffix(req.URL.Path, "/simulation") {
-				if requestSimHandler == nil {
-					http.NotFound(w, req)
-					return
-				}
-				requestSimHandler.ServeHTTP(w, req)
-				return
-			}
-			// Otherwise, route to request handler (any authenticated user can view own requests)
-			requestHandler.ServeHTTP(w, req)
-		}))
+
+	// Sign-request routes
+	//
+	// ⭐ The two registrations and the inline closure that used to be here —
+	// "/api/v1/evm/requests" without a method, "/api/v1/evm/requests/" without a
+	// method or a sub-path, and a strings.HasSuffix ladder dispatching to four
+	// handlers while installing two permissions by hand — are gone. All six
+	// endpoints are named routes in requestsModule now, and the two permissions
+	// the closure installed are declared at the registration where
+	// route-perm-binding can see them.
+	//
+	// ⛔ Measured before the change, not reasoned about: the ladder took the id
+	// from "the segment before the action", so POST /api/v1/evm/requests/a/b/approve
+	// approved request "b" — a mutation whose path named a different row. See
+	// requestsModule.Routes for the full before/after table.
+	requestsMod, reqModErr := NewRequestsModule(
+		listHandler, requestHandler, approvalHandler, batchApprovalHandler, previewRuleHandler, requestSimHandler,
+	)
+	if reqModErr != nil {
+		return fmt.Errorf("failed to create requests module: %w", reqModErr)
+	}
+	r.mountModules(requestsMod)
 
 	// Rule management routes (RBAC: PermListRules covers GET for admin/dev/agent)
 	r.handle("/api/v1/evm/rules", Permitted(middleware.PermListRules), ruleHandler)

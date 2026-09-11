@@ -15,7 +15,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/respond"
 
@@ -50,33 +49,24 @@ func NewRequestSimulationHandler(
 	return &RequestSimulationHandler{simRepo: simRepo, reqRepo: reqRepo, logger: logger}, nil
 }
 
-// ServeHTTP only honors GET. The path must end in "/simulation"; the
-// id is the path segment immediately before. Anything else is a 404
-// shape mismatch — the router only sends us URLs that match the
-// expected pattern, but defence-in-depth means we still validate.
+// ServeHTTP serves GET /api/v1/evm/requests/{id}/simulation — one endpoint, one
+// route (internal/api/module_requests.go).
+//
+// ⚠️ The method guard, the suffix check and the "invalid path" 400 that used to
+// stand here are gone, and they are gone rather than moved: this function was
+// reached through the method-less "/api/v1/evm/requests/" prefix and a closure
+// that picked it by strings.HasSuffix(path, "/simulation"), so nothing but the
+// handler itself could say which verb and which shape it served. The route says
+// both now, and a shape it does not describe reaches no handler at all — which is
+// why the checks are not merely redundant but unreachable.
 func (h *RequestSimulationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
 		return
 	}
 
-	// Path: /api/v1/evm/requests/{id}/simulation
-	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
-	// expected ["", "api", "v1", "evm", "requests", "{id}", "simulation"]
-	if len(parts) < 7 || parts[len(parts)-1] != "simulation" {
-		respond.Error(w, "invalid path: expected /api/v1/evm/requests/{id}/simulation", http.StatusBadRequest, h.logger)
-		return
-	}
-	requestID := parts[len(parts)-2]
-	if requestID == "" {
-		respond.Error(w, "request id is required", http.StatusBadRequest, h.logger)
-		return
-	}
+	requestID := r.PathValue("id")
 
 	// Visibility gate: re-fetch the parent sign_request so we can
 	// enforce the same "caller must own this id" rule the rest of

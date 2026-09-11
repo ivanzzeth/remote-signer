@@ -45,5 +45,17 @@
 # 「路径 + 端点函数」,coverage_boost 涨了 11 行,棘轮报红 —— 提示语写的
 # 「别往 coverage_boost 里塞」就是这次该做的事。
 
+# 2026-09-11 · 提案 S7(requests 闭包拆解):**15612 → 15581 行**,文件数不变。
+# 少掉的 31 行是 evm_coverage_boost3_test.go 里的四个用例:
+# `TestB3ListHandler_MethodNotAllowed`、`TestB3RequestSimulation_MethodNotAllowed`、
+# `TestB3RequestSimulation_InvalidPath`、`TestB3RequestHandler_InvalidPath`。
+# 四个都断言**同一类守卫**:一个方法无关的前缀把不该进来的动词/形状放进了 handler,
+# 于是 handler 自己回 405 或 400。拆解之后没有任何 pattern 把那些请求路由到任何地方,
+# 那几句话再也产生不出来。
+# ⛔ 不是删掉了事:它们在 internal/api/handler/evm/request_routes_test.go 的
+# TestRequestRoutes_UnclaimedShapesReachNoEndpoint 里各有一行,断言的是同一个请求
+# **到不了任何 handler**(经生产 pattern 判定),而且顺带断言 spy 上一次调用都没有 ——
+# 比原来的「状态码是 405」强:一个先改状态再回 405 的 handler 骗得过后者。
+
 files      13
-lines   15612
+lines   15581

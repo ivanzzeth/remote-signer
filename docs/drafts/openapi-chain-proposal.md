@@ -31,7 +31,7 @@
 | S6 presets 拆 4 条 + instances 闭包拆 1 条 | ✅ 已落地 | `2200459` |
 | （插入）所有客户端改发 `%2F`（**先于**下一行落，打在未改动的服务端上） | ✅ 已落地 | |
 | S6 余下：templates 的 id 子树 → templates 共 8 条具名路由 | ✅ 已落地 | |
-| S7 requests 闭包 | ⬜ 未开始 | |
+| S7 requests 闭包 | ✅ 已落地 | |
 | S8 rule.go 12 条（⛔ 切 3 个 PR） | ⬜ 未开始 | |
 | S9 起（swag / SDK 生成 / 门禁 C） | ⬜ 未开始 | |
 
@@ -73,6 +73,54 @@ pattern,落到 `/api/v1/` 的 JSON 404。已发布的 npm `remote-signer-client@
 地停在 7。⛔ 别在生产文件里写出那串字面量。
 
 ---
+
+### ✅ S7 已经走完(2026-09-11,实测)
+
+`/api/v1/evm/requests`(不带 method)+ `/api/v1/evm/requests/`(不带 method、
+不带子路径)+ 一个 inline 闭包 → **六条具名路由**
+(`internal/api/module_requests.go`),`POST .../batch-approve` 一并收进模块。
+
+基线移动(实测):`handler-path-dispatch` 12 → 8(RequestHandler / ApprovalHandler /
+PreviewRuleHandler / RequestSimulationHandler 四条 ServeHTTP),
+`route-perm-binding` 77 → 79,`route-auth-exempt` 15 → 16(一行前缀变两行端点),
+`route-mutating-perm` 14 → **14,一行都没加**,
+`manual_method_checks` **6 → 2** —— §2.5 / §6 预测的「6 → 2」兑现。
+
+⭐ **route-mutating-perm 没动是算过的,不是碰巧**:三条写路由挂的是
+`approve_request` 与 `preview_rule`,两个都不在 `cmd/archcheck/routeauth.go` 的
+`readPermissions` 表里。这是六步以来第一次「拆出具名路由而不新增可见债」。
+
+⛔ **顺手查出来的一件事**:这个闭包和 templates 一样,四个分支**都**检查了自己的
+method(拿 `ProcessApproval` / `PreviewRuleForRequest` 的 spy 实测:每个错动词都
+回 405 且一个服务调用都没发生),所以没有 signers/presets 那种「GET 能改状态」的洞。
+**真正的洞是吞路径,而且吞在一个会改状态的端点上**:闭包按
+`HasSuffix(path, "/approve")` 挑分支、handler 把 id 读成 `parts[len-2]`,于是
+实测 `POST /api/v1/evm/requests/a/b/approve` → **200,批准了 request "b"**;
+`.../a/b/c/d/approve` 批准了 "d"。路径上写的 id 与真正被改的那一行不是同一个,
+审计日志因此是误导的。⚠️ 不是越权(`approve_request` 照样要有),是 id/路径混淆。
+
+⛔ **另一件**:那条前缀的豁免理由写着两个无权限端点都「对陌生 id 回 404 而不是
+403」—— simulation 是真的,**detail 不是**,它回 403
+(`TestB3RequestHandler_NonAdminOwnershipCheck` 一直在断言这个)。把理由按端点拆开
+才看得见。⛔ **本次没有改任何一边的答案**,两条理由现在各说各的实情;让它们一致
+是一个关于 id 枚举的安全决定,单独走 PR。
+
+⚠️ **有一处中间件顺序的位移,写在这里免得被当成没发生**:闭包把
+`RequirePermission` 套在最里层(在 RateLimit 与 ContentType **之后**),而
+`withAuthAndPerm` 把它放在两者**之前**。所以「没有 approve_request + Content-Type
+不对」的请求以前回 415、现在回 403,被权限拒掉的请求也不再消耗限流额度。
+同一个权限、同一个判断,只是更早 —— 仓库里其它 Permitted 路由本来就是这个顺序。
+
+⚠️ 这一步**没有**收回任何一次能用的调用:request id 是 UUID
+(`internal/core/service/sign.go` 的 `uuid.New().String()`,全仓再无第二处造 id),
+不含 '/',所以 templates 那个编码陷阱在这里不存在;六条路由与五个客户端
+(`pkg/client`、`pkg/rs-client`、`pkg/js-client`、`extension/background.js`、
+`pkg/mcp-server`)实际发的 method+path 逐条对齐,一个都没坏。
+
+⚠️ `GET /api/v1/evm/requests/batch-approve` **不是**被拆丢的形状:"batch-approve"
+是一个合法的段,它匹配 `GET /api/v1/evm/requests/{id}`、当作 id 去查 —— 与闭包的
+default 分支做的事一模一样。它同时是这组 pattern 里唯一的重叠(字面量段是通配段的
+严格子集,§2.2 的安全形状),POST 走字面量、GET 走通配。
 
 ### ⛔（历史）S6 当时停在哪里(2026-09-11,实测)
 
@@ -512,7 +560,7 @@ lingxiao 的原话：**「松判据比没判据更糟：它让人以为有人在
 | **S4** | hd-wallets / signers-access / api-keys | 基线 −3 |
 | **S5** | `settings` 拆 18 条 | ⭐ 消灭 group 变体 |
 | **S6** | presets 4 条 + templates 8 条（含 instances 闭包） | ✅ `manual_method_checks` 7 → 6（§0 订正 10 兑现）；⛔ 前置是「客户端先改发 `%2F`」那个**单独提交** |
-| **S7** | requests 闭包 | 6 → 2 |
+| **S7** | requests 闭包 | ✅ `manual_method_checks` 6 → 2(已兑现);⭐ `route-mutating-perm` 没加行 |
 | **S8** | `rule.go` 拆 12 条 | ⛔ 建议切 3 个 PR |
 | **S9** | swag spike + 注解 + `make openapi` + 子命令 + 门禁 B | |
 | **S10** | oapi-codegen Go SDK + 签名差分测试 | |
@@ -606,3 +654,15 @@ lingxiao 的原话：**「松判据比没判据更糟：它让人以为有人在
 **没有任何路由注册**的那个函数，所以它归零的前提是「把它接上路由」，不是拆解。
 ⛔ 而且判据是对生产文件的 `grep 'r.Method != http.Method'`，**注释也算**：在生产
 文件里把这串字面量写进散文会让棘轮停在旧值上而一个字不报（2026-09-11 撞过一次）。
+
+⭐ **2026-09-11 再更新（S7 之后实测 2 处）**：`approval.go` 的两处、
+`request.go` 的 ListHandler、`request_simulation.go` 随 requests 闭包一起消失，
+6 → 2。**剩下的两处都不是闭包，S8 也碰不到它们**：
+
+| 位置 | 归零的前提 |
+|---|---|
+| `signer_wallet.go:43` | `HandleWalletSigners` **没有任何路由注册**（§0「已挂起」），前提是把它接上路由，不是拆解 |
+| `simulation_history.go:62` | `/api/v1/evm/simulations` 是另一条**不带 method** 的注册，与 requests 无关；给它加 `GET ` 前缀即可，那是它自己的一步 |
+
+⚠️ 也就是说 **S8（rule.go）预期不会动这个数字** —— `rule.go` 用的是
+`switch r.Method`，判据只数 `!=`。
