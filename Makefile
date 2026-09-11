@@ -11,7 +11,7 @@
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help check hooks build build-embed build-cli web web-deps test test-unit test-integration integration clean tidy desktop-dev desktop-dist
+.PHONY: help check hooks build build-embed build-cli web web-deps lint-deps lint-js test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -37,7 +37,9 @@ help:
 	@echo "  build         Build daemon with embedded React UI (default; same as build-embed)"
 	@echo "  build-embed   Same as build"
 	@echo "  build-cli     Go-only binary, no embedded UI (placeholder page; fast backend dev)"
-	@echo "  check         Fast feedback gates (fmt/vet/staticcheck/test-structure/arch) — parallel, seconds"
+	@echo "  lint-deps     Install node_modules + build the SDK dist that gate ⑬ needs"
+	@echo "  lint-js       Run gate ⑬ only (type-aware eslint over pkg/js-client + web)"
+	@echo "  check         Fast feedback gates (fmt/vet/staticcheck/ts-js-lint/test-structure/arch) — parallel, seconds"
 	@echo "  hooks         Install .githooks as this clone's hooks (git config core.hooksPath)"
 	@echo "  test          Default layers: unit http cli"
 	@echo "  test LAYER=x  One layer: unit|http|cli|integration|blackbox|e2e|web-unit|web-e2e"
@@ -80,6 +82,35 @@ web: js-client
 web-deps:
 	$(call npm_install,web)
 
+## lint-deps — 门禁 ⑬(TS/JS lint)需要的 node_modules。
+##
+## ⛔ `make check` **不会**自动调它:一条会顺手跑 `npm ci` 的门禁,在一台干净的
+## 机器上第一次就要几十秒,而 `make check` 的全部意义是秒级。缺依赖时
+## scripts/check-js-lint.sh 直接红并指向这个 target —— 与 staticcheck /
+## golangci-lint 缺失时的处理一致(不跳过,因为跳过得到的绿是假的)。
+##
+## ⚠️ 锁文件哈希做标记,锁没变就跳过 —— 重复调用几乎不花时间。
+##
+## ⛔ 依赖 `js-client`(装 + **构建 dist**),不是只 npm_install。实测过不这么做
+## 的后果:`web` 通过 `file:../pkg/js-client` 消费 SDK,没有 dist/index.d.ts 时
+## TypeScript 解析不到 `remote-signer-client` 的类型,于是
+##
+##   · `tsc --noEmit` 在 web 上冒出 20+ 条 TS2307「找不到模块」
+##   · **类型感知的 eslint 规则数字会变**:no-base-to-string 7→6、
+##     no-unnecessary-type-assertion 10→6、no-redundant-type-constituents 0→22、
+##     require-await 0→3
+##
+## 也就是说「有没有构建 SDK」决定了门禁 ⑬ 的基线数字。CI 上只跑 npm ci 而本地
+## 有 dist,就是「本地绿、CI 红」—— 而那种红人会当成噪声。
+## ⚠️ 门禁自己也会断言 dist/index.d.ts 在(check-js-lint.sh ①c),所以这一条
+## 就算被人改回去也不会变成静默的错数字。
+lint-deps: js-client
+	$(call npm_install,web)
+
+## lint-js — 只跑门禁 ⑬(等价于 `make check` 里的 js-lint 那一步)。
+lint-js:
+	@bash scripts/check-js-lint.sh
+
 build: build-embed
 
 build-embed: web
@@ -88,8 +119,12 @@ build-embed: web
 build-cli:
 	CGO_ENABLED=0 $(GO) build -ldflags="$(LDFLAGS)" -o remote-signer ./cmd/remote-signer
 
-## check — 反馈循环(秒级):格式 + vet + staticcheck + 测试结构 + 架构约束。
+## check — 反馈循环(秒级):格式 + vet + staticcheck + 丢掉的错误(⑫)
+##         + TS/JS lint(⑬)+ 测试结构 + 架构约束。
 ##         改一行想知道对不对跑这个,不要跑 test。并行执行,顺序打印。
+##
+## ⚠️ ⑬ 需要 node 与两个包的 node_modules + SDK 的 dist:先跑一次 `make lint-deps`
+## (锁没变时它几乎不花时间)。缺了的话 ⑬ **直接红并告诉你跑什么**,不会跳过。
 check:
 	@# ⛔ 先断言依赖再开跑 —— 缺工具时门禁的结论不可信,绿和红都不可信。
 	@# 新增门禁加在 scripts/run-checks.sh 的 STEPS 里,别加回这里(加回来就变串行)。

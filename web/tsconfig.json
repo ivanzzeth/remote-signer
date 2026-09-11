@@ -10,6 +10,12 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    // ⭐ 下面两条是 2026-09-11 加的,代价**实测为 0**(见下面那段注释里的数字)。
+    // noImplicitOverride:子类方法忘了 `override` 关键字 —— 父类改名后子类那个
+    //   方法会静默变成一个**新**方法,而不是覆盖。
+    // noImplicitReturns:一条分支忘了 return —— 返回 undefined 而类型说不会。
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "esModuleInterop": true,
@@ -18,6 +24,24 @@
     "resolveJsonModule": true,
     "useDefineForClassFields": true,
     "noEmit": true
+
+    // ---------- 还没开的两条,以及**为什么** ----------
+    //
+    // ⚠️ 不是忘了 —— 是量过了。`tsc --noEmit --<flag>` 在今天这棵树上:
+    //
+    //   noUncheckedIndexedAccess     8 处报错
+    //   exactOptionalPropertyTypes  23 处报错
+    //
+    // ⛔ 开一条就得同时改 8 / 23 处源码,而那样一次改动里既有配置又有几十行
+    // 业务代码 —— 没人 review 得动,于是它会被整体回滚。judgment 在人那边:
+    // 要开就单独开一条 issue,一条 flag 一个 PR。
+    //
+    // ⭐ 顺带量过 pkg/js-client 的同一组(它的 tsconfig 更松):
+    //   noImplicitOverride 0 · noImplicitReturns 0 · noUnusedParameters 0 ·
+    //   noFallthroughCasesInSwitch 0 · noUnusedLocals 4 ·
+    //   noUncheckedIndexedAccess 7 · exactOptionalPropertyTypes 8
+    // 前四条在那边也是免费的 —— 同样留给一个单独的决定(它是 npm 发布包,
+    // 改它的编译选项会影响 `tsup --dts` 产出的 .d.ts)。
   },
   "include": ["src", "vite.config.ts"]
 }

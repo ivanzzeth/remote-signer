@@ -1,0 +1,122 @@
+# ⑬ TypeScript/JavaScript lint —— **债务清单**,⛔ 只许往下走。
+#
+# 由 scripts/check-js-lint.sh 读取。数字来自各包 node_modules 里**钉死版本**的
+# eslint(见那个脚本的 ② / ③),配置是 <包>/eslint.config.mjs(类型感知)。
+#
+# ---------- 先读这一段:为什么会有这张表 ----------
+#
+# 2026-09-11 之前的状态:
+#   · pkg/js-client 有 .eslintrc.json、有 `"lint": "eslint src --ext .ts"`,
+#     而 **make check / scripts/lib/layers.sh / .github/workflows/\* 里一次都
+#     没出现过 eslint**。第一次真的跑它,当场 3 个 error —— 门禁红着,没人看得见。
+#   · web/(16,668 行 TSX,嵌进守护进程二进制的那个 UI)**一个 lint 配置都没有**。
+#     它的 src/ 里却躺着两行 `// eslint-disable-next-line react-hooks/exhaustive-deps`
+#     —— 有人以为这里有 eslint 在跑。没有。
+#
+# ⚠️ 这是本仓库第三次踩到同一个形状(.githooks 从没被装过、blackbox 层重放了
+# 10 个提交的缓存、这一条)。判据因此是:*有东西在跑它吗?* 而不是「配了吗」。
+#
+# ---------- 格式 ----------
+#
+#   <包>|<规则 id>            <条数>
+#   <包>|@files_min           <下限>
+#
+# ⭐ **没有条目的规则,基线就是 0** —— 也就是硬约束。所以下面这几条今天不在表里
+# 的规则是「一条都不许有」:
+#
+#   pkg/js-client|@typescript-eslint/no-floating-promises   今天 0 ← 硬
+#   pkg/js-client|@typescript-eslint/no-misused-promises    今天 0 ← 硬
+#   pkg/js-client|@typescript-eslint/only-throw-error       今天 0 ← 硬
+#   pkg/js-client|@typescript-eslint/ban-ts-comment         今天 0 ← 硬
+#   web|@typescript-eslint/only-throw-error                 今天 0 ← 硬
+#   web|@typescript-eslint/ban-ts-comment                   今天 0 ← 硬
+#
+# ⚠️ 实际数字**变小也红** —— 那一刻正是把这里的数字改小的时候,一行编辑。
+# 放过它,基线就永远停在 2026-09-11 的高位。
+#
+# ⛔ 别把新违规加进这张表了事:基线是历史债的清单,不是新债的收容所。
+#
+# ---------- ⛔ 重新量这些数字之前:先 `make lint-deps` ----------
+#
+# web 通过 `file:../pkg/js-client` 消费 SDK,**没有 pkg/js-client/dist 时它是在
+# 另一套类型宇宙里被 lint 的**。2026-09-11 实测同一棵 web/src 的差别:
+#
+#     tsc --noEmit                        0  →  20+ 条 TS2307
+#     no-redundant-type-constituents      0  →  22
+#     require-await                       0  →  3
+#     no-base-to-string                   7  →  6     ← ⚠️ 变**少**
+#     no-unnecessary-type-assertion      10  →  6     ← ⚠️ 变**少**
+#
+# ⚠️ 注意最后两条:忘了构建 SDK 会让某些规则**测不到东西**,而一条变小的棘轮
+# 看起来像「修好了」。check-js-lint.sh ①c 直接断言 dist/index.d.ts 在,
+# `make lint-deps` 依赖 `js-client` 目标(装 + 构建)。
+
+# ---------- @files_min:反「lint 了 0 个文件却绿」 ----------
+#
+# ⚠️ 这**不是**文件数的棘轮,是下限。`eslint <打错的路径>` 打印空、退出 0 ——
+# 一条什么都没检查却报告成功的门禁,正是本仓库反复踩的那种绿。
+# (同类陷阱:dependency-cruiser 可以分析 0 个模块并打印 "no violations found"。)
+# 今天:pkg/js-client 31 个文件,web 52 个。下限留了余量,删文件不会误红。
+pkg/js-client|@files_min            25
+web|@files_min                      40
+
+# ---------- pkg/js-client(发布到 npm 的 SDK,31 个文件 / 5,579 行) ----------
+
+pkg/js-client|@typescript-eslint/no-explicit-any               45  # 上一版是 "warn" ——
+                                                                   # 而门禁里 warn 等于没有。
+                                                                   # 多数集中在 transport.ts 的
+                                                                   # JSON 边界与 templates/presets
+                                                                   # 的动态字段上。
+pkg/js-client|@typescript-eslint/require-await                  5
+pkg/js-client|@typescript-eslint/no-unnecessary-type-assertion  4
+pkg/js-client|@typescript-eslint/no-unused-vars                 3  # 🔴 这 3 条就是「配了却没人
+                                                                   # 跑」的证据:上一版配置里
+                                                                   # 它已经是 error,而这个包
+                                                                   # 一直红着没人知道。
+pkg/js-client|@typescript-eslint/no-redundant-type-constituents 2
+pkg/js-client|@typescript-eslint/no-require-imports             2  # transport.ts 里 node 专用的
+                                                                   # 懒加载 require(浏览器分支不走)。
+pkg/js-client|<unused-disable-directive>                        1  # transport.ts:121 压着一条
+                                                                   # `no-var-requires` —— 那个规则
+                                                                   # 在 typescript-eslint 8 里已经
+                                                                   # 没了,所以这行 disable 是死的。
+
+# ---------- web(嵌进二进制的 React SPA,52 个文件 / 16,668 行) ----------
+#
+# 🔴 这一段是本次审计最重的发现:**61 处 promise 相关的错误**
+# (54 misused + 7 floating)。这个 UI 负责发起签名请求 —— 一个没被 await 的
+# promise 在这里的表现是「点了按钮,界面显示成功,而请求没发出去」。
+# ⛔ 本次**不修**(那要改几十处源码,与配置改动混在一起没人 review 得动),
+# 但它们从今天起不许涨。
+
+web|@typescript-eslint/no-misused-promises                 54  # 🔴 绝大多数是
+                                                               # `onClick={async () => …}`:
+                                                               # React 的 handler 返回 void,
+                                                               # async 函数返回的 promise 被丢掉,
+                                                               # 里面 throw 出来的错误**不会**被
+                                                               # 任何 error boundary 接住。
+web|@typescript-eslint/no-unnecessary-type-assertion       10
+web|@typescript-eslint/no-explicit-any                      8
+web|@typescript-eslint/no-base-to-string                    7
+web|@typescript-eslint/no-floating-promises                 7  # 🔴 调用了、没 await、没 catch。
+web|preserve-caught-error                                   2  # eslint 10 新增的核心规则:
+                                                               # 重新抛出时丢掉了 cause。
+                                                               # src/lib/auth.ts:102,109。
+web|react-hooks/exhaustive-deps                             2  # ⚠️ 这两条**不是 hook 的问题**,
+                                                               # 是 "Definition for rule was not
+                                                               # found":src/lib/useApi.ts:63 与
+                                                               # src/pages/Signers.tsx:966 写了
+                                                               # `eslint-disable-next-line
+                                                               # react-hooks/exhaustive-deps`,
+                                                               # 而**没有任何 eslint 配置提供过
+                                                               # 那个规则**。
+                                                               # ⭐ 未决的决定(不是疏漏):要不要
+                                                               # 装 eslint-plugin-react-hooks。
+                                                               # 实测过代价 —— 装上 7.1.1 并只开
+                                                               # rules-of-hooks + exhaustive-deps:
+                                                               # rules-of-hooks 0 条,
+                                                               # exhaustive-deps 2 条。
+                                                               # 便宜,但它抓的是另一类缺陷,
+                                                               # 留给一次单独的评估。
+web|@typescript-eslint/await-thenable                       1
+web|@typescript-eslint/prefer-promise-reject-errors         1

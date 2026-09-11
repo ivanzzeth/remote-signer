@@ -25,6 +25,14 @@ need gofmt     "格式门禁(随 go 分发)"    "随 go 一起装"
 need staticcheck "静态分析(go vet 之外)"  "go install honnef.co/go/tools/cmd/staticcheck@latest"
 need python3   "yaml 目录门禁 + ⑫ 分类"   "apt install python3"
 
+# ---------- node / npm:门禁 ⑬(TS/JS lint)要它们 ----------
+#
+# ⚠️ 这不是新增门槛:`make build` 默认就走 vite,web-unit 层也要 node。
+# ⛔ 包内的 eslint 版本由 scripts/check-js-lint.sh 自己断言(它是 package-local
+# 的二进制,不在 PATH 上),这里只点名解释器本身。
+need node      "⑬ TS/JS lint(类型感知 eslint)" "https://nodejs.org/(建议 20+)"
+need npm       "⑬ 的依赖安装(make lint-deps)"  "随 node 一起装"
+
 # ---------- golangci-lint:装了还不够,**版本要对** ----------
 #
 # ⛔ 为什么这一条要比版本:golangci-lint 的**发现集随版本变**(默认排除表、

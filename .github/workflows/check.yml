@@ -51,5 +51,31 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
             | sh -s -- -b "$(go env GOPATH)/bin" "v${v}"
           golangci-lint --version
+      # ⛔ 门禁 ⑬(scripts/check-js-lint.sh)需要 node。它不是新增门槛 ——
+      # `make build` 默认就走 vite,web-unit 层也要 node。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            pkg/js-client/package-lock.json
+            web/package-lock.json
+      # ⛔ 同 staticcheck / golangci-lint:check-js-lint.sh 会断言两个包的
+      # node_modules 在、而且 eslint / typescript-eslint / typescript 装的版本
+      # **就是 package.json 里精确钉的那个**。缺了它**直接红**,不跳过 ——
+      # 跳过得到的绿是假的。
+      #
+      # ⛔ `make lint-deps` 依赖 `js-client` 目标,也就是它会**构建 SDK 的 dist**。
+      # 别把它换成裸 `npm ci`:web 通过 `file:../pkg/js-client` 消费 SDK,没有
+      # dist/index.d.ts 时 web 上的类型感知规则会**测出另一套数字**
+      # (实测 no-redundant-type-constituents 0→22,而 no-base-to-string 7→6),
+      # 于是同一棵树本地绿、CI 红。门禁 ①c 会直接点名这件事。
+      #
+      # ⚠️ 这一步是本 job 里最贵的新增(两次 npm ci + 一次 tsup;冷跑实测 23s,
+      # 有 npm cache 时更快)。
+      # 判据仍是「人会不会为了省这段时间绕过它」:绕不过去 —— 这是 CI,
+      # 而本地那 3 秒(5.9s → 9.0s)才是人会不会绕的那部分。
+      - name: Install JS lint deps (gate ⑬)
+        run: make lint-deps
       - name: make check
         run: make check

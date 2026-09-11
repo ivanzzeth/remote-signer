@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest:e2e": "cd .. && make build-embed",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "lint": "eslint src"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
@@ -21,6 +22,7 @@
     "remote-signer-client": "file:../pkg/js-client"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@playwright/test": "^1.60.0",
     "@types/node": "^22.7.5",
     "@types/react": "^18.3.10",
@@ -28,9 +30,12 @@
     "@vitejs/plugin-react": "^4.3.1",
     "@vitest/ui": "^2.1.9",
     "autoprefixer": "^10.4.20",
+    "eslint": "10.10.0",
+    "globals": "17.12.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
-    "typescript": "~5.6.2",
+    "typescript": "5.6.3",
+    "typescript-eslint": "8.70.0",
     "vite": "^5.4.8",
     "vitest": "^2.1.9"
   }
