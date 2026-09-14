@@ -26,7 +26,7 @@ OPT_IN_LAYERS="web-e2e"
 # 进 `all`:它不要浏览器、不起 daemon、不构建二进制,冷跑 ≈18s,而 `make build`
 # 默认就走 vite —— 所以「有 node」本来就是本仓库的既有前提,不是新增门槛。
 # 依赖缺失由层命令里的 `make web-deps` 兜住,不会红在 "vitest: not found"。
-NODE_LAYERS="web-unit"
+NODE_LAYERS="web-unit js-client-unit"
 
 want=${1:-}
 case "$want" in

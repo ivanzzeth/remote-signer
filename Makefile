@@ -11,7 +11,7 @@
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help check hooks openapi sdk build build-embed build-cli web web-deps lint-deps lint-js test test-unit test-integration integration clean tidy desktop-dev desktop-dist
+.PHONY: help check hooks openapi sdk build build-embed build-cli web web-deps js-client-deps lint-deps lint-js test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -44,8 +44,8 @@ help:
 	@echo "  check         Fast feedback gates (fmt/vet/staticcheck/ts-js-lint/test-structure/arch) — parallel, seconds"
 	@echo "  hooks         Install .githooks as this clone's hooks (git config core.hooksPath)"
 	@echo "  test          Default layers: unit http cli"
-	@echo "  test LAYER=x  One layer: unit|http|cli|integration|blackbox|e2e|web-unit|web-e2e"
-	@echo "  test LAYER=all         Every layer, slow ones + web-unit included (web-e2e needs LAYER=everything)"
+	@echo "  test LAYER=x  One layer: unit|http|cli|integration|blackbox|e2e|web-unit|js-client-unit|web-e2e"
+	@echo "  test LAYER=all         Every layer, slow ones + web-unit + js-client-unit included (web-e2e needs LAYER=everything)"
 	@echo "  test LAYER=unit RUN=TestFoo   Narrow by test name"
 	@echo "  test-unit     Alias for test LAYER=unit"
 	@echo "  test-integration  Alias for test LAYER=integration"
@@ -83,6 +83,19 @@ web: js-client
 ## 上 `make test LAYER=all` 会红在 "vitest: not found",即红在环境而不是代码。
 web-deps:
 	$(call npm_install,web)
+
+## js-client-deps — 只装依赖 + 生成 TS schema,不 tsup。`make test LAYER=js-client-unit` 用它。
+##
+## ⚠️ 与 web-deps 同一个理由:jest 直接跑 tests/*.test.ts → ../src,不碰 dist,
+## 走 `js-client`(= 装 + `npm run build`)会白白付一次 tsup。
+## ⛔ 但也不能只 npm_install:src/gen/schema.d.ts **是 .gitignore 掉的**
+## (.gitignore:110 —— TS 侧生成物不入库),而 src/generated-client.ts
+## `import type { paths } from "./gen/schema"`。一台干净的机器上少了这一步,
+## ts-jest 红在 "cannot find module './gen/schema'",即红在环境而不是代码。
+## 生成走 scripts/gen-sdk.sh(唯一生成入口,~1.2s),不要在这里另抄一条命令行。
+js-client-deps:
+	$(call npm_install,pkg/js-client)
+	@bash scripts/gen-sdk.sh ts
 
 ## lint-deps — 门禁 ⑬(TS/JS lint)需要的 node_modules。
 ##

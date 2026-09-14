@@ -59,7 +59,35 @@ LAYERS=(
     # 会;这一层只要 node + npm,而 `make build` 默认就走 vite,同一条前提。
     # 依赖由 `make web-deps` 保证(锁文件哈希做标记,没变就跳过)。
     "web-unit|@cmd|make web-deps && cd web && npm test"
+    # ⭐ js-client 的单元层(Jest,pkg/js-client/tests/*.test.ts,7 个文件 119 个用例)。
+    #
+    # 为什么必须登记:2026-09-14 发现这套 jest 有 **2 个失败**,而
+    # `make test LAYER=all` 与 CI 全绿 —— 因为**没有任何东西跑它**。
+    # package.json 里有 `test` / `test:unit` 脚本,CI 的 4 个 job 都只
+    # `npm ci && npm run build`(它们要的是 dist,不是测试)。这是同一个形状的
+    # 第四例:e2e/ 46 个文件没有 make 目标、web-e2e 只在 CI 跑、`npm test` 一直红、
+    # pkg/js-client 的 eslint 配了却没人调 —— ⛔ 不在这张表里的 tier,红没人看得见。
+    #
+    # ⚠️ 跑的是 `test:unit` 而不是 `test`:后者含 tests/e2e.test.ts,那个文件
+    # **spawn 一个真的 Go daemon**(setup-test-server.ts,端口 8549)并从 `../dist`
+    # 导入 —— 那是 e2e 层的前提(真二进制 + 构建产物),不是本层的。
+    # ⛔ 这不是「跳过一个测试让它变绿」:排除项来自 package.json 既有的
+    # test:unit 脚本,而 tests/e2e.test.ts 本身仍未被任何层覆盖 —— 见下方注记。
+    #
+    # ⚠️ 它**进 `all`**(run-tests.sh 的 NODE_LAYERS),判据与 web-unit 逐字相同:
+    # 「装不上的机器上会不会红在环境?」它只要 node + npm(+ python3,gen-sdk.sh
+    # 数 operation 用),不要浏览器、不起 daemon、不构建二进制,冷跑 ≈4s。
+    # 依赖与 src/gen/schema.d.ts 由 `make js-client-deps` 保证 —— ⛔ 那份 schema
+    # 是 .gitignore 掉的(见 .gitignore:110),不生成的话 ts-jest 直接红在
+    # "cannot find module './gen/schema'",即红在环境而不是代码。
+    "js-client-unit|@cmd|make js-client-deps && cd pkg/js-client && npm run test:unit"
 )
+
+# ⚠️ 已知缺口(登记在此,不假装不存在):pkg/js-client/tests/e2e.test.ts 目前
+# 不属于任何层。它要一个真 daemon + `npm run build` 的 dist,而 e2e 层里的
+# e2e/e2e_javascript_client_test.go 已经用 Go 驱动同一个 SDK 打同一个 daemon。
+# 要么给它一层(带 CI job),要么删掉它 —— ⛔ 不要让它以「仓库里有这个文件」
+# 的形式继续冒充覆盖率。门禁 ①(check-tests.sh)看不见它:那条只数 *_test.go。
 
 # ⛔ 哪些层可以并行,哪些不行。
 #

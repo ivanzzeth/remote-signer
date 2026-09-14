@@ -430,7 +430,30 @@ describe("EIP1193Provider - RPC Methods", () => {
     });
 
     expect(signedTx).toBe("0xsignedtx");
-    expect(signer1.signTransaction).toHaveBeenCalledWith(tx);
+    // ⛔ NOT `toHaveBeenCalledWith(tx)`. The signer is handed a `Transaction`
+    // (src/evm/types.ts), not the raw EIP-1193 object, and the conversion is
+    // the thing worth pinning here:
+    //   · hex quantity → decimal string for big numbers ("0x1" → "1")
+    //   · hex quantity → JS number for gas/nonce (Go uint64 on the wire):
+    //     "0x5208" → 21000. Asserting the raw "0x5208" would mean the daemon
+    //     receives a *string* where it expects a uint64.
+    //   · `from` is dropped — `Transaction` has no such field; the address
+    //     selects the signer (_resolveSigner) and the signer is already
+    //     bound to it. Re-adding it would be a silently ignored field.
+    //   · txType defaults to "legacy" when no maxFeePerGas is present.
+    // Second argument is the per-call chain override; this tx carries no
+    // chainId, so it must be undefined = "use the provider's global chain".
+    expect(signer1.signTransaction).toHaveBeenCalledWith(
+      {
+        to: "0xRecipient",
+        value: "1",
+        data: undefined,
+        nonce: undefined,
+        gas: 21000,
+        txType: "legacy",
+      },
+      undefined,
+    );
   });
 
   it("should throw ProviderRpcError for unsupported methods", async () => {
@@ -523,7 +546,20 @@ describe("EIP1193Provider - Events", () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     const error = handler.mock.calls[0][0];
-    expect(error.code).toBe(ProviderErrorCode.DISCONNECTED);
+    // ⛔ NOT ProviderErrorCode.DISCONNECTED (4900). EIP-1193 keeps these two
+    // apart on purpose:
+    //   · 4900 is a *rejection code for `request()`* — "the Promise rejection
+    //     error code MUST be 4900" when the Provider is disconnected. That
+    //     path is covered by eip1193.compliance.test.ts, "MUST throw error
+    //     code 4900 when calling signing methods while disconnected".
+    //   · the `disconnect` *event* carries a ProviderRpcError whose code
+    //     "MUST follow the status codes for CloseEvent" (1000-1015).
+    // 1000 = Normal Closure, which is what a user-initiated disconnect() is.
+    // The sibling assertion in eip1193.compliance.test.ts only pins the
+    // 1000-1015 range; this one pins the exact value, so a change from
+    // "user closed it" to e.g. 1006 (abnormal) cannot slip through.
+    expect(error.code).toBe(1000);
+    expect(error.message).toBe("User disconnected");
   });
 
   it("should emit both chainChanged and accountsChanged on switchChain", async () => {

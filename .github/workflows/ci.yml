@@ -153,6 +153,28 @@ jobs:
       - name: make test LAYER=web-unit
         run: make test LAYER=web-unit
 
+  # Jest over pkg/js-client/tests. Like web-unit: no Go toolchain, no daemon,
+  # no Playwright browser — ~4 s cold. The suite existed with a `test` script
+  # since the package was created and NOTHING ran it: the four jobs above that
+  # touch pkg/js-client all do `npm ci && npm run build` because they want
+  # dist/, not the tests. It was sitting on 2 real failures when this job was
+  # added (2026-09-14) — see scripts/lib/layers.sh, layer `js-client-unit`.
+  js-client-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: pkg/js-client/package-lock.json
+
+      # `make js-client-deps` = npm ci (lockfile-stamped) + scripts/gen-sdk.sh ts.
+      # The generated schema is gitignored, so it MUST be regenerated here or
+      # ts-jest fails to resolve ./gen/schema on a fresh checkout.
+      - name: make test LAYER=js-client-unit
+        run: make test LAYER=js-client-unit
+
   web-e2e:
     runs-on: ubuntu-latest
     steps:
