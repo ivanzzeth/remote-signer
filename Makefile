@@ -11,7 +11,7 @@
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help check hooks build build-embed build-cli web web-deps lint-deps lint-js test test-unit test-integration integration clean tidy desktop-dev desktop-dist
+.PHONY: help check hooks openapi build build-embed build-cli web web-deps lint-deps lint-js test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -38,6 +38,7 @@ help:
 	@echo "  build-embed   Same as build"
 	@echo "  build-cli     Go-only binary, no embedded UI (placeholder page; fast backend dev)"
 	@echo "  lint-deps     Install node_modules + build the SDK dist that gate ⑬ needs"
+	@echo "  openapi       Regenerate internal/apidocs/openapi.json from the handler annotations"
 	@echo "  lint-js       Run gate ⑬ only (type-aware eslint over pkg/js-client + web)"
 	@echo "  check         Fast feedback gates (fmt/vet/staticcheck/ts-js-lint/test-structure/arch) — parallel, seconds"
 	@echo "  hooks         Install .githooks as this clone's hooks (git config core.hooksPath)"
@@ -129,6 +130,22 @@ check:
 	@# ⛔ 先断言依赖再开跑 —— 缺工具时门禁的结论不可信,绿和红都不可信。
 	@# 新增门禁加在 scripts/run-checks.sh 的 STEPS 里,别加回这里(加回来就变串行)。
 	@bash scripts/run-checks.sh
+
+## openapi — 从 handler 注解重新生成 internal/apidocs/openapi.json。
+##
+## ⛔ **不从活 router 生成**(提案 §4.1):NewRouter 要 5 个依赖、要库,而
+## setupRoutes 有条件注册 —— 那样得到的是**某一次部署**而不是这份代码的 API
+## (e2e/test_server.go 就留了 14 个 RouterConfig 字段为 nil,rpc-proxy /
+## broadcast / batch-sign / ACL 一条都不注册)。注解是静态的,所以这份文档描述的
+## 是代码。
+##
+## ⚠️ 生成产物**进版本库**,与本仓库其它构建产物相反 —— 因为 `go build` 不跑
+## 代码生成,而 internal/apidocs 用 //go:embed 引它:不提交的话新 clone 编译不过。
+##
+## ⚠️ 版本钉在 .swag-version(门禁 ⑭ 和 scripts/check-prereqs.sh 都读它)。
+## 装法:go install github.com/swaggo/swag/v2/cmd/swag@v$(shell tr -d ' \t\r\n' < .swag-version)
+openapi:
+	@bash scripts/gen-openapi.sh
 
 ## hooks — 把 .githooks/ 装成这个 clone 的 hooks 目录。
 ##

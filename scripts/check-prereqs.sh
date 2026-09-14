@@ -61,6 +61,29 @@ if command -v golangci-lint >/dev/null 2>&1; then
     fi
 fi
 
+# ---------- swag(门禁 ⑭ / `make openapi`):版本钉在 .swag-version ----------
+#
+# ⛔ 这里点的名和上面几条不一样,理由写清楚免得被人「补齐」成 `need swag ...`:
+# 生成器**不从 PATH 取**,走 `go run github.com/swaggo/swag/v2/cmd/swag@v<pin>`。
+# 两个实测的理由:
+#
+#   · `swag --version` 打印 "swag version v2.0.0" —— rc 后缀被它自己吃掉,
+#     PATH 上的 rc5 和 rc6 用版本断言分不开,而两者生成的文档不一样。
+#   · v1 与 v2 的二进制同名。本机 PATH 上就有一个 v1.16.4(别的项目装的),
+#     而 v1 只出 Swagger 2.0 —— 拿它生成等于换掉文档格式。
+#
+# 所以这里能断言的只有**版本文件本身**:它读不到,`make openapi` 与 ⑭ 都跑不了。
+# ⚠️ 故意不在这里跑一次 `go run ...@pin --version` 去证明模块能拿到:那要 0.7s
+# (冷机上是一次下载),而 check-prereqs 是串行前置。拿不到时 ⑭ 自己会红,
+# 并且明确说「生成失败,本次结论作废」——⛔ 不会读成「没有违规」。
+SWAG_WANT=$(tr -d 'v \t\r\n' < .swag-version 2>/dev/null)
+if [ -z "$SWAG_WANT" ]; then
+    printf '  ✗ %-16s .swag-version 读不到 —— 门禁 ⑭ 与 `make openapi` 钉不住版本\n' "swag" >&2
+    printf '    改法:写回一个精确版本(今天是 2.0.0-rc6)。⛔ 别改成从 PATH 取 swag:\n' >&2
+    printf '          `swag --version` 不打印 rc 后缀,而 rc5/rc6 生成的文档不同。\n' >&2
+    fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo >&2
     echo "FAIL: 缺依赖 —— 先装上再跑门禁。" >&2

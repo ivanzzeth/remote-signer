@@ -6,6 +6,7 @@
 //	remote-signer validate [...]               validate rule files / config
 //	remote-signer rule | sign | keystore | ... operator/admin commands
 //	remote-signer version                      print version
+//	remote-signer openapi                      print the OpenAPI 3.1 document
 //
 // Server/TUI/validate keep their original flag-style CLI surface
 // (`-config foo.yaml`, `-api-key-id ...`); DisableFlagParsing forwards them
@@ -20,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ivanzzeth/remote-signer/internal/cli/admin"
+	"github.com/ivanzzeth/remote-signer/internal/cli/apidocs"
 	"github.com/ivanzzeth/remote-signer/internal/cli/server"
 	"github.com/ivanzzeth/remote-signer/internal/cli/tui"
 	"github.com/ivanzzeth/remote-signer/internal/cli/validate"
@@ -57,6 +59,7 @@ the service over its HTTP API.`,
 	root.AddCommand(newTUICmd())
 	root.AddCommand(newValidateCmd())
 	root.AddCommand(newVersionCmd())
+	root.AddCommand(newOpenAPICmd())
 
 	// Admin operator commands (rule/sign/keystore/preset/apikey/...).
 	// Note: admin.Register also installs persistent auth flags
@@ -115,6 +118,21 @@ func newValidateCmd() *cobra.Command {
 		SilenceErrors:      true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			return validate.Run(args)
+		},
+	}
+}
+
+// newOpenAPICmd prints the OpenAPI document that was generated from the handler
+// annotations at build time. ⛔ It does not start anything and does not build a
+// router — see internal/cli/apidocs for why the spec is static.
+func newOpenAPICmd() *cobra.Command {
+	return &cobra.Command{
+		Use:           "openapi",
+		Short:         "Print the OpenAPI 3.1 document for this binary's API",
+		Long:          "Write the OpenAPI 3.1 document to stdout: `remote-signer openapi > openapi.json`. No database, socket or config is needed — the document is generated from the handler annotations at build time (regenerate with `make openapi`).",
+		SilenceErrors: true,
+		RunE: func(_ *cobra.Command, args []string) error {
+			return apidocs.Run(os.Stdout, args)
 		},
 	}
 }

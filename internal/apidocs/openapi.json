@@ -1,0 +1,782 @@
+{
+    "components": {
+        "schemas": {
+            "handler.AddMemberRequest": {
+                "properties": {
+                    "signer_address": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "handler.CreateWalletRequest": {
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "handler.MemberResponse": {
+                "properties": {
+                    "added_at": {
+                        "type": "string"
+                    },
+                    "signer_address": {
+                        "type": "string"
+                    },
+                    "wallet_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "handler.MembersListResponse": {
+                "properties": {
+                    "members": {
+                        "items": {
+                            "$ref": "#/components/schemas/handler.MemberResponse"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "handler.UpdateWalletRequest": {
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "handler.WalletListResponse": {
+                "properties": {
+                    "has_more": {
+                        "type": "boolean"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "wallets": {
+                        "items": {
+                            "$ref": "#/components/schemas/handler.WalletResponse"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "handler.WalletResponse": {
+                "properties": {
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "owner_id": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "securitySchemes": {
+            "Ed25519Signature": {
+                "description": "⚠️ An approximation: four headers are required, not one. X-API-Key-ID names the key; X-Timestamp, X-Nonce and X-Signature carry an Ed25519 signature over the canonical request (internal/api/middleware/auth.go). A client that sends only X-API-Key-ID is rejected with 401.",
+                "in": "header",
+                "name": "X-API-Key-ID",
+                "type": "apiKey"
+            }
+        }
+    },
+    "info": {
+        "description": "Policy-driven signing daemon: the API a client uses to ask for a signature and an operator uses to decide what may be signed.\n\n⚠️ Authentication is an Ed25519 signature over the request, not a bearer token — see the Ed25519Signature scheme below for what the headers actually carry. OpenAPI has no vocabulary for \"signature over method + path + body + timestamp\", so a generated client CANNOT authenticate on the strength of this document alone; the signing step stays in the hand-written transport (pkg/client/transport).",
+        "title": "Remote Signer API",
+        "version": "1.0"
+    },
+    "externalDocs": {
+        "description": "",
+        "url": ""
+    },
+    "paths": {
+        "/api/v1/wallets": {
+            "get": {
+                "description": "Lists the caller's wallets. An admin key sees every wallet unless owner_id narrows it.",
+                "parameters": [
+                    {
+                        "description": "admin only: restrict to one owner",
+                        "in": "query",
+                        "name": "owner_id",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "rows to skip",
+                        "in": "query",
+                        "name": "offset",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "maximum rows",
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/handler.WalletListResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "List wallets",
+                "tags": [
+                    "wallets"
+                ]
+            },
+            "post": {
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/handler.CreateWalletRequest",
+                                "summary": "body",
+                                "description": "wallet to create"
+                            }
+                        }
+                    },
+                    "description": "wallet to create",
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/handler.WalletResponse"
+                                }
+                            }
+                        },
+                        "description": "Created"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "Create a wallet",
+                "tags": [
+                    "wallets"
+                ]
+            }
+        },
+        "/api/v1/wallets/{id}": {
+            "delete": {
+                "parameters": [
+                    {
+                        "description": "wallet id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "deleted; no body"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "Delete a wallet",
+                "tags": [
+                    "wallets"
+                ]
+            },
+            "get": {
+                "description": "A wallet owned by another key answers 404, not 403 — telling them apart would let any key enumerate wallet ids.",
+                "parameters": [
+                    {
+                        "description": "wallet id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/handler.WalletResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "Get one wallet",
+                "tags": [
+                    "wallets"
+                ]
+            },
+            "patch": {
+                "description": "Absent fields are left alone; both are pointers so \"absent\" and \"set to empty\" stay distinguishable.",
+                "parameters": [
+                    {
+                        "description": "wallet id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/handler.UpdateWalletRequest",
+                                "summary": "body",
+                                "description": "fields to change"
+                            }
+                        }
+                    },
+                    "description": "fields to change",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/handler.WalletResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "Update a wallet",
+                "tags": [
+                    "wallets"
+                ]
+            }
+        },
+        "/api/v1/wallets/{id}/members": {
+            "get": {
+                "parameters": [
+                    {
+                        "description": "wallet id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/handler.MembersListResponse"
+                                }
+                            }
+                        },
+                        "description": "OK"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "List wallet members",
+                "tags": [
+                    "wallets"
+                ]
+            },
+            "post": {
+                "parameters": [
+                    {
+                        "description": "wallet id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/handler.AddMemberRequest",
+                                "summary": "body",
+                                "description": "signer address to add"
+                            }
+                        }
+                    },
+                    "description": "signer address to add",
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/handler.MemberResponse"
+                                }
+                            }
+                        },
+                        "description": "Created"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Bad Request"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "caller neither owns the signer nor has access to it"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "Add a signer to a wallet",
+                "tags": [
+                    "wallets"
+                ]
+            }
+        },
+        "/api/v1/wallets/{id}/members/{signerAddress}": {
+            "delete": {
+                "parameters": [
+                    {
+                        "description": "wallet id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "signer address",
+                        "in": "path",
+                        "name": "signerAddress",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "removed; no body"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "Ed25519Signature": []
+                    }
+                ],
+                "summary": "Remove a signer from a wallet",
+                "tags": [
+                    "wallets"
+                ]
+            }
+        }
+    },
+    "openapi": "3.1.0"
+}

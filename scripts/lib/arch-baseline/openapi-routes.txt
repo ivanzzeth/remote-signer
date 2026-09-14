@@ -1,0 +1,156 @@
+# 门禁 ⑭b(scripts/check-openapi.sh):**哪些注册了的路由还不在 OpenAPI 文档里**。
+#
+# 行的形状:`<class> [METHOD ]<path> [理由]`,class 只有两种:
+#
+#   todo    还没写注解。⛔ 没有理由字段 —— 因为没有理由,只是还没做。
+#           每一行都是一个**生成不出 SDK 方法**的端点。棘轮只许往下走。
+#
+#   exempt  **描述不了**,不是「还没描述」。理由必填(门禁要求 ≥20 字符),
+#           ⛔ 没有理由的豁免等于关掉检查:一条谁都无法反驳的理由
+#           (「内部端点」)和没有理由是同一回事。
+#
+# ---------- 两个方向都会红 ----------
+#
+#   1. 新注册一条路由、没注解、也没登记 → 基线里没有这个 key → 红
+#   2. 某条路由**补上注解了**、这行还留着 → 红,把它删掉
+#   3. 某条路由被删了或改名了 → 这行对不上任何注册 → 红
+#
+# ⭐ 第 2 条是这张表存在的一半意义:留着一行已经修好的条目,下一次那条路由**丢掉**
+# 注解时这里不会响 —— 一条永远绿的豁免等于把检查关掉。
+#
+# ---------- ⚠️ exempt 分两类,理由里写清是哪一类 ----------
+#
+#   (a) **形状上就描述不了**,而且不打算改:SPA catch-all、Prometheus 文本、
+#       /api/v1/ 的 JSON 404 兜底、JSON-RPC 信封。它们不会随任何一步拆解消失。
+#   (b) **今天描述不了,因为 handler 还没拆**:尾斜杠子树 pattern 与不带方法的
+#       pattern。⛔ 这一类不是永久的 —— 理由里点名了它的前提条件(拆哪个 handler)。
+#       提案 §3.3:一个还在 HasSuffix 分发的函数,它的 @Router 注解只能是猜的。
+#
+# ---------- 清单 ----------
+
+# ===== exempt (a):形状上描述不了 =====
+
+# SPA 本体 + catch-all:任何没被别的 pattern 认领的路径都由它回 HTML。它不是一个
+# API 资源,spec 里放一条 `/` 只会让生成的 SDK 多出一个返回 text/html 的方法。
+# 提案 §3.4 明写「⛔ 不进 spec」。
+exempt / SPA catch-all:回 HTML 而不是 JSON,不是 API 资源;提案 §3.4 点名不进 spec。
+
+# /api/v1 的 JSON 404 兜底。它的全部语义是「这里**没有**端点」—— 一个描述
+# 「不存在的东西」的 operation 会让 SDK 长出一个专门去踩 404 的方法。
+exempt /api/v1/ 兜底路由:它的语义就是「这条路径不是端点」,不带方法、匹配整棵子树,描述它等于把 404 写成一个 API。
+
+# Prometheus 文本曝露格式,不是 JSON;而且不带方法。提案 §3.4。
+exempt /metrics Prometheus 文本曝露格式(非 JSON),且 pattern 不带方法;提案 §3.4 列为非 REST 端点。
+
+# JSON-RPC 信封:能干什么由 body 里的 method 名决定,**错误也回 HTTP 200**
+# (handler/evm/rpc_proxy.go 的 writeRPCError)。OpenAPI 描述的是「路径 × 方法 →
+# 状态码 → schema」,而这条端点的全部语义在 body 里。⚠️ 它同时还是尾斜杠子树
+# (chainID 在路径上,由 RPCProxyHandler.ServeHTTP 自己切),两个理由各自成立。
+exempt POST /api/v1/evm/rpc/ JSON-RPC 信封:操作名在 body 里、错误也回 200,状态码表达不了它;且尾斜杠子树,chainID 由 handler 自己从 URL.Path 切。提案 §3.4。
+
+# ===== exempt (b):handler 还没拆,今天写不出诚实的注解 =====
+#
+# ⛔ 这六条(budgets 四条 + audit 一条 + transactions 一条)与两条不带方法的
+# pattern,对应的正是 handler-path-dispatch 基线里还剩的那几个 ServeHTTP。
+# 提案 §3.3:「拆解未完成的 handler 不许加注解」—— 还在 HasSuffix 分发的函数,
+# 一个注解块只能覆盖它背后若干个端点中的一个,剩下的会**看起来不存在**。
+
+exempt GET /api/v1/evm/budgets/ 尾斜杠子树,背后是 BudgetItemHandler.ServeHTTP(仍在切 r.URL.Path,见 handler-path-dispatch 基线);拆成具名路由之前写不出诚实注解。
+exempt POST /api/v1/evm/budgets/ 同上:一条 pattern 背后多个端点,BudgetItemHandler.ServeHTTP 自己按路径分发。
+exempt PATCH /api/v1/evm/budgets/ 同上:一条 pattern 背后多个端点,BudgetItemHandler.ServeHTTP 自己按路径分发。
+exempt DELETE /api/v1/evm/budgets/ 同上:一条 pattern 背后多个端点,BudgetItemHandler.ServeHTTP 自己按路径分发。
+exempt GET /api/v1/audit/requests/ 尾斜杠子树:AuditHandler.ServeRequestHTTP 从 URL.Path 里取 request id,路径形状没有写进注册。
+exempt GET /api/v1/evm/transactions/ 尾斜杠子树:TransactionsHandler.ServeHTTP 自己按路径分发(handler-path-dispatch 基线里的一条)。
+exempt /api/v1/evm/simulations 不带方法的 pattern,背后不止一个端点;simulation_history.go 自己比 r.Method(manual_method_checks 基线里剩下的两条之一)。给它加方法前缀是它自己的一步,见提案 §9.5。
+exempt /api/v1/evm/guard/resume 不带方法的 pattern:route_auth.go 点名的两条「仍然服务多个端点的无方法前缀」之一,拆开之前一个 operation 描述不了它。
+
+# ===== todo:能描述,只是还没写 =====
+#
+# ⛔ 每一行都是一个 SDK 生成不出来的端点。⚠️ 84 行,就是提案 §5 门禁 B 预期的
+# 「初始基线,单调递减到 0」——⭐ 已经减掉的 8 行是 wallets 模块(提案 S3 的范本),
+# 它同时是「一个模块全部注解完」长什么样的范本。
+
+todo DELETE /api/v1/api-keys/{id}
+todo DELETE /api/v1/evm/rules/{id}
+todo DELETE /api/v1/evm/signers/{address}
+todo DELETE /api/v1/evm/signers/{address}/access/{keyID}
+todo DELETE /api/v1/templates/{id}
+todo GET /api/v1/acls/ip-whitelist
+todo GET /api/v1/admin/settings/audit_monitor
+todo GET /api/v1/admin/settings/evm.dynamic_blocklist
+todo GET /api/v1/admin/settings/evm.foundry
+todo GET /api/v1/admin/settings/evm.material_check
+todo GET /api/v1/admin/settings/evm.rpc_gateway
+todo GET /api/v1/admin/settings/evm.simulation
+todo GET /api/v1/admin/settings/notify
+todo GET /api/v1/admin/settings/security
+todo GET /api/v1/admin/settings/web
+todo GET /api/v1/api-keys
+todo GET /api/v1/api-keys/names
+todo GET /api/v1/api-keys/{id}
+todo GET /api/v1/audit
+todo GET /api/v1/bootstrap/status
+todo GET /api/v1/evm/budgets
+todo GET /api/v1/evm/hd-wallets
+todo GET /api/v1/evm/hd-wallets/{address}/derived
+todo GET /api/v1/evm/requests
+todo GET /api/v1/evm/requests/{id}
+todo GET /api/v1/evm/requests/{id}/simulation
+todo GET /api/v1/evm/rules
+todo GET /api/v1/evm/rules/{id}
+todo GET /api/v1/evm/rules/{id}/budgets
+todo GET /api/v1/evm/signers
+todo GET /api/v1/evm/signers/{address}/access
+todo GET /api/v1/evm/simulate/status
+todo GET /api/v1/evm/transactions
+todo GET /api/v1/presets
+todo GET /api/v1/presets/{id}
+todo GET /api/v1/templates
+todo GET /api/v1/templates/{id}
+todo GET /health
+todo PATCH /api/v1/evm/rules/{id}
+todo PATCH /api/v1/evm/signers/{address}
+todo PATCH /api/v1/templates/{id}
+todo POST /api/v1/api-keys
+todo POST /api/v1/bootstrap/admin
+todo POST /api/v1/evm/broadcast
+todo POST /api/v1/evm/budgets
+todo POST /api/v1/evm/hd-wallets
+todo POST /api/v1/evm/hd-wallets/{address}/derive
+todo POST /api/v1/evm/requests/batch-approve
+todo POST /api/v1/evm/requests/{id}/approve
+todo POST /api/v1/evm/requests/{id}/preview-rule
+todo POST /api/v1/evm/rules
+todo POST /api/v1/evm/rules/validate
+todo POST /api/v1/evm/rules/{id}/approve
+todo POST /api/v1/evm/rules/{id}/budgets/reset
+todo POST /api/v1/evm/rules/{id}/propose
+todo POST /api/v1/evm/rules/{id}/reject
+todo POST /api/v1/evm/rules/{id}/validate
+todo POST /api/v1/evm/sign
+todo POST /api/v1/evm/sign/batch
+todo POST /api/v1/evm/signers
+todo POST /api/v1/evm/signers/{address}/approve
+todo POST /api/v1/evm/signers/{address}/access
+todo POST /api/v1/evm/signers/{address}/lock
+todo POST /api/v1/evm/signers/{address}/transfer
+todo POST /api/v1/evm/signers/{address}/unlock
+todo POST /api/v1/evm/simulate
+todo POST /api/v1/evm/simulate/batch
+todo POST /api/v1/presets/{id}/apply
+todo POST /api/v1/presets/{id}/validate
+todo POST /api/v1/registry/refresh
+todo POST /api/v1/templates
+todo POST /api/v1/templates/instances/{ruleID}/revoke
+todo POST /api/v1/templates/{id}/instantiate
+todo POST /api/v1/templates/{id}/validate
+todo PUT /api/v1/admin/settings/audit_monitor
+todo PUT /api/v1/admin/settings/evm.dynamic_blocklist
+todo PUT /api/v1/admin/settings/evm.foundry
+todo PUT /api/v1/admin/settings/evm.material_check
+todo PUT /api/v1/admin/settings/evm.rpc_gateway
+todo PUT /api/v1/admin/settings/evm.simulation
+todo PUT /api/v1/admin/settings/notify
+todo PUT /api/v1/admin/settings/security
+todo PUT /api/v1/admin/settings/web
+todo PUT /api/v1/api-keys/{id}

@@ -75,6 +75,16 @@ jobs:
       # 有 npm cache 时更快)。
       # 判据仍是「人会不会为了省这段时间绕过它」:绕不过去 —— 这是 CI,
       # 而本地那 3 秒(5.9s → 9.0s)才是人会不会绕的那部分。
+      # ⛔ 门禁 ⑭(scripts/check-openapi.sh)用 `go run …/swag@v<pin>` 生成 OpenAPI
+      # 文档 —— ⚠️ 那个模块**不在 go.sum 里**(故意的:swag 是构建期工具,进
+      # require 段就成了 pkg/client 的传递依赖,提案 §3.2),所以 setup-go 的
+      # 按 go.sum 做 key 的缓存**不包含它**,每次 CI 都要下载一次。
+      #
+      # 这一步只是把那次下载从门禁里挪出来、让它在日志里有名字:和上面三条一样,
+      # 「这条门禁用到的外部东西」应该在 CI 文件里点得出名,而不是藏在门禁内部
+      # 突然失败。⛔ 删掉它不会让 ⑭ 变绿 —— 只会让它在下载失败时才说话。
+      - name: Warm the pinned swag (gate ⑭)
+        run: go run "github.com/swaggo/swag/v2/cmd/swag@v$(tr -d 'v \t\r\n' < .swag-version)" --version
       - name: Install JS lint deps (gate ⑬)
         run: make lint-deps
       - name: make check

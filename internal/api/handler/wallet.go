@@ -125,16 +125,53 @@ type MembersListResponse struct {
 // again by accident.
 
 // ListWallets serves GET /api/v1/wallets.
+//
+//	@Summary		List wallets
+//	@Description	Lists the caller's wallets. An admin key sees every wallet unless owner_id narrows it.
+//	@Tags			wallets
+//	@Produce		json
+//	@Param			owner_id	query		string	false	"admin only: restrict to one owner"
+//	@Param			offset		query		int		false	"rows to skip"
+//	@Param			limit		query		int		false	"maximum rows"
+//	@Success		200			{object}	WalletListResponse
+//	@Failure		401			{object}	map[string]string
+//	@Failure		500			{object}	map[string]string
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/wallets [get]
 func (h *WalletHandler) ListWallets(w http.ResponseWriter, r *http.Request) {
 	h.listWallets(w, r)
 }
 
 // CreateWallet serves POST /api/v1/wallets.
+//
+//	@Summary		Create a wallet
+//	@Tags			wallets
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		CreateWalletRequest	true	"wallet to create"
+//	@Success		201		{object}	WalletResponse
+//	@Failure		400		{object}	map[string]string
+//	@Failure		401		{object}	map[string]string
+//	@Failure		500		{object}	map[string]string
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/wallets [post]
 func (h *WalletHandler) CreateWallet(w http.ResponseWriter, r *http.Request) {
 	h.createWallet(w, r)
 }
 
 // GetWallet serves GET /api/v1/wallets/{id}.
+//
+//	@Summary		Get one wallet
+//	@Description	A wallet owned by another key answers 404, not 403 — telling them apart would let any key enumerate wallet ids.
+//	@Tags			wallets
+//	@Produce		json
+//	@Param			id	path		string	true	"wallet id"
+//	@Success		200	{object}	WalletResponse
+//	@Failure		401	{object}	map[string]string
+//	@Failure		404	{object}	map[string]string
+//	@Failure		500	{object}	map[string]string
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/wallets/{id} [get]
 func (h *WalletHandler) GetWallet(w http.ResponseWriter, r *http.Request) {
 	_, wallet, ok := h.resolveOwnedWallet(w, r)
 	if !ok {
@@ -144,6 +181,21 @@ func (h *WalletHandler) GetWallet(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateWallet serves PATCH /api/v1/wallets/{id}.
+//
+//	@Summary		Update a wallet
+//	@Description	Absent fields are left alone; both are pointers so "absent" and "set to empty" stay distinguishable.
+//	@Tags			wallets
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string				true	"wallet id"
+//	@Param			body	body		UpdateWalletRequest	true	"fields to change"
+//	@Success		200		{object}	WalletResponse
+//	@Failure		400		{object}	map[string]string
+//	@Failure		401		{object}	map[string]string
+//	@Failure		404		{object}	map[string]string
+//	@Failure		500		{object}	map[string]string
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/wallets/{id} [patch]
 func (h *WalletHandler) UpdateWallet(w http.ResponseWriter, r *http.Request) {
 	_, wallet, ok := h.resolveOwnedWallet(w, r)
 	if !ok {
@@ -153,6 +205,17 @@ func (h *WalletHandler) UpdateWallet(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteWallet serves DELETE /api/v1/wallets/{id}.
+//
+//	@Summary	Delete a wallet
+//	@Tags		wallets
+//	@Produce	json
+//	@Param		id	path	string	true	"wallet id"
+//	@Success	204	"deleted; no body"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router		/api/v1/wallets/{id} [delete]
 func (h *WalletHandler) DeleteWallet(w http.ResponseWriter, r *http.Request) {
 	walletID, _, ok := h.resolveOwnedWallet(w, r)
 	if !ok {
@@ -162,6 +225,17 @@ func (h *WalletHandler) DeleteWallet(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListMembers serves GET /api/v1/wallets/{id}/members.
+//
+//	@Summary	List wallet members
+//	@Tags		wallets
+//	@Produce	json
+//	@Param		id	path		string	true	"wallet id"
+//	@Success	200	{object}	MembersListResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router		/api/v1/wallets/{id}/members [get]
 func (h *WalletHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	walletID, _, ok := h.resolveOwnedWallet(w, r)
 	if !ok {
@@ -171,6 +245,21 @@ func (h *WalletHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 // AddMember serves POST /api/v1/wallets/{id}/members.
+//
+//	@Summary	Add a signer to a wallet
+//	@Tags		wallets
+//	@Accept		json
+//	@Produce	json
+//	@Param		id		path		string				true	"wallet id"
+//	@Param		body	body		AddMemberRequest	true	"signer address to add"
+//	@Success	201		{object}	MemberResponse
+//	@Failure	400		{object}	map[string]string
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string	"caller neither owns the signer nor has access to it"
+//	@Failure	404		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router		/api/v1/wallets/{id}/members [post]
 func (h *WalletHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	walletID, _, ok := h.resolveOwnedWallet(w, r)
 	if !ok {
@@ -180,6 +269,18 @@ func (h *WalletHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveMember serves DELETE /api/v1/wallets/{id}/members/{signerAddress}.
+//
+//	@Summary	Remove a signer from a wallet
+//	@Tags		wallets
+//	@Produce	json
+//	@Param		id				path	string	true	"wallet id"
+//	@Param		signerAddress	path	string	true	"signer address"
+//	@Success	204				"removed; no body"
+//	@Failure	401				{object}	map[string]string
+//	@Failure	404				{object}	map[string]string
+//	@Failure	500				{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router		/api/v1/wallets/{id}/members/{signerAddress} [delete]
 func (h *WalletHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	walletID, _, ok := h.resolveOwnedWallet(w, r)
 	if !ok {

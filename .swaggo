@@ -1,0 +1,20 @@
+// swag global type overrides (swag --overridesFile .swaggo).
+//
+// ⛔ Only types swag cannot resolve on its own belong here. Every line is a place
+// where the generated schema is *less* true than the Go type, so each one needs a
+// reason — an override nobody can argue with is how a spec starts lying.
+//
+// json.RawMessage: swag v2.0.0-rc6 cannot resolve it at all ("cannot find type
+// definition: json.RawMessage") and refuses to generate, so this is not a choice
+// between a good schema and a better one — it is the difference between a spec and
+// no spec. ⚠️ The rendered schema is `{"type":"object"}`, which is **wrong for the
+// fields that hold a scalar**: handler.TemplateVarResponse.Default is a
+// RawMessage precisely to preserve "string / number / bool / array" (see its
+// comment). A generated SDK will therefore type those as objects. ⛔ Do not fix
+// that by changing the Go type — the wire shape is the contract; fix it, if it is
+// worth fixing, by giving those fields a named type with a truthful schema.
+//
+// ⚠️ The short spelling is the one that works. `replace encoding/json.RawMessage
+// interface{}` (the fully-qualified form the swag docs show) is accepted and then
+// does nothing — measured on rc6: generation still fails on the same type.
+replace json.RawMessage interface{}

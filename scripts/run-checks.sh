@@ -45,6 +45,14 @@ STEPS=(
     # (layers.sh 是**测试**的事实来源;而且 check.yml 跑在每个分支每次 push 上,
     #  ci.yml 只跑 main/dev + PR —— 放这里 CI 覆盖面严格更宽)。
     "js-lint|./scripts/check-js-lint.sh"
+    # ⑭ OpenAPI 注解覆盖。⚠️ 单独跑 ≈2.9s(其中 swag 生成 ≈1s、两次
+    # `go run ./cmd/archcheck` ≈1.4s),排在 ⑬ 后面 —— 它是第二慢的一条,而
+    # 并行度有限时先启动的先占核。
+    #
+    # ⚠️ 实测代价(16 核 i5-12600H,热跑):加它之前 11.5/11.7s,加它之后
+    # 11.6/12.0s —— 落在噪声里,因为它比 ⑬ 短,整条 `make check` 的 wall clock
+    # 仍由 ⑬ 那 7s 决定。⛔ 这也意味着「它很便宜」只在 ⑬ 还在的时候成立。
+    "openapi|./scripts/check-openapi.sh"
     "staticcheck|staticcheck ./... 2>&1 | head -40"
     "lint|./scripts/check-lint.sh"
     "vet|go vet ./... && go vet -tags integration ./internal/... && go vet -tags e2e ./e2e/..."
