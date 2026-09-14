@@ -735,42 +735,32 @@ export class EIP1193Provider {
       }
 
       case "wallet_switchEthereumChain": {
-        console.log("[EIP1193] wallet_switchEthereumChain called:", params);
-
         // Switch chain
         const chainIdParam = (params as any[])?.[0]?.chainId;
         if (!chainIdParam) {
-          console.error("[EIP1193] wallet_switchEthereumChain: Missing chainId parameter");
           throw providerErrors.rpc(-32602, "Missing chainId parameter");
         }
 
         const newChainId = parseInt(chainIdParam, 16);
         if (isNaN(newChainId)) {
-          console.error("[EIP1193] wallet_switchEthereumChain: Invalid chainId format:", chainIdParam);
           throw providerErrors.rpc(-32602, "Invalid chainId format");
         }
-
-        console.log("[EIP1193] Switching from chain", this._chainId, "to chain", newChainId);
 
         // Update chainId and all signers
         this._chainId = newChainId;
         const newChainIdStr = newChainId.toString();
-        console.log("[EIP1193] Updating signers to chainId:", newChainIdStr);
         for (const signer of this._signers) {
           signer.setChainID(newChainIdStr);
         }
 
         // Emit chainChanged event
-        console.log("[EIP1193] Emitting chainChanged:", `0x${newChainId.toString(16)}`);
         this._emit("chainChanged", `0x${newChainId.toString(16)}`);
 
         // EIP-1193: MUST also emit accountsChanged when chain switches
         // Because the accounts available may change when switching chains
-        console.log("[EIP1193] Emitting accountsChanged:", this._getAccounts());
         this._emit("accountsChanged", this._getAccounts());
 
         void this._persistState();
-        console.log("[EIP1193] wallet_switchEthereumChain completed successfully");
         return null;
       }
 
@@ -886,6 +876,10 @@ export class EIP1193Provider {
         try {
           handler(...args);
         } catch (error) {
+          // ⛔ 这是全包唯一一处允许的 console —— 删掉它等于**静默吞掉**监听者
+          // 抛出的异常(一个 dApp 的 accountsChanged handler 出错,将不再有任何
+          // 痕迹)。它写的是 handler 自己的错误对象,不含任何签名/消息内容。
+          // eslint-disable-next-line no-console -- swallowing a listener's throw silently is worse; this logs only the handler's own error
           console.error(`Error in ${event} handler:`, error);
         }
       });

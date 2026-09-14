@@ -85,6 +85,23 @@ export default tseslint.config(
       // 的计数棘轮兜着,不许涨。
       "@typescript-eslint/no-explicit-any": "error",
 
+      // ⛔ 一个发布到 npm 的**签名** SDK,不许往宿主页面的控制台写东西。
+      //
+      // 2026-09-14 实测,这不是假设:`evm/remote_signer.ts` 的 personalSign 把
+      // **被签的消息**、签名地址、以及**签名本身**(整个 resp,含 resp.signature)
+      // 打进了 dApp 的控制台 —— 而它相邻的 signEIP191Message / signTypedData
+      // 一行日志都没有。也就是说那是调试脚手架留在了发布路径上,不是设计。
+      // 另有 8 行在 eip1193.ts 的 wallet_switchEthereumChain 里。
+      //
+      // ⚠️ 此前这条规则**从未被启用** —— `js.configs.recommended` 不含
+      // no-console,所以这一整类由什么都没有在看(本仓库第四次踩到这个形状)。
+      // 今天起是硬零:baseline 里没有条目的规则就是 0。
+      //
+      // ⚠️ 全禁而不是 `{ allow: ["error", "warn"] }`:放行 console.error 等于
+      // 留下一条把签名写进控制台的合法路径。唯一那处真正需要它的地方
+      // (eip1193.ts 的 _emit catch)带**写下来的理由**单点豁免。
+      "no-console": "error",
+
       // ---------- 下面是**降噪**,每条都写清为什么 ----------
       //
       // ⛔ 降噪不是放松判据:被降的每一条要么在类型感知下必然大面积误报,

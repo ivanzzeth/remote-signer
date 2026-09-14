@@ -59,6 +59,11 @@ export default tseslint.config(
       ],
       "@typescript-eslint/no-explicit-any": "error",
 
+      // 同 js-client(理由写在那边):这个 UI 发起签名请求,控制台不是它的日志槽。
+      // ⭐ web/src 今天 **0 处**,所以这条从启用的第一天起就是硬零 —— 它拦的是
+      // 「下一处」,而不是历史债。
+      "no-console": "error",
+
       // ---------- 降噪,理由同 js-client ----------
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
