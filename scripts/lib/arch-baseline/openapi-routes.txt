@@ -64,93 +64,14 @@ exempt GET /api/v1/evm/transactions/ 尾斜杠子树:TransactionsHandler.ServeHT
 exempt /api/v1/evm/simulations 不带方法的 pattern,背后不止一个端点;simulation_history.go 自己比 r.Method(manual_method_checks 基线里剩下的两条之一)。给它加方法前缀是它自己的一步,见提案 §9.5。
 exempt /api/v1/evm/guard/resume 不带方法的 pattern:route_auth.go 点名的两条「仍然服务多个端点的无方法前缀」之一,拆开之前一个 operation 描述不了它。
 
-# ===== todo:能描述,只是还没写 =====
+# ===== todo:能描述,只是还没写 —— **已清空** =====
 #
-# ⛔ 每一行都是一个 SDK 生成不出来的端点。⚠️ 84 行,就是提案 §5 门禁 B 预期的
-# 「初始基线,单调递减到 0」——⭐ 已经减掉的 8 行是 wallets 模块(提案 S3 的范本),
-# 它同时是「一个模块全部注解完」长什么样的范本。
+# ⛔ 每一行都是一个 SDK 生成不出来的端点。曾经 84 行(提案 §5 门禁 B 的初始基线),
+# 现在 **0 行**:92 条路由全部带注解,12 条豁免,合计 104 条。
+#
+# ⚠️ 这一节空着是有意义的,别把它连同标题一起删掉:它现在是**硬零**。再注册一条
+# 没有注解的路由,⑭b 会因为「基线里没有这个 key」直接红 —— 而如果有人为了赶工把它
+# 加回 todo,这行注释就是下一个读者判断「那是退步」的依据。
+#
+# ⭐ 补注解的范本仍然是 wallets(提案 S3);⛔ 但别再往这里加 todo 行。
 
-todo DELETE /api/v1/api-keys/{id}
-todo DELETE /api/v1/evm/rules/{id}
-todo DELETE /api/v1/evm/signers/{address}
-todo DELETE /api/v1/evm/signers/{address}/access/{keyID}
-todo DELETE /api/v1/templates/{id}
-todo GET /api/v1/acls/ip-whitelist
-todo GET /api/v1/admin/settings/audit_monitor
-todo GET /api/v1/admin/settings/evm.dynamic_blocklist
-todo GET /api/v1/admin/settings/evm.foundry
-todo GET /api/v1/admin/settings/evm.material_check
-todo GET /api/v1/admin/settings/evm.rpc_gateway
-todo GET /api/v1/admin/settings/evm.simulation
-todo GET /api/v1/admin/settings/notify
-todo GET /api/v1/admin/settings/security
-todo GET /api/v1/admin/settings/web
-todo GET /api/v1/api-keys
-todo GET /api/v1/api-keys/names
-todo GET /api/v1/api-keys/{id}
-todo GET /api/v1/audit
-todo GET /api/v1/bootstrap/status
-todo GET /api/v1/evm/budgets
-todo GET /api/v1/evm/hd-wallets
-todo GET /api/v1/evm/hd-wallets/{address}/derived
-todo GET /api/v1/evm/requests
-todo GET /api/v1/evm/requests/{id}
-todo GET /api/v1/evm/requests/{id}/simulation
-todo GET /api/v1/evm/rules
-todo GET /api/v1/evm/rules/{id}
-todo GET /api/v1/evm/rules/{id}/budgets
-todo GET /api/v1/evm/signers
-todo GET /api/v1/evm/signers/{address}/access
-todo GET /api/v1/evm/simulate/status
-todo GET /api/v1/evm/transactions
-todo GET /api/v1/presets
-todo GET /api/v1/presets/{id}
-todo GET /api/v1/templates
-todo GET /api/v1/templates/{id}
-todo GET /health
-todo PATCH /api/v1/evm/rules/{id}
-todo PATCH /api/v1/evm/signers/{address}
-todo PATCH /api/v1/templates/{id}
-todo POST /api/v1/api-keys
-todo POST /api/v1/bootstrap/admin
-todo POST /api/v1/evm/broadcast
-todo POST /api/v1/evm/budgets
-todo POST /api/v1/evm/hd-wallets
-todo POST /api/v1/evm/hd-wallets/{address}/derive
-todo POST /api/v1/evm/requests/batch-approve
-todo POST /api/v1/evm/requests/{id}/approve
-todo POST /api/v1/evm/requests/{id}/preview-rule
-todo POST /api/v1/evm/rules
-todo POST /api/v1/evm/rules/validate
-todo POST /api/v1/evm/rules/{id}/approve
-todo POST /api/v1/evm/rules/{id}/budgets/reset
-todo POST /api/v1/evm/rules/{id}/propose
-todo POST /api/v1/evm/rules/{id}/reject
-todo POST /api/v1/evm/rules/{id}/validate
-todo POST /api/v1/evm/sign
-todo POST /api/v1/evm/sign/batch
-todo POST /api/v1/evm/signers
-todo POST /api/v1/evm/signers/{address}/approve
-todo POST /api/v1/evm/signers/{address}/access
-todo POST /api/v1/evm/signers/{address}/lock
-todo POST /api/v1/evm/signers/{address}/transfer
-todo POST /api/v1/evm/signers/{address}/unlock
-todo POST /api/v1/evm/simulate
-todo POST /api/v1/evm/simulate/batch
-todo POST /api/v1/presets/{id}/apply
-todo POST /api/v1/presets/{id}/validate
-todo POST /api/v1/registry/refresh
-todo POST /api/v1/templates
-todo POST /api/v1/templates/instances/{ruleID}/revoke
-todo POST /api/v1/templates/{id}/instantiate
-todo POST /api/v1/templates/{id}/validate
-todo PUT /api/v1/admin/settings/audit_monitor
-todo PUT /api/v1/admin/settings/evm.dynamic_blocklist
-todo PUT /api/v1/admin/settings/evm.foundry
-todo PUT /api/v1/admin/settings/evm.material_check
-todo PUT /api/v1/admin/settings/evm.rpc_gateway
-todo PUT /api/v1/admin/settings/evm.simulation
-todo PUT /api/v1/admin/settings/notify
-todo PUT /api/v1/admin/settings/security
-todo PUT /api/v1/admin/settings/web
-todo PUT /api/v1/api-keys/{id}

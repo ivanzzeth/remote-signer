@@ -70,6 +70,19 @@ type RefreshError struct {
 	Error string `json:"error"`
 }
 
+// ServeHTTP handles POST /api/v1/registry/refresh.
+//
+//	@Summary		Re-sync the template and preset catalogue from disk
+//	@Description	Re-runs the registry sync so an operator who edited YAML on disk picks it up without restarting the daemon.
+//	@Description	⚠️ Takes no request body — the catalogue source is daemon config, not a parameter.
+//	@Description	⚠️ Partial failure is reported inside a 200, not as an error status: per-file problems land in `templates.errors` / `presets.errors` while the sync itself succeeded. Only a whole-registry sync failure is a 500.
+//	@Tags			registry
+//	@Produce		json
+//	@Success		200	{object}	RefreshResponse
+//	@Failure		401	{object}	map[string]string
+//	@Failure		500	{object}	map[string]string	"a whole registry failed to sync"
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/registry/refresh [post]
 func (h *RegistryRefreshHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
 	// ServeMux answers 405 before this runs.

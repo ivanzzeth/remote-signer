@@ -46,11 +46,19 @@ func NewApprovalHandler(signService service.SignServiceAPI, accessService *servi
 
 // ApprovalAPIRequest represents the request body for approval
 type ApprovalAPIRequest struct {
+	// ⛔ NOT marked required, and that is the handler's behaviour rather than a
+	// gap: nothing rejects an absent `approved`, so `{}` is a valid body and
+	// Go's zero value makes it a REJECTION. A generated SDK will let a caller
+	// omit the one field that decides the outcome. Reported, not fixed —
+	// making it required here would change what the endpoint accepts.
 	Approved bool   `json:"approved"`
 	RuleType string `json:"rule_type,omitempty"` // evm_address_list, evm_contract_method, evm_value_limit
 	RuleMode string `json:"rule_mode,omitempty"` // whitelist, blocklist
 	RuleName string `json:"rule_name,omitempty"`
-	MaxValue string `json:"max_value,omitempty"` // Required for evm_value_limit
+	// ⚠️ Called "required for evm_value_limit" but the handler does not enforce
+	// that: it only validates the format when the field is non-empty. A
+	// conditional requirement a flat `required` list cannot express anyway.
+	MaxValue string `json:"max_value,omitempty"`
 }
 
 // ApprovalAPIResponse represents the response for an approval request
@@ -65,10 +73,15 @@ type ApprovalAPIResponse struct {
 
 // PreviewRuleAPIRequest represents the request body for rule preview
 type PreviewRuleAPIRequest struct {
-	RuleType string `json:"rule_type"` // Required
-	RuleMode string `json:"rule_mode"` // Required
+	// Rejected when empty: 400 "rule_type is required".
+	RuleType string `json:"rule_type" binding:"required"`
+	// Rejected when empty: 400 "rule_mode is required". ⚠️ Contrast the approval
+	// endpoint, where rule_mode is optional.
+	RuleMode string `json:"rule_mode" binding:"required"`
 	RuleName string `json:"rule_name,omitempty"`
-	MaxValue string `json:"max_value,omitempty"` // Required for evm_value_limit
+	// ⚠️ Not enforced as required for any rule type; only format-checked when
+	// non-empty.
+	MaxValue string `json:"max_value,omitempty"`
 }
 
 // ServeHTTP serves POST /api/v1/evm/requests/{id}/approve — one endpoint, one
@@ -82,6 +95,27 @@ type PreviewRuleAPIRequest struct {
 // POST /api/v1/evm/requests/a/b/c/d/approve approved request "d" — a mutation
 // whose path named a different resource than the row it changed. {id} is exactly
 // one segment, so that is unrepresentable now.
+//
+//	@Summary	Approve or reject a sign request
+//	@Description	⛔ `approved` decides everything and defaults to FALSE. An empty body `{}` REJECTS the request — there is no \"you forgot to say\" error.
+//	@Description	⚠️ Supplying `rule_type` additionally generates a rule from this request so the next identical one is decided automatically; the new rule comes back in `generated_rule`. Omitting it approves this request only.
+//	@Description	⚠️ A locked signer answers 423, and a request already decided answers 409.
+//	@Description	⛔ Authorization is per row: a key without approve_request permission may still approve, but only for a signer it owns.
+//	@Tags	requests
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"sign request id"
+//	@Param	body	body	ApprovalAPIRequest	true	"the decision, and optionally a rule to generate"
+//	@Success	200	{object}	ApprovalAPIResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"not the signer owner, or rule generation while security.rules_api_readonly is on"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	409	{object}	map[string]string	"the request was already decided"
+//	@Failure	423	{object}	map[string]string	"the signer is locked"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/requests/{id}/approve [post]
 func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
@@ -245,6 +279,24 @@ func NewPreviewRuleHandler(signService service.SignServiceAPI, logger *slog.Logg
 // so POST /api/v1/evm/requests/a/b/preview-rule previewed a rule for request "b"
 // (measured). This one only reads, so it was a wrong-answer bug rather than a
 // wrong-mutation one; {id} is one segment and neither is possible now.
+//
+//	@Summary	Preview the rule an approval would generate
+//	@Description	Read-only dry run: returns the rule that POST .../approve WOULD create for this request, without creating it and without deciding the request.
+//	@Description	⚠️ Stricter than the approval endpoint it previews: `rule_mode` is required here and optional there.
+//	@Description	⚠️ Every generator failure is a 400 with a rewritten operator-facing message.
+//	@Tags	requests
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"sign request id"
+//	@Param	body	body	PreviewRuleAPIRequest	true	"the rule shape to preview"
+//	@Success	200	{object}	types.Rule	"the rule that would be created; nothing is persisted"
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"the request belongs to another api key"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/requests/{id}/preview-rule [post]
 func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())

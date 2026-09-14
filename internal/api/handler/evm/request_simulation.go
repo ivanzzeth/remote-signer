@@ -59,6 +59,19 @@ func NewRequestSimulationHandler(
 // handler itself could say which verb and which shape it served. The route says
 // both now, and a shape it does not describe reaches no handler at all — which is
 // why the checks are not merely redundant but unreachable.
+//
+//	@Summary	Get a sign request's simulation
+//	@Description	⛔ 404 has TWO meanings here and the message is the only way to tell them apart: \"request not found\" (no such id, or it belongs to someone else) and \"simulation not yet available\" (the request exists and the pipeline has not finished). The UI polls on the second.
+//	@Description	⛔ A request owned by another api key is 404, never 403 — telling them apart would let any key enumerate request ids.
+//	@Tags	requests
+//	@Produce	json
+//	@Param	id	path	string	true	"sign request id"
+//	@Success	200	{object}	types.RequestSimulation
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string	"no such request, not yours, or the simulation is not ready yet"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/requests/{id}/simulation [get]
 func (h *RequestSimulationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {

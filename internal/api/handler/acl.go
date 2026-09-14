@@ -27,6 +27,16 @@ func NewACLHandler(ipWhitelist *ports.IPWhitelist) *ACLHandler {
 }
 
 // ServeHTTP handles GET /api/v1/acls/ip-whitelist only.
+//
+//	@Summary		Read the IP whitelist
+//	@Description	Read-only view of the IP allow-list the daemon booted with. Configured in config.yaml, not through this API — there is no write counterpart.
+//	@Description	⚠️ When no whitelist is wired the handler answers 200 with `enabled:false` and both address lists null, not 404. "Disabled" and "not configured" are the same answer here.
+//	@Tags			acls
+//	@Produce		json
+//	@Success		200	{object}	IPWhitelistResponse
+//	@Failure		401	{object}	map[string]string
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/acls/ip-whitelist [get]
 func (h *ACLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
 	// ServeMux answers 405 before this runs.

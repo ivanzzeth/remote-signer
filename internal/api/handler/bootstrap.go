@@ -69,6 +69,15 @@ type statusResponse struct {
 // The response shape is intentionally minimal — the front-end only needs
 // "is bootstrap still required?". Anything richer would invite tying UI
 // behaviour to mutable backend state and complicate the unauth contract.
+//
+//	@Summary		Is bootstrap still needed
+//	@Description	Unauthenticated by design: the api_keys table is empty on first run, so there is no public key to verify a signed request against.
+//	@Description	⚠️ "Needs bootstrap" means specifically "no api key with id=admin yet" — not "no keys at all". The agent key is provisioned at every first start, so a count-based check would flip to false and hide the bootstrap form.
+//	@Tags			bootstrap
+//	@Produce		json
+//	@Success		200	{object}	statusResponse
+//	@Failure		500	{object}	map[string]string
+//	@Router			/api/v1/bootstrap/status [get]
 func (h *BootstrapHandler) ServeStatus(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped and the mux answers 405.
 	// "Needs bootstrap" specifically means "no admin api key yet". The
@@ -94,7 +103,10 @@ func (h *BootstrapHandler) ServeStatus(w http.ResponseWriter, r *http.Request) {
 // keeps the wire format small and makes it impossible for a malicious
 // caller to redirect the keystore output to an attacker-controlled path.
 type adminRequest struct {
-	Password string `json:"password"`
+	// Password is rejected when absent or empty: ServeAdmin returns 400
+	// "password is required" (bootstrap.go, the `req.Password == ""` check).
+	// See wallet.go for why `binding:"required"` is documentation-only here.
+	Password string `json:"password" binding:"required"`
 }
 
 // ServeAdmin answers POST /api/v1/bootstrap/admin.
@@ -108,6 +120,21 @@ type adminRequest struct {
 // The 410 distinction matters: a 500 invites retries that will never
 // succeed; the 410 tells the UI to drop the bootstrap flow and route the
 // user to the regular login page instead.
+//
+//	@Summary		Create the admin key
+//	@Description	Unauthenticated by design and succeeds exactly once; two concurrent calls race fairly inside the creator and the loser gets 410.
+//	@Description	⚠️ The 200 body carries ONE FIELD MORE than the schema below says: a constant `"status": "ok"` sits alongside the four AdminResult fields, which Go embedding flattens to the top level rather than nesting under a key. `keystore_json` is present only when the daemon returns the keystore inline.
+//	@Description	⛔ The schema under-describes on purpose. The handler answers with an anonymous struct, which swag cannot name, and its `AdminResult{status=string}` composition syntax is worse than useless on v2.0.0-rc6 — measured: it emits a bogus top-level component literally named `status` AND rewrites the shared `bootstrap.AdminResult` component to claim a `status` field it does not have. Under-describing one response beats corrupting a shared schema; the honest fix is a named response type, which is a code change and not this step's job.
+//	@Description	⛔ The password is never echoed back and the handler zeroises its copy before responding.
+//	@Tags			bootstrap
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		adminRequest	true	"admin password"
+//	@Success		200		{object}	bootstrap.AdminResult	"plus a constant `status: \"ok\"` field — see the description"
+//	@Failure		400		{object}	map[string]string	"bad JSON or empty password"
+//	@Failure		410		{object}	map[string]string	"the bootstrap window has closed; code=admin_already_exists"
+//	@Failure		500		{object}	map[string]string
+//	@Router			/api/v1/bootstrap/admin [post]
 func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped and the mux answers 405.
 	var req adminRequest

@@ -43,8 +43,12 @@ func NewBatchApprovalHandler(signService service.SignServiceAPI, accessService *
 
 // BatchApprovalAPIRequest is the JSON body for batch approve/reject.
 type BatchApprovalAPIRequest struct {
-	RequestIDs []string `json:"request_ids"`
-	Approved   bool     `json:"approved"`
+	// Rejected when absent, empty, or entirely blank after trimming: 400
+	// "request_ids is required and must not be empty".
+	RequestIDs []string `json:"request_ids" binding:"required"`
+	// ⛔ NOT required — same trap as the single-request endpoint: absent means
+	// false, which REJECTS every id in the batch. Reported, not fixed.
+	Approved bool `json:"approved"`
 }
 
 // BatchApprovalItemAPIResult is a single row in the batch response.
@@ -65,6 +69,24 @@ type BatchApprovalAPIResponse struct {
 }
 
 // ServeHTTP handles POST /api/v1/evm/requests/batch-approve
+//
+//	@Summary	Approve or reject several sign requests
+//	@Description	⛔ `approved` defaults to FALSE, so a body carrying only `request_ids` REJECTS all of them.
+//	@Description	⚠️ Partial success is normal and arrives as 200: per-id outcomes are in `results[].error` and the counts in `summary`. A 4xx here means the batch was refused before any of it ran.
+//	@Description	⚠️ Blank ids are dropped silently rather than rejected; a list of only blanks is a 400.
+//	@Description	⛔ A caller without approve_request permission must own the signer behind EVERY id — one foreign id fails the whole call with 403 before anything is decided.
+//	@Description	⚠️ `idempotent: true` on a row means that request had already been decided and this call did not change it.
+//	@Tags	requests
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	BatchApprovalAPIRequest	true	"ids and the decision"
+//	@Success	200	{object}	BatchApprovalAPIResponse	"read results[].error for per-id outcomes"
+//	@Failure	400	{object}	map[string]string	"empty or oversized batch"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"not the owner of every signer in the batch"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/requests/batch-approve [post]
 func (h *BatchApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped
 	// (internal/api/module_requests.go) and Go's ServeMux answers 405 before this

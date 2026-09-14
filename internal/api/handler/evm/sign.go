@@ -67,11 +67,29 @@ func NewSignHandler(signService service.SignServiceAPI, signerManager evm.Signer
 }
 
 // SignRequest represents the request body for signing
+//
+// ⚠️ All four are required and the handler proves it: each has its own
+// "<field> is required" 400 immediately after the decode, before any format
+// check. See ServeHTTP below.
 type SignRequest struct {
-	ChainID       string          `json:"chain_id"`
-	SignerAddress string          `json:"signer_address"`
-	SignType      string          `json:"sign_type"`
-	Payload       json.RawMessage `json:"payload"`
+	// Rejected when empty (400 "chain_id is required"), then parsed as a
+	// positive decimal integer.
+	ChainID string `json:"chain_id" binding:"required"`
+	// Rejected when empty (400 "signer_address is required"), then checked as
+	// 0x + 40 hex.
+	SignerAddress string `json:"signer_address" binding:"required"`
+	// Rejected when empty (400 "sign_type is required"), then checked against
+	// the known set.
+	SignType string `json:"sign_type" binding:"required"`
+	// Rejected when zero-length (400 "payload is required"), capped at 2 MB.
+	//
+	// ⛔ The generated schema for this field is `{"type":"object"}` and that is
+	// WRONG for some sign types — the real shape depends on sign_type, and for
+	// `hash` / `raw_message` the payload is not an object. It renders that way
+	// because .swaggo has to map json.RawMessage to interface{} for swag to
+	// generate at all. Recorded there; do not read the schema as the payload
+	// contract.
+	Payload json.RawMessage `json:"payload" binding:"required"`
 }
 
 // SignResponse represents the response for a sign request
@@ -90,6 +108,26 @@ type ErrorResponse struct {
 }
 
 // ServeHTTP handles the sign request
+//
+//	@Summary	Sign a payload
+//	@Description	The core endpoint. Runs the rule engine: blocklist, then whitelist, then budget, then manual approval.
+//	@Description	⛔ A 200 does NOT mean a signature. When no rule matched and manual approval is enabled, the response is 200 with `status` set to a pending/authorizing state and `signature` absent — a client must branch on `status`, not on the HTTP code.
+//	@Description	⚠️ 403 covers four different things, distinguishable only by the message: no access to the signer, the signer is awaiting admin approval, the signer is locked, and \"no matching rule and manual approval is disabled\".
+//	@Description	⚠️ A signer whose key material is missing is 409, not 404 — the signer exists, its material does not.
+//	@Description	⚠️ 404 and the locked-signer 403 deliberately tell a caller apart states that a stricter API would merge; that is an accepted risk recorded in the handler, not an oversight.
+//	@Tags	sign
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	SignRequest	true	"what to sign"
+//	@Success	200	{object}	SignResponse	"signed, OR accepted and awaiting approval — read `status`"
+//	@Failure	400	{object}	map[string]string	"missing or malformed field, oversized payload, or a payload the chain adapter rejected"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"no signer access, signer pending approval, signer locked, or no rule matched with manual approval off"
+//	@Failure	404	{object}	map[string]string	"no such signer"
+//	@Failure	409	{object}	map[string]string	"the signer exists but its key material is unavailable"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/sign [post]
 func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
 	// ServeMux answers 405 before this runs.

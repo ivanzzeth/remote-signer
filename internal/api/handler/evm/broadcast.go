@@ -39,8 +39,10 @@ func NewBroadcastHandler(rpcProvider Broadcaster, logger *slog.Logger) (*Broadca
 
 // BroadcastRequest is the request body for broadcasting a signed transaction.
 type BroadcastRequest struct {
-	ChainID     string `json:"chain_id"`
-	SignedTxHex string `json:"signed_tx_hex"`
+	// Rejected when empty or not a positive decimal integer — one combined 400.
+	ChainID string `json:"chain_id" binding:"required"`
+	// Rejected when empty or not 0x-prefixed hex — one combined 400.
+	SignedTxHex string `json:"signed_tx_hex" binding:"required"`
 }
 
 // BroadcastResponse is the response from broadcasting a transaction.
@@ -49,6 +51,20 @@ type BroadcastResponse struct {
 }
 
 // ServeHTTP handles POST /api/v1/evm/broadcast.
+//
+//	@Summary	Broadcast a signed transaction
+//	@Description	⛔ This endpoint does NOT sign and does NOT consult the rule engine: it forwards bytes the caller already holds to the chain's RPC. A transaction signed elsewhere goes out unexamined.
+//	@Description	⚠️ An RPC rejection is 502, not 400 — including a rejection caused by the caller's own transaction (bad nonce, underpriced). The upstream message is passed through verbatim in `error`.
+//	@Tags	sign
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	BroadcastRequest	true	"signed transaction to broadcast"
+//	@Success	200	{object}	BroadcastResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	502	{object}	map[string]string	"the upstream RPC refused it"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/broadcast [post]
 func (h *BroadcastHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
 	// ServeMux answers 405 before this runs.

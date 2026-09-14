@@ -46,6 +46,38 @@ func NewTransactionsHandler(repo storage.TransactionRepository, logger *slog.Log
 
 // ServeHTTP routes /api/v1/evm/transactions (list) and
 // /api/v1/evm/transactions/{id} (item).
+//
+// ⚠️ Only the list route is annotated. This function is registered against two
+// patterns and the trailing-slash one is a subtree it takes apart itself, so a
+// second @Router here would be describing a path shape that no registration
+// states. That one stays an `exempt` line in the gate's baseline until the item
+// route is registered as `GET /api/v1/evm/transactions/{id}` and read through
+// r.PathValue.
+//
+//	@Summary		List recorded transactions
+//	@Description	Read-only view of the on-chain transactions the daemon recorded. The wallet RPC proxy writes these rows; nothing here does.
+//	@Description	⛔ Visibility is per row, not per route: a caller that is neither admin nor dev has `api_key_id` pinned to its own key server-side, and passing someone else's is 403 rather than an empty list. Admin and dev see every row.
+//	@Description	⚠️ `signer_address` is an accepted alias for `from`, used only when `from` is absent.
+//	@Description	⚠️ `status` and `sign_request_id` are passed through unvalidated — an unknown status yields an empty page, not a 400.
+//	@Tags			transactions
+//	@Produce		json
+//	@Param			from			query		string	false	"sender address, 0x + 40 hex"
+//	@Param			signer_address	query		string	false	"alias for from; ignored when from is present"
+//	@Param			sign_request_id	query		string	false	"transactions produced by one sign request"
+//	@Param			chain_id		query		string	false	"chain id"
+//	@Param			api_key_id		query		string	false	"admin/dev only; 403 for anyone else naming another key"
+//	@Param			sign_type		query		string	false	"400 if not a known sign type"
+//	@Param			status			query		string	false	"transaction status; not validated"
+//	@Param			role			query		string	false	"api key role; 400 if unknown. ⚠️ Ignored for non-admin callers, who are pinned to their own key."
+//	@Param			limit			query		int		false	"non-negative; 400 otherwise"
+//	@Param			offset			query		int		false	"non-negative; 400 otherwise"
+//	@Success		200				{object}	TransactionsListResponse
+//	@Failure		400				{object}	map[string]string
+//	@Failure		401				{object}	map[string]string
+//	@Failure		403				{object}	map[string]string	"non-admin filtering by another api key"
+//	@Failure		500				{object}	map[string]string
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/evm/transactions [get]
 func (h *TransactionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
 	// ServeMux answers 405 for anything else before this runs.

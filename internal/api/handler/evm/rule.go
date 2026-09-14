@@ -229,6 +229,27 @@ func (h *RuleHandler) requireAPIKey(w http.ResponseWriter, r *http.Request) bool
 }
 
 // ListRules serves GET /api/v1/evm/rules.
+//
+//	@Summary	List rules
+//	@Description	⛔ Scoped and REDACTED per caller: admin and dev see every rule, an agent or strategy key sees only rules that apply to it, and an AGENT key gets `config` stripped to null so rule script source never reaches it. `total` is recomputed after that filtering.
+//	@Description	⚠️ `enabled`, `limit` and `offset` are parsed leniently — a malformed value leaves the default; the other filters answer 400.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	chain_type	query	string	false	"400 if unknown"
+//	@Param	chain_id	query	string	false	"chain id"
+//	@Param	signer_address	query	string	false	"0x + 40 hex"
+//	@Param	owner	query	string	false	"owning api key id"
+//	@Param	type	query	string	false	"400 if unknown"
+//	@Param	source	query	string	false	"400 if unknown"
+//	@Param	enabled	query	string	false	"enabled-only filter"
+//	@Param	limit	query	int	false	"maximum rows"
+//	@Param	offset	query	int	false	"rows to skip"
+//	@Success	200	{object}	ListRulesResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules [get]
 func (h *RuleHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -237,6 +258,24 @@ func (h *RuleHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateRule serves POST /api/v1/evm/rules.
+//
+//	@Summary	Create a rule
+//	@Description	⛔ TWO success codes, and the difference matters: 201 means the rule is ACTIVE and already deciding sign requests; 202 means it was stored as pending_approval and decides nothing until an admin approves it. Which one you get depends on your role and on security.require_approval_for_agent_rules — not on the request.
+//	@Description	⚠️ Role restrictions are per rule TYPE: an agent key cannot create certain types and a dev key cannot create signer_restriction, both 403.
+//	@Description	⚠️ A rule created active immediately re-evaluates pending sign requests in the background, so creating one can approve something that was already waiting.
+//	@Tags	rules
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	CreateRuleRequest	true	"rule to create"
+//	@Success	201	{object}	RuleResponse	"created and ACTIVE"
+//	@Success	202	{object}	RuleResponse	"stored as pending_approval; inert until an admin approves"
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"read-only mode, a rule type your role may not create, or the per-key rule limit"
+//	@Failure	500	{object}	map[string]string
+//	@Failure	503	{object}	map[string]string	"the rule type needs a toolchain (e.g. forge) that is not available"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules [post]
 func (h *RuleHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -261,6 +300,19 @@ func (h *RuleHandler) ruleItemID(w http.ResponseWriter, r *http.Request) (string
 }
 
 // GetRule serves GET /api/v1/evm/rules/{id}.
+//
+//	@Summary	Get one rule
+//	@Description	⚠️ An id that is not a well-formed rule id is 400, not 404.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id"
+//	@Success	200	{object}	RuleResponse
+//	@Failure	400	{object}	map[string]string	"malformed rule id"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id} [get]
 func (h *RuleHandler) GetRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -273,6 +325,21 @@ func (h *RuleHandler) GetRule(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteRule serves DELETE /api/v1/evm/rules/{id}.
+//
+//	@Summary	Delete a rule
+//	@Description	⚠️ Deletes the rule's budgets with it.
+//	@Description	⛔ Refused with 403 for: read-only mode, a config-sourced rule, an immutable rule, someone else's rule, and a synthetic simulation rule unless you are admin and it was auto-generated.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id"
+//	@Success	204	"deleted; no body"
+//	@Failure	400	{object}	map[string]string	"malformed rule id"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id} [delete]
 func (h *RuleHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -289,6 +356,25 @@ func (h *RuleHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 // ⚠️ The synthetic-id refusal is the PATCH arm's own, copied verbatim: a
 // `sim:0x…` placeholder row exists only to satisfy the budget table's foreign
 // key, and it is readable and deletable but not modifiable.
+//
+//	@Summary	Update a rule
+//	@Description	Partial. ⛔ Like templates, `name` / `description` / `type` are plain strings, so an empty one means «leave unchanged» rather than «clear».
+//	@Description	⛔ Four things are un-updatable and all answer 403: a config-sourced rule, an immutable rule, a synthetic `sim:` budget rule, and someone else's rule.
+//	@Description	⚠️ Only admin may change `applied_to`.
+//	@Tags	rules
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id"
+//	@Param	body	body	UpdateRuleRequest	true	"fields to change"
+//	@Success	200	{object}	RuleResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"read-only mode, config-sourced, immutable, synthetic, not yours, or a type/applied_to your role may not set"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Failure	503	{object}	map[string]string	"a required toolchain is unavailable"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id} [patch]
 func (h *RuleHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -305,6 +391,23 @@ func (h *RuleHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 }
 
 // ApproveRule serves POST /api/v1/evm/rules/{id}/approve.
+//
+//	@Summary	Approve a pending rule
+//	@Description	Takes no request body. ⛔ Admin ROLE only, checked in the handler as 403 — the route's list_rules permission is not what gates this.
+//	@Description	⚠️ A rule that is not in pending_approval is 400, and the message names its current status.
+//	@Description	⚠️ Approving a PROPOSAL applies the proposed changes to the target rule. If the target has since been deleted the answer is 409 and the proposal is rejected; if the target became immutable it is 403.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id, or the id of a proposal"
+//	@Success	200	{object}	RuleResponse
+//	@Failure	400	{object}	map[string]string	"not pending approval, or the proposed change fails validation"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"admin role required, or the target rule is immutable"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	409	{object}	map[string]string	"the target rule of this proposal no longer exists"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id}/approve [post]
 func (h *RuleHandler) ApproveRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -313,6 +416,24 @@ func (h *RuleHandler) ApproveRule(w http.ResponseWriter, r *http.Request) {
 }
 
 // RejectRule serves POST /api/v1/evm/rules/{id}/reject.
+//
+//	@Summary	Reject a pending rule
+//	@Description	⛔ Admin ROLE only, 403 otherwise.
+//	@Description	⚠️ The body is optional AND unvalidated: a malformed one is swallowed and the rule is still rejected, with an empty reason. Sending no body at all works the same way.
+//	@Description	⚠️ A rule that is not in pending_approval is 400.
+//	@Tags	rules
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id"
+//	@Param	body	body	RejectRuleRequest	false	"optional reason; a malformed body is ignored, not rejected"
+//	@Success	200	{object}	RuleResponse
+//	@Failure	400	{object}	map[string]string	"the rule is not pending approval"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"admin role required"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id}/reject [post]
 func (h *RuleHandler) RejectRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -321,6 +442,26 @@ func (h *RuleHandler) RejectRule(w http.ResponseWriter, r *http.Request) {
 }
 
 // ProposeRule serves POST /api/v1/evm/rules/{id}/propose.
+//
+//	@Summary	Propose changes to a rule
+//	@Description	For keys that may not edit a rule directly: creates a SEPARATE pending rule row pointing at the target. Always 202 — nothing changes on the target until an admin approves the proposal.
+//	@Description	⛔ Only agent and admin roles may propose; everyone else is 403.
+//	@Description	⚠️ An empty body is a 400 («at least one field must be changed»), but no individual field is required — which is why none is marked so.
+//	@Description	⚠️ A second pending proposal from the same key for the same rule is 409.
+//	@Tags	rules
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"id of the rule to change"
+//	@Param	body	body	ProposeRuleRequest	true	"the changes being proposed; at least one field"
+//	@Success	202	{object}	RuleResponse	"the proposal row; the target rule is unchanged"
+//	@Failure	400	{object}	map[string]string	"no changes, unknown type, the target is itself a proposal, or the target is not active"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"role may not propose, read-only mode, config-sourced or immutable target, or the per-key rule limit"
+//	@Failure	404	{object}	map[string]string	"no such target rule"
+//	@Failure	409	{object}	map[string]string	"you already have a pending proposal for this rule"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id}/propose [post]
 func (h *RuleHandler) ProposeRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -351,6 +492,21 @@ func (h *RuleHandler) requireAdmin(w http.ResponseWriter, r *http.Request) bool 
 
 // ValidateRules serves POST /api/v1/evm/rules/validate — batch validation.
 // ⛔ Admin only, checked here rather than on the route. See requireAdmin.
+//
+//	@Summary	Validate every evm_js rule
+//	@Description	Runs the stored test cases of every enabled evm_js rule. Changes nothing and takes no request body.
+//	@Description	⛔ Admin ROLE only, 403 otherwise.
+//	@Description	⚠️ Always 200: failures are in `results[].valid` and in `passed`/`failed`, never in the status code.
+//	@Description	⚠️ `full=true` loads every rule into one engine so cross-rule interference shows up. It silently falls back to isolated mode when no JS evaluator is wired — the response does not say which mode ran.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	full	query	bool	false	"only the literal `true` selects full-engine mode"
+//	@Success	200	{object}	BatchValidateResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"admin role required"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/validate [post]
 func (h *RuleHandler) ValidateRules(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
@@ -360,6 +516,22 @@ func (h *RuleHandler) ValidateRules(w http.ResponseWriter, r *http.Request) {
 
 // ValidateRule serves POST /api/v1/evm/rules/{id}/validate.
 // ⛔ Admin only, checked here rather than on the route. See requireAdmin.
+//
+//	@Summary	Validate one rule's test cases
+//	@Description	Changes nothing and takes no request body.
+//	@Description	⛔ Admin ROLE only, 403 otherwise. ⛔ evm_js rules only — any other type is 400.
+//	@Description	⚠️ A rule with no test cases is 200 with an empty result set, which reads as a pass.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id"
+//	@Success	200	{object}	ValidateRuleResponse
+//	@Failure	400	{object}	map[string]string	"not an evm_js rule, or its test_cases do not parse"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"admin role required"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id}/validate [post]
 func (h *RuleHandler) ValidateRule(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
@@ -380,6 +552,19 @@ func (h *RuleHandler) ValidateRule(w http.ResponseWriter, r *http.Request) {
 const maxBudgetRuleIDLen = 128
 
 // ListBudgets serves GET /api/v1/evm/rules/{id}/budgets.
+//
+//	@Summary	List one rule's budgets
+//	@Description	⚠️ Returns a bare JSON ARRAY, not an object with a `budgets` key — unlike the collection endpoint at /api/v1/evm/budgets.
+//	@Description	⚠️ An unknown rule id is 200 with an empty array, not 404. Only an id longer than 128 characters is a 400.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id, at most 128 characters"
+//	@Success	200	{array}	RuleBudgetListItem
+//	@Failure	400	{object}	map[string]string	"rule id longer than 128 characters"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id}/budgets [get]
 func (h *RuleHandler) ListBudgets(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -402,6 +587,20 @@ func (h *RuleHandler) ListBudgets(w http.ResponseWriter, r *http.Request) {
 }
 
 // ResetBudgets serves POST /api/v1/evm/rules/{id}/budgets/reset.
+//
+//	@Summary	Reset one rule's budgets
+//	@Description	Zeroes spent and tx_count on every budget of this rule. Takes no request body.
+//	@Description	⚠️ The 200 body has a single key `reset` — how many budget rows were zeroed, which is 0 when the rule had none.
+//	@Tags	rules
+//	@Produce	json
+//	@Param	id	path	string	true	"rule id, at most 128 characters"
+//	@Success	200	{object}	map[string]int	"single key `reset`"
+//	@Failure	400	{object}	map[string]string	"rule id longer than 128 characters"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/rules/{id}/budgets/reset [post]
 func (h *RuleHandler) ResetBudgets(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return

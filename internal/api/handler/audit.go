@@ -71,6 +71,32 @@ type ErrorResponse struct {
 }
 
 // ServeHTTP handles GET /api/v1/audit
+//
+//	@Summary		Query the audit log
+//	@Description	Cursor-paginated. Follow `next_cursor` **and** `next_cursor_id` together — the cursor is a RFC3339Nano timestamp and ties are broken by id, so sending one without the other skips or repeats rows.
+//	@Description	⚠️ Filter validation is asymmetric and that is the handler's actual behaviour, not an oversight in this description: `event_type`, `severity`, `signer_address`, `chain_type`, `chain_id`, `exclude_event_type`, `start_time`, `end_time` and `cursor` answer 400 when malformed, while `limit` is silently ignored unless it is in 1..100 (the default 30 stands), and `api_key_id`, `sign_request_id` and `cursor_id` are taken as given with no validation at all.
+//	@Description	⚠️ `total` is counted with the cursor filters removed, so it is the size of the whole filtered set rather than of the page.
+//	@Tags			audit
+//	@Produce		json
+//	@Param			event_type			query		string	false	"exact event type; 400 if unknown"
+//	@Param			exclude_event_type	query		string	false	"comma-separated event types to omit; 400 if any is unknown"
+//	@Param			severity			query		string	false	"info, warning or critical"
+//	@Param			api_key_id			query		string	false	"records produced by this api key"
+//	@Param			signer_address		query		string	false	"0x + 40 hex"
+//	@Param			sign_request_id		query		string	false	"records belonging to one sign request"
+//	@Param			chain_type			query		string	false	"chain family; 400 if unknown"
+//	@Param			chain_id			query		string	false	"positive decimal integer"
+//	@Param			start_time			query		string	false	"RFC3339 lower bound"
+//	@Param			end_time			query		string	false	"RFC3339 upper bound"
+//	@Param			limit				query		int		false	"1..100; anything else leaves the default 30 in place"
+//	@Param			cursor				query		string	false	"RFC3339Nano timestamp from next_cursor"
+//	@Param			cursor_id			query		string	false	"audit id from next_cursor_id; pair it with cursor"
+//	@Success		200					{object}	ListAuditResponse
+//	@Failure		400					{object}	map[string]string
+//	@Failure		401					{object}	map[string]string
+//	@Failure		500					{object}	map[string]string
+//	@Security		Ed25519Signature
+//	@Router			/api/v1/audit [get]
 func (h *AuditHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context (for auth verification)
 	apiKey := middleware.GetAPIKey(r.Context())

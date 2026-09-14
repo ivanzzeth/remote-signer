@@ -81,19 +81,31 @@ type JSRuleTestCase struct {
 
 // CreateRuleRequest represents a request to create a new rule
 type CreateRuleRequest struct {
-	Name          string                 `json:"name"`
-	Description   string                 `json:"description,omitempty"`
-	Type          string                 `json:"type"`
-	Mode          string                 `json:"mode"`
-	ChainType     *string                `json:"chain_type,omitempty"`
-	ChainID       *string                `json:"chain_id,omitempty"`
-	SignerAddress *string                `json:"signer_address,omitempty"`
-	Config        map[string]interface{} `json:"config"`
-	Enabled       bool                   `json:"enabled"`
-	Immutable     bool                   `json:"immutable,omitempty"`
-	AppliedTo     []string               `json:"applied_to,omitempty"`
-	Priority      *int                   `json:"priority,omitempty"`
-	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js rules
+	// Rejected when empty: 400 "name is required" (rule_crud.go createRule).
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description,omitempty"`
+	// Rejected when empty: 400 "type is required".
+	Type string `json:"type" binding:"required"`
+	// Rejected when empty: 400 "mode is required"; then must be exactly
+	// "whitelist" or "blocklist".
+	Mode          string  `json:"mode" binding:"required"`
+	ChainType     *string `json:"chain_type,omitempty"`
+	ChainID       *string `json:"chain_id,omitempty"`
+	SignerAddress *string `json:"signer_address,omitempty"`
+	// ⚠️ NOT marked required even though it has no omitempty and most rule
+	// types need it: the emptiness check lives in ValidateRuleConfig, which is
+	// per rule TYPE, so whether an absent config is a 400 depends on `type`.
+	// A flat required list cannot say that.
+	Config    map[string]interface{} `json:"config"`
+	Enabled   bool                   `json:"enabled"`
+	Immutable bool                   `json:"immutable,omitempty"`
+	// ⚠️ Only admin may set this to anything but the default; a non-admin
+	// naming other keys is a 400 from the ownership resolver.
+	AppliedTo []string `json:"applied_to,omitempty"`
+	Priority  *int     `json:"priority,omitempty"`
+	// ⚠️ "required for evm_js" is a per-type rule enforced during validation,
+	// not a field-level required. Left optional for the same reason as Config.
+	TestCases []JSRuleTestCase `json:"test_cases,omitempty"`
 }
 
 // UpdateRuleRequest represents a request to update an existing rule
@@ -132,6 +144,11 @@ type ProposeRuleRequest struct {
 }
 
 // RejectRuleRequest represents a request body for POST /evm/rules/:id/reject
+//
+// ⛔ Reason is NOT required, and the body is not required either: rejectRule
+// ignores a decode failure entirely (it resets Reason to "" and carries on), so
+// an absent, empty or malformed body still rejects the rule. Reported, not
+// changed.
 type RejectRuleRequest struct {
 	Reason string `json:"reason"`
 }

@@ -28,7 +28,8 @@ type SignerHandler struct {
 
 // TransferOwnershipRequest represents the request to transfer signer ownership.
 type TransferOwnershipRequest struct {
-	NewOwnerID string `json:"new_owner_id"`
+	// Rejected when empty: 400 "new_owner_id is required".
+	NewOwnerID string `json:"new_owner_id" binding:"required"`
 }
 
 // NewSignerHandler creates a new signer handler
@@ -129,6 +130,29 @@ func (h *SignerHandler) signerAddress(w http.ResponseWriter, r *http.Request) (s
 }
 
 // ListSigners serves GET /api/v1/evm/signers.
+//
+//	@Summary	List signers
+//	@Description	⛔ Scoped per caller: a non-admin is pinned to its own signers, and naming another key in `api_key_id` is 403 rather than an empty list. `ownership_status=pending_approval` is admin-only, also 403.
+//	@Description	⚠️ `locked` and `enabled` are tri-state: absent means no filter, and anything that is not `true`/`false` is a 400.
+//	@Description	⚠️ `exclude_hd_derived` only recognises `true` and `1`; any other value leaves derived addresses in.
+//	@Tags	signers
+//	@Produce	json
+//	@Param	type	query	string	false	"private_key or keystore; 400 otherwise"
+//	@Param	tag	query	string	false	"restrict to signers carrying this tag"
+//	@Param	api_key_id	query	string	false	"admin only; 403 for anyone else naming another key"
+//	@Param	locked	query	string	false	"true or false; 400 otherwise"
+//	@Param	enabled	query	string	false	"true or false; 400 otherwise"
+//	@Param	ownership_status	query	string	false	"only pending_approval is accepted, and only for admin"
+//	@Param	exclude_hd_derived	query	string	false	"true or 1 to hide HD-derived addresses"
+//	@Param	limit	query	int	false	"maximum rows"
+//	@Param	offset	query	int	false	"rows to skip"
+//	@Success	200	{object}	ListSignersResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"filtering by another api key, or listing pending approvals without admin"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers [get]
 func (h *SignerHandler) ListSigners(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -137,6 +161,23 @@ func (h *SignerHandler) ListSigners(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateSigner serves POST /api/v1/evm/signers.
+//
+//	@Summary	Create a signer
+//	@Description	⛔ A signer created by a NON-ADMIN key lands in pending_approval and cannot sign until an admin calls the approve endpoint. The 201 does not tell you which happened — check the signer's ownership status.
+//	@Description	⚠️ Three creation modes share one body, chosen inside `keystore`: both import fields empty generates a fresh keypair, `private_key_hex` imports a raw key, `keystore_json` imports a v3 keystore. Sending both import fields is 400.
+//	@Description	⛔ Password, private key and keystore JSON are zeroised after handoff and never echoed back; the response carries only the address and labels.
+//	@Description	⚠️ A failure to record ownership is logged but does NOT fail the 201 — the signer exists with no owner and has to be fixed by hand.
+//	@Tags	signers
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	CreateSignerRequest	true	"signer to create or import"
+//	@Success	201	{object}	CreateSignerResponse
+//	@Failure	400	{object}	map[string]string	"missing or unsupported type, missing keystore params, empty password, or both import fields set"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"read-only mode, or the per-key keystore limit is reached"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers [post]
 func (h *SignerHandler) CreateSigner(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAPIKey(w, r) {
 		return
@@ -145,6 +186,19 @@ func (h *SignerHandler) CreateSigner(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteSigner serves DELETE /api/v1/evm/signers/{address}.
+//
+//	@Summary	Delete a signer
+//	@Description	⛔ Owner only: a signer owned by someone else answers 403 and a signer that does not exist answers 404 — these are NOT merged, so the pair is distinguishable.
+//	@Tags	signers
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address; not format-checked here, an unknown one is 404"
+//	@Success	204	"deleted; no body"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"only the signer owner may do this"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address} [delete]
 func (h *SignerHandler) DeleteSigner(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -154,6 +208,23 @@ func (h *SignerHandler) DeleteSigner(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchSignerLabels serves PATCH /api/v1/evm/signers/{address}.
+//
+//	@Summary	Update a signer's labels
+//	@Description	Owner only. Changes display name and tags; nothing else about a signer is editable through this endpoint.
+//	@Description	⚠️ An empty body is 400 — at least one of the two fields must be present. Present-but-null clears a label.
+//	@Tags	signers
+//	@Accept	json
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Param	body	body	PatchSignerLabelsRequest	true	"at least one of display_name or tags"
+//	@Success	200	{object}	SignerResponse
+//	@Failure	400	{object}	map[string]string	"empty body, or a rejected label value"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"only the signer owner may do this"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address} [patch]
 func (h *SignerHandler) PatchSignerLabels(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -163,6 +234,24 @@ func (h *SignerHandler) PatchSignerLabels(w http.ResponseWriter, r *http.Request
 }
 
 // Unlock serves POST /api/v1/evm/signers/{address}/unlock.
+//
+//	@Summary	Unlock a signer
+//	@Description	Owner only. Decrypts the keystore into memory so the signer can sign; how long it stays unlocked is security.auto_lock_timeout, not a parameter here.
+//	@Description	⚠️ An already-unlocked signer is 409, not a no-op 200.
+//	@Tags	signers
+//	@Accept	json
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Param	body	body	UnlockSignerRequest	true	"keystore password"
+//	@Success	200	{object}	SignerResponse
+//	@Failure	400	{object}	map[string]string	"bad body or empty password"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"only the signer owner may do this"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	409	{object}	map[string]string	"already unlocked"
+//	@Failure	500	{object}	map[string]string	"also the answer for a WRONG password — it is not distinguished from an internal failure"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address}/unlock [post]
 func (h *SignerHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -172,6 +261,21 @@ func (h *SignerHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 }
 
 // Lock serves POST /api/v1/evm/signers/{address}/lock.
+//
+//	@Summary	Lock a signer
+//	@Description	Owner only. Drops the decrypted key from memory. Takes no request body.
+//	@Description	⚠️ An already-locked signer is 409, not a no-op 200.
+//	@Tags	signers
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Success	200	{object}	SignerResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"only the signer owner may do this"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	409	{object}	map[string]string	"already locked"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address}/lock [post]
 func (h *SignerHandler) Lock(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -181,6 +285,22 @@ func (h *SignerHandler) Lock(w http.ResponseWriter, r *http.Request) {
 }
 
 // ApproveSigner serves POST /api/v1/evm/signers/{address}/approve.
+//
+//	@Summary	Approve a pending signer
+//	@Description	Moves a signer's ownership from pending_approval to active, which is what lets it sign at all. Takes no request body.
+//	@Description	⛔ Admin ROLE only, checked in the handler as 403 — the route's read_signers permission is not what gates this.
+//	@Description	⚠️ An already-active signer is 409, and a signer with no ownership record at all is 404.
+//	@Tags	signers
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Success	200	{object}	map[string]string	"keys `status` and `signer_address`"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"admin role required"
+//	@Failure	404	{object}	map[string]string	"no ownership record for this signer"
+//	@Failure	409	{object}	map[string]string	"already active"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address}/approve [post]
 func (h *SignerHandler) ApproveSigner(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -190,6 +310,21 @@ func (h *SignerHandler) ApproveSigner(w http.ResponseWriter, r *http.Request) {
 }
 
 // TransferOwnership serves POST /api/v1/evm/signers/{address}/transfer.
+//
+//	@Summary	Transfer a signer to another api key
+//	@Description	⚠️ Hands the signer to `new_owner_id`, so the CALLER loses it. Existing access grants are not part of this response.
+//	@Tags	signers
+//	@Accept	json
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Param	body	body	TransferOwnershipRequest	true	"the api key that should own it"
+//	@Success	200	{object}	map[string]string	"keys describing the completed transfer"
+//	@Failure	400	{object}	map[string]string	"bad body, missing new_owner_id, or a new owner the service refuses"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"only the signer owner may do this"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address}/transfer [post]
 func (h *SignerHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -199,6 +334,18 @@ func (h *SignerHandler) TransferOwnership(w http.ResponseWriter, r *http.Request
 }
 
 // ListAccess serves GET /api/v1/evm/signers/{address}/access.
+//
+//	@Summary	List a signer's access grants
+//	@Description	⚠️ Returns a bare JSON ARRAY, not an object with a key.
+//	@Description	⛔ Every failure from the access service is flattened to 403 with the service's own message — including a signer that does not exist. There is no 404 on this endpoint.
+//	@Tags	signers
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Success	200	{array}	SignerAccessResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"not permitted, or the signer does not exist — the two are not distinguished"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address}/access [get]
 func (h *SignerHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -208,6 +355,21 @@ func (h *SignerHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
 }
 
 // GrantAccess serves POST /api/v1/evm/signers/{address}/access.
+//
+//	@Summary	Grant another api key access to a signer
+//	@Description	Access is not ownership: the grantee may use the signer, the owner stays the owner.
+//	@Description	⛔ Every failure from the access service is flattened to 403, so "already granted", "no such signer" and "you may not grant this" arrive with the same status and differ only in the message.
+//	@Tags	signers
+//	@Accept	json
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Param	body	body	GrantAccessRequest	true	"the api key to grant"
+//	@Success	200	{object}	map[string]string	"keys `status`, `signer_address`, `api_key_id`"
+//	@Failure	400	{object}	map[string]string	"bad body or missing api_key_id"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"any refusal from the access service"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address}/access [post]
 func (h *SignerHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {
@@ -224,6 +386,19 @@ func (h *SignerHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 // does not match an empty segment, so that request now matches no DELETE
 // pattern and the mux answers 405 (GET and POST are registered on that path).
 // The guard is gone rather than kept as unreachable code.
+//
+//	@Summary	Revoke an api key's access to a signer
+//	@Description	Takes no request body. ⚠️ Answers 200 with a body, not 204.
+//	@Description	⛔ Every failure from the access service is flattened to 403, including a grant that never existed — there is no 404 here.
+//	@Tags	signers
+//	@Produce	json
+//	@Param	address	path	string	true	"signer address"
+//	@Param	keyID	path	string	true	"the api key whose grant is being revoked"
+//	@Success	200	{object}	map[string]string	"keys `status`, `signer_address`, `api_key_id`"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"any refusal from the access service"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/signers/{address}/access/{keyID} [delete]
 func (h *SignerHandler) RevokeAccess(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.signerAddress(w, r)
 	if !ok {

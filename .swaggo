@@ -18,3 +18,35 @@
 // interface{}` (the fully-qualified form the swag docs show) is accepted and then
 // does nothing — measured on rc6: generation still fails on the same type.
 replace json.RawMessage interface{}
+
+// time.Duration: same failure mode as above — swag v2.0.0-rc6 answers "cannot
+// find type definition: time.Duration" and **refuses to generate at all**, so
+// without this line the settings group (nine snapshots, eighteen routes) takes
+// the whole document down with it.
+//
+// ⭐ Unlike the line above, this override is not a loss. time.Duration *is* an
+// int64, none of the snapshot types define MarshalJSON, and encoding/json
+// therefore puts a plain JSON number on the wire and reads one back. `int64` is
+// what the wire actually carries, so the generated schema is exactly true.
+//
+// ⚠️ What it cannot carry is the unit: the number is **nanoseconds**, so 30s is
+// 30000000000 and a client that sends 30 has asked for 30ns. OpenAPI has no
+// vocabulary for a unit on an integer, so that fact lives in the @Description of
+// each settings endpoint instead of being silently lost here. ⛔ Do not "fix"
+// this by replacing with `string` — that would describe a wire format the
+// daemon does not accept.
+replace time.Duration int64
+
+// pq.StringArray: third type in the same family — swag v2.0.0-rc6 cannot resolve
+// it and refuses to generate, which takes the whole document down as soon as any
+// endpoint returns a types.Rule (AppliedTo is a pq.StringArray).
+//
+// ⭐ Also not a loss. `type StringArray []string`, and lib/pq gives it Scan and
+// Value for database/sql but NO MarshalJSON/UnmarshalJSON (checked in the module
+// cache), so encoding/json treats it as a plain []string in both directions.
+// `[]string` is exactly what the wire carries.
+//
+// ⚠️ The Postgres array literal syntax it exists for ({a,b}) never appears in
+// JSON — that encoding lives on the database side of the struct, behind the
+// gorm tag, and is not part of the API contract.
+replace pq.StringArray []string

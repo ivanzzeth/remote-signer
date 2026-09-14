@@ -69,7 +69,9 @@ type WalletSignersResponse struct {
 
 // UnlockSignerRequest represents the request to unlock a locked signer
 type UnlockSignerRequest struct {
-	Password string `json:"password"`
+	// Rejected when empty: 400 "password is required" (signer_locking.go
+	// handleUnlock, after the ownership check).
+	Password string `json:"password" binding:"required"`
 }
 
 // ListSignersResponse represents the response for listing signers
@@ -81,7 +83,12 @@ type ListSignersResponse struct {
 
 // CreateSignerRequest represents the request to create a signer
 type CreateSignerRequest struct {
-	Type        string                 `json:"type"`
+	// Rejected when empty: types.CreateSignerRequest.Validate answers
+	// ErrMissingSignerType for the empty case, which the handler turns into 400.
+	Type string `json:"type" binding:"required"`
+	// ⚠️ NOT marked required although a keystore-type create cannot succeed
+	// without it (ErrMissingKeystoreParams → 400): the requirement is
+	// conditional on `type`, which a flat required list cannot express.
 	Keystore    *CreateKeystoreRequest `json:"keystore,omitempty"`
 	DisplayName string                 `json:"display_name,omitempty"`
 	Tags        []string               `json:"tags,omitempty"`
@@ -93,7 +100,13 @@ type CreateSignerRequest struct {
 //   - PrivateKeyHex: raw secp256k1 (64 hex chars, 0x prefix optional).
 //   - KeystoreJSON: full v3 keystore JSON encrypted with Password.
 type CreateKeystoreRequest struct {
-	Password      string `json:"password"`
+	// Required WHENEVER this object is present, which is exactly what a schema
+	// `required` means: Validate answers ErrEmptyPassword → 400. There is no
+	// path on which a present keystore object with an empty password succeeds.
+	Password string `json:"password" binding:"required"`
+	// ⛔ At most one of these two, and neither is required — leaving both empty
+	// creates a fresh keypair. Sending both is 400 "specify private_key_hex or
+	// keystore_json, not both". An at-most-one-of, which no required list says.
 	PrivateKeyHex string `json:"private_key_hex,omitempty"`
 	KeystoreJSON  string `json:"keystore_json,omitempty"`
 }
@@ -108,6 +121,11 @@ type CreateSignerResponse struct {
 }
 
 // PatchSignerLabelsRequest updates human-readable signer labels (owner only).
+//
+// ⛔ Neither field is required individually, but an empty body IS rejected (400
+// "at least one of display_name or tags is required") — a one-of-two rule a flat
+// required list cannot state. Both are pointers so "absent" and "set to empty"
+// stay distinguishable, which is how a label gets cleared.
 type PatchSignerLabelsRequest struct {
 	DisplayName *string   `json:"display_name"`
 	Tags        *[]string `json:"tags"`
@@ -115,7 +133,8 @@ type PatchSignerLabelsRequest struct {
 
 // GrantAccessRequest represents the request to grant access to a signer.
 type GrantAccessRequest struct {
-	APIKeyID string `json:"api_key_id"`
+	// Rejected when empty: 400 "api_key_id is required".
+	APIKeyID string `json:"api_key_id" binding:"required"`
 }
 
 // SignerAccessResponse represents an access grant entry.

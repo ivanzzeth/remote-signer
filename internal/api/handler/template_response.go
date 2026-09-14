@@ -62,12 +62,21 @@ type ListTemplatesResponse struct {
 
 // CreateTemplateRequest represents a request to create a new template via API
 type CreateTemplateRequest struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Type        string                 `json:"type"`
-	Mode        string                 `json:"mode"`
-	Variables   []TemplateVarRequest   `json:"variables,omitempty"`
-	Config      map[string]interface{} `json:"config"`
+	// Name is rejected when empty: createTemplate returns 400 "name is
+	// required" (template_handler.go, right after the decode).
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description,omitempty"`
+	// Type is rejected when empty: 400 "type is required". Must be a known
+	// rule type or the meta type "template_bundle".
+	Type string `json:"type" binding:"required"`
+	// Mode is rejected when empty: 400 "mode is required".
+	Mode      string               `json:"mode" binding:"required"`
+	Variables []TemplateVarRequest `json:"variables,omitempty"`
+	// ⚠️ Config is NOT required despite having no omitempty: the handler
+	// json.Marshals it with no emptiness check, so an absent config stores
+	// `null` and creates the template. Reported rather than enforced — adding
+	// the check would be a validation change.
+	Config map[string]interface{} `json:"config"`
 	// BudgetMetering (optional) configures how a template instance measures "spend amount"
 	// for budget enforcement.
 	//
@@ -108,7 +117,7 @@ type InstantiateTemplateRequest struct {
 	ChainID       *string           `json:"chain_id,omitempty"`
 	APIKeyID      *string           `json:"api_key_id,omitempty"`
 	SignerAddress *string           `json:"signer_address,omitempty"`
-	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
+	ExpiresAt     *time.Time        `json:"expires_at,omitempty" format:"date-time"`
 	ExpiresIn     *string           `json:"expires_in,omitempty"` // duration string e.g. "24h", "168h"
 	Budget        *BudgetRequest    `json:"budget,omitempty"`
 	Schedule      *ScheduleRequest  `json:"schedule,omitempty"`
@@ -127,7 +136,7 @@ type BudgetRequest struct {
 // ScheduleRequest represents schedule config in an instantiate request
 type ScheduleRequest struct {
 	Period  string     `json:"period"` // duration string e.g. "24h"
-	StartAt *time.Time `json:"start_at,omitempty"`
+	StartAt *time.Time `json:"start_at,omitempty" format:"date-time"`
 }
 
 // InstantiateTemplateResponse represents the response for creating a rule instance

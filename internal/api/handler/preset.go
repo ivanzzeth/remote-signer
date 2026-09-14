@@ -178,6 +178,17 @@ type PresetListItem struct {
 
 // ListPresets serves GET /api/v1/presets — the visible catalogue, narrowed by
 // the optional ?q= fuzzy query.
+//
+//	@Summary	List presets
+//	@Description	⚠️ Filtering happens in the daemon after loading every row, and `q` is a fuzzy match over id, name, description and template ids. There is no paging: the whole visible catalogue comes back.
+//	@Tags	presets
+//	@Produce	json
+//	@Param	q	query	string	false	"fuzzy filter over id / name / description / template ids"
+//	@Success	200	{object}	map[string][]PresetListItem	"single key `presets`"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/presets [get]
 func (h *PresetHandler) ListPresets(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.presetRepo.List(r.Context(), storage.PresetFilter{})
 	if err != nil {
@@ -240,6 +251,18 @@ type PresetDetailResponse struct {
 
 // GetPreset serves GET /api/v1/presets/{id} — the detail view, joining the
 // variable definitions of every template the preset references.
+//
+//	@Summary	Get one preset
+//	@Description	⚠️ `variables[].required` is the union of the preset's operator override flag and the template's own declared flag — a preset can make a variable mandatory that its template calls optional. That list is what POST .../apply enforces.
+//	@Description	⚠️ Any repository error answers 404, including a real failure — the handler does not distinguish them.
+//	@Tags	presets
+//	@Produce	json
+//	@Param	id	path	string	true	"preset id"
+//	@Success	200	{object}	PresetDetailResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/presets/{id} [get]
 func (h *PresetHandler) GetPreset(w http.ResponseWriter, r *http.Request) {
 	id := presetID(r)
 	p, err := h.presetRepo.Get(r.Context(), id)
@@ -347,6 +370,24 @@ type validatePresetResponse struct {
 // carries PermApplyPreset because that is what the POST /api/v1/presets/
 // pattern this endpoint came from carried. ⛔ Changing either is a security
 // decision, not part of this decomposition (proposal §2.5).
+//
+//	@Summary	Dry-run a preset's test cases
+//	@Description	Runs every referenced template's test cases against the resolved variables. Creates nothing.
+//	@Description	⛔ Admin ROLE required, checked inside the handler and answered as 403 — that is stricter than the route's apply_preset permission, so a non-admin key holding that permission still gets 403 here.
+//	@Description	⚠️ The request body is optional and best-effort: `{\"variables\": {...}}` overrides the preset defaults, but a body that fails to parse is SILENTLY IGNORED rather than answered with 400. A typo in the body yields a validation run against the preset defaults, which looks like a pass.
+//	@Tags	presets
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"preset id"
+//	@Param	body	body	map[string]map[string]string	false	"optional `{variables: {...}}` overrides; unparseable bodies are ignored, not rejected"
+//	@Success	200	{object}	validatePresetResponse
+//	@Failure	400	{object}	map[string]string	"the preset references no templates"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"admin role required"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	503	{object}	map[string]string	"no JS evaluator wired"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/presets/{id}/validate [post]
 func (h *PresetHandler) ValidatePreset(w http.ResponseWriter, r *http.Request) {
 	if !middleware.GetAPIKey(r.Context()).IsAdmin() {
 		respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
@@ -478,9 +519,16 @@ func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolved
 // here fall back to the preset's defaults (which themselves fall back
 // to the template's declared defaults).
 type ApplyPresetRequest struct {
+	// Variables is NOT required: a nil map is replaced by an empty one and the
+	// preset's own defaults apply. ⚠️ What IS required cannot be said in a
+	// schema — the preset's operator_overrides decide, per preset, which keys
+	// must be present and non-empty, and a missing one is 400 "required
+	// override %q not supplied". Call GET /api/v1/presets/{id} and read
+	// `variables[].required` to learn which.
 	Variables map[string]string `json:"variables"`
 	AppliedTo []string          `json:"applied_to,omitempty"`
 	// Parsed only to reject — never honored. See validation_mandatory.go.
+	// ⛔ Not required, and sending `true` is a 400 by design.
 	SkipValidation bool `json:"skip_validation,omitempty"` //nolint:staticcheck // kept to detect forbidden client requests
 }
 
@@ -491,6 +539,24 @@ type ApplyPresetRequest struct {
 // the method-less body of `GET /api/v1/presets/` as well: a GET carrying a JSON
 // body reached this function and applied the preset, on the *read* permission,
 // never touching PermApplyPreset. See module_presets.go for the measurement.
+//
+//	@Summary	Apply a preset
+//	@Description	Creates one rule instance per template_id, in a single transaction.
+//	@Description	⛔ Test cases ALWAYS run: `skip_validation: true` is a 400 and a missing JS evaluator is a 503. There is no bypass, on purpose (validation_mandatory.go).
+//	@Description	⚠️ Almost every failure after the preset loads is a 400, including validation failures and commit failures — the status does not tell a client whether to retry.
+//	@Tags	presets
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"preset id"
+//	@Param	body	body	ApplyPresetRequest	true	"operator variables and target signers"
+//	@Success	201	{object}	map[string][]map[string]interface{}	"single key `results`, one entry per created instance"
+//	@Failure	400	{object}	map[string]string	"disabled preset, missing required override, skip_validation, failed test cases, or a failed commit"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"security.rules_api_readonly is on"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	503	{object}	map[string]string	"no template service, no database, no JS evaluator, or a solidity template without forge"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/presets/{id}/apply [post]
 func (h *PresetHandler) ApplyPreset(w http.ResponseWriter, r *http.Request) {
 	id := presetID(r)
 	apiKey := middleware.GetAPIKey(r.Context())

@@ -54,15 +54,44 @@ func NewWalletHandler(repo storage.WalletRepository, ownershipRepo storage.Signe
 //
 // ⛔ The JSON tags are the actual contract and none of them changed here. A
 // field name a client parses lives in the tag, not in the Go identifier.
+//
+// # `binding:"required"` is documentation, and it is documentation of the handler
+//
+// ⛔ There is no binding framework in this repository — no gin, no
+// go-playground/validator, nothing reads this tag at run time (grep: zero
+// imports of either). It exists for exactly one reader: swag, which turns it
+// into `required: [...]` on the generated schema, and from there into a
+// non-optional field in every generated SDK. Without it **every** property
+// generates as optional and an SDK lets a caller omit a field the handler
+// rejects.
+//
+// ⚠️ Therefore the tag is only allowed where the handler *already* rejects the
+// request when the field is absent, and the comment on each one names the line
+// that does the rejecting. A tag on a field the handler tolerates would make the
+// spec lie in the more dangerous direction: the SDK would refuse a request the
+// server accepts, and nobody would find out from the server. ⛔ And the fix for
+// such a mismatch is never to add a check to the handler so the annotation comes
+// true — that is a behaviour change wearing a documentation change's clothes.
 
 // CreateWalletRequest is the body of POST /api/v1/wallets.
 type CreateWalletRequest struct {
-	Name        string `json:"name"`
+	// Name is rejected when blank or absent: createWallet returns 400
+	// "name is required" (see the TrimSpace check below the decode).
+	Name string `json:"name" binding:"required"`
+	// Description has no check at all and its zero value is meaningful (a
+	// wallet with no description), so it is optional.
 	Description string `json:"description,omitempty"`
 }
 
 // UpdateWalletRequest is the body of PATCH /api/v1/wallets/{id}. Both fields are
 // pointers so that "absent" and "set to empty" stay distinguishable.
+//
+// ⛔ Neither field is required and that is the whole point of PATCH here:
+// updateWallet leaves an absent field alone. `{}` is a valid body. ⚠️ Note the
+// asymmetry that a schema cannot express: Name absent is fine, Name *present and
+// blank* is a 400 ("name cannot be empty"). That is a minLength on a nullable
+// field, not a required, and swag has no tag for it — recorded as a finding
+// rather than approximated with `required`, which would be false.
 type UpdateWalletRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
@@ -70,7 +99,9 @@ type UpdateWalletRequest struct {
 
 // AddMemberRequest is the body of POST /api/v1/wallets/{id}/members.
 type AddMemberRequest struct {
-	SignerAddress string `json:"signer_address"`
+	// SignerAddress is rejected when blank or absent: addMember returns 400
+	// "signer_address is required".
+	SignerAddress string `json:"signer_address" binding:"required"`
 }
 
 // WalletResponse is one wallet as the API returns it.

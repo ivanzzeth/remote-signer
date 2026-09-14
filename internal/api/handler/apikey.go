@@ -22,25 +22,41 @@ var apiKeyIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 // APIKeyResponse represents an API key in API responses.
 type APIKeyResponse struct {
-	ID         string           `json:"id"`
-	Name       string           `json:"name"`
-	Source     string           `json:"source"`
-	Role       types.APIKeyRole `json:"role"`
-	Enabled    bool             `json:"enabled"`
-	RateLimit  int              `json:"rate_limit"`
-	CreatedAt  time.Time        `json:"created_at"`
-	UpdatedAt  time.Time        `json:"updated_at"`
-	LastUsedAt *time.Time       `json:"last_used_at,omitempty"`
-	ExpiresAt  *time.Time       `json:"expires_at,omitempty"`
+	ID        string           `json:"id"`
+	Name      string           `json:"name"`
+	Source    string           `json:"source"`
+	Role      types.APIKeyRole `json:"role"`
+	Enabled   bool             `json:"enabled"`
+	RateLimit int              `json:"rate_limit"`
+	// ⚠️ The four timestamps carry `format:"date-time"` for swag only. Without
+	// it a time.Time generates as a bare `string` and a generated SDK hands the
+	// caller an unparsed one; encoding/json really does write RFC 3339 here, so
+	// the format is the truth and its absence was the lie.
+	// ⛔ It does not fix the other half: `last_used_at` and `expires_at` are
+	// pointers and generate as non-nullable strings anyway — swag has no tag for
+	// OpenAPI 3.1 nullability, so "absent" is the only signal a client gets.
+	CreatedAt  time.Time  `json:"created_at" format:"date-time"`
+	UpdatedAt  time.Time  `json:"updated_at" format:"date-time"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty" format:"date-time"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty" format:"date-time"`
 }
 
 // CreateAPIKeyRequest represents the request to create an API key.
 type CreateAPIKeyRequest struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	PublicKey string `json:"public_key"`           // Ed25519 public key, hex or base64 DER
-	Role      string `json:"role"`                 // admin, dev, agent, strategy
-	RateLimit int    `json:"rate_limit,omitempty"` // default 100
+	// ID is rejected when empty: createAPIKey returns 400 "id is required"
+	// (apikey.go:297). Also capped at 64 chars and restricted to [a-zA-Z0-9-].
+	ID string `json:"id" binding:"required"`
+	// Name is rejected when empty: 400 "name is required" (apikey.go:311).
+	Name string `json:"name" binding:"required"`
+	// PublicKey is rejected when empty: 400 "public_key is required"
+	// (apikey.go:321). Ed25519 public key, hex or base64 DER.
+	PublicKey string `json:"public_key" binding:"required"`
+	// Role is rejected when empty: 400 "role is required" (apikey.go:341).
+	// One of admin, dev, agent, strategy.
+	Role string `json:"role" binding:"required"`
+	// RateLimit is NOT required: 0 (the absent value) is replaced by the
+	// default 100 at apikey.go:332, so omitting it is a supported call.
+	RateLimit int `json:"rate_limit,omitempty"`
 }
 
 // UpdateAPIKeyRequest represents the request to update an API key.
@@ -140,26 +156,100 @@ func (h *APIKeyHandler) SetAccessService(svc AccessServiceForKeyDelete) {
 // again by accident.
 
 // ListAPIKeys serves GET /api/v1/api-keys.
+//
+//	@Summary	List API keys
+//	@Description	⛔ The Ed25519 public key is never returned by any endpoint in this group — `toAPIKeyResponse` omits it deliberately.
+//	@Description	⚠️ `limit` above 100 is clamped to 100 rather than rejected; a negative or non-numeric one is a 400.
+//	@Tags	api-keys
+//	@Produce	json
+//	@Param	source	query	string	false	"restrict to keys from this source (config or api)"
+//	@Param	enabled	query	bool	false	"⚠️ only `true` filters — `false` is parsed, then ignored, so it returns enabled and disabled alike"
+//	@Param	limit	query	int	false	"default 100, clamped to 100"
+//	@Param	offset	query	int	false	"rows to skip"
+//	@Success	200	{object}	ListAPIKeysResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/api-keys [get]
 func (h *APIKeyHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	h.listAPIKeys(w, r)
 }
 
 // CreateAPIKey serves POST /api/v1/api-keys.
+//
+//	@Summary	Create an API key
+//	@Description	⚠️ The caller supplies the public key; the daemon never generates or stores a private key for an API key, and nothing secret comes back in the response.
+//	@Description	⚠️ New keys are always created enabled, with source `api`. Neither is settable.
+//	@Tags	api-keys
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	CreateAPIKeyRequest	true	"key to create"
+//	@Success	201	{object}	APIKeyResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"api_keys_api_readonly is on in the security settings"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/api-keys [post]
 func (h *APIKeyHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	h.createAPIKey(w, r)
 }
 
 // GetAPIKey serves GET /api/v1/api-keys/{id}.
+//
+//	@Summary	Get one API key
+//	@Tags	api-keys
+//	@Produce	json
+//	@Param	id	path	string	true	"api key id"
+//	@Success	200	{object}	APIKeyResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/api-keys/{id} [get]
 func (h *APIKeyHandler) GetAPIKey(w http.ResponseWriter, r *http.Request) {
 	h.getAPIKey(w, r, r.PathValue("id"))
 }
 
 // UpdateAPIKey serves PUT /api/v1/api-keys/{id}.
+//
+//	@Summary	Update an API key
+//	@Description	Partial: every field is a pointer and an absent one is left alone. `{}` is a valid body and a no-op.
+//	@Description	⛔ Two self-protection rules answer 400, not 403: you cannot change your own role, and a config-sourced key cannot be modified through the API at all (that one is 403).
+//	@Tags	api-keys
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"api key id"
+//	@Param	body	body	UpdateAPIKeyRequest	true	"fields to change"
+//	@Success	200	{object}	APIKeyResponse
+//	@Failure	400	{object}	map[string]string	"bad body, own role, empty/too-long name, unknown role, or rate_limit outside 1..10000"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"read-only mode, or the key came from config.yaml"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/api-keys/{id} [put]
 func (h *APIKeyHandler) UpdateAPIKey(w http.ResponseWriter, r *http.Request) {
 	h.updateAPIKey(w, r, r.PathValue("id"))
 }
 
 // DeleteAPIKey serves DELETE /api/v1/api-keys/{id}.
+//
+//	@Summary	Delete an API key
+//	@Description	⛔ Three lockout guards answer 400: you cannot delete your own key, you cannot delete the last enabled admin key, and a key that still owns signers must have them deleted or transferred first.
+//	@Description	⚠️ On success the daemon cascades rules, applied_to and signer_access for the deleted key. A cascade failure is logged and does NOT change the 204 — the key is already gone by then.
+//	@Tags	api-keys
+//	@Produce	json
+//	@Param	id	path	string	true	"api key id"
+//	@Success	204	"deleted; no body"
+//	@Failure	400	{object}	map[string]string	"own key, last admin key, or the key still owns signers"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"read-only mode, or the key came from config.yaml"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/api-keys/{id} [delete]
 func (h *APIKeyHandler) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	h.deleteAPIKey(w, r, r.PathValue("id"))
 }
@@ -239,6 +329,17 @@ func (h *APIKeyHandler) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 //
 // Today this returns the full enabled set; pagination + free-text
 // search can land later under the same shape if catalogues grow.
+//
+//	@Summary	List API key names
+//	@Description	Authenticated but NOT permissioned: any valid key may call it, which is why the projection is deliberately narrower than the admin listing — id, name, role, enabled and nothing else.
+//	@Description	⚠️ Enabled keys only, hard-capped at 500, with no paging parameters. A deployment past 500 keys silently sees a prefix.
+//	@Tags	api-keys
+//	@Produce	json
+//	@Success	200	{object}	ListAPIKeyNamesResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/api-keys/names [get]
 func (h *APIKeyHandler) ListAPIKeyNames(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: GET /api/v1/api-keys/names is method-scoped.
 	// Caller is already authenticated by the router (withAuth, not

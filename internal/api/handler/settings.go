@@ -70,46 +70,127 @@ func (h *SettingsHandler) SetAuditLogger(a *audit.AuditLogger) { h.audit = a }
 // this API serves is now stated where the mux enforces it.
 
 // GetSecurity returns the current security snapshot.
+//
+//	@Summary	Read the security settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.SecuritySnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/security [get]
 func (h *SettingsHandler) GetSecurity(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.Security())
 }
 
 // GetNotify returns the current notification snapshot.
+//
+//	@Summary	Read the notification settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.NotifySnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/notify [get]
 func (h *SettingsHandler) GetNotify(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.Notify())
 }
 
 // GetAuditMonitor returns the current audit-monitor snapshot.
+//
+//	@Summary	Read the audit-monitor settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.AuditMonitorSnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/audit_monitor [get]
 func (h *SettingsHandler) GetAuditMonitor(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.AuditMonitor())
 }
 
 // GetBlocklist returns the current dynamic-blocklist snapshot.
+//
+//	@Summary	Read the dynamic-blocklist settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.BlocklistSnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.dynamic_blocklist [get]
 func (h *SettingsHandler) GetBlocklist(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.Blocklist())
 }
 
 // GetSimulation returns the current simulation snapshot.
+//
+//	@Summary	Read the simulation settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.SimulationSnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.simulation [get]
 func (h *SettingsHandler) GetSimulation(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.Simulation())
 }
 
 // GetFoundry returns the current Foundry snapshot.
+//
+//	@Summary	Read the Foundry settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.FoundrySnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.foundry [get]
 func (h *SettingsHandler) GetFoundry(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.Foundry())
 }
 
 // GetRPCGateway returns the current RPC-gateway snapshot.
+//
+//	@Summary	Read the RPC-gateway settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.RPCGatewaySnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.rpc_gateway [get]
 func (h *SettingsHandler) GetRPCGateway(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.RPCGateway())
 }
 
 // GetMaterialCheck returns the current material-check snapshot.
+//
+//	@Summary	Read the material-check settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.MaterialCheckSnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.material_check [get]
 func (h *SettingsHandler) GetMaterialCheck(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.MaterialCheck())
 }
 
 // GetWeb returns the current Web UI snapshot.
+//
+//	@Summary	Read the Web UI settings
+//	@Description	Returns the group as the daemon is currently running it — the live snapshot, not what config.yaml said at boot.
+//	@Tags	settings
+//	@Produce	json
+//	@Success	200	{object}	settings.WebSnapshot
+//	@Failure	401	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/web [get]
 func (h *SettingsHandler) GetWeb(w http.ResponseWriter, _ *http.Request) {
 	writeSettingsJSON(w, http.StatusOK, h.mgr.Web())
 }
@@ -124,54 +205,189 @@ func (h *SettingsHandler) GetWeb(w http.ResponseWriter, _ *http.Request) {
 // through SetOnSecurityUpdated, so a changed approval policy takes effect
 // without a restart. Written here rather than inside putSettingsGroup because
 // "security is special" is a fact about this endpoint, not about the mechanism.
+//
+//	@Summary	Replace the security settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.SecuritySnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.SecuritySnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/security [put]
 func (h *SettingsHandler) PutSecurity(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupSecurity, h.mgr.UpdateSecurity,
 		func() any { return h.mgr.Security() }, h.onSecurityUpdated)
 }
 
 // PutNotify replaces the notification snapshot.
+//
+//	@Summary	Replace the notification settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.NotifySnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.NotifySnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/notify [put]
 func (h *SettingsHandler) PutNotify(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupNotify, h.mgr.UpdateNotify,
 		func() any { return h.mgr.Notify() }, nil)
 }
 
 // PutAuditMonitor replaces the audit-monitor snapshot.
+//
+//	@Summary	Replace the audit-monitor settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.AuditMonitorSnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.AuditMonitorSnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/audit_monitor [put]
 func (h *SettingsHandler) PutAuditMonitor(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupAuditMonitor, h.mgr.UpdateAuditMonitor,
 		func() any { return h.mgr.AuditMonitor() }, nil)
 }
 
 // PutBlocklist replaces the dynamic-blocklist snapshot.
+//
+//	@Summary	Replace the dynamic-blocklist settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.BlocklistSnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.BlocklistSnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.dynamic_blocklist [put]
 func (h *SettingsHandler) PutBlocklist(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupBlocklist, h.mgr.UpdateBlocklist,
 		func() any { return h.mgr.Blocklist() }, nil)
 }
 
 // PutSimulation replaces the simulation snapshot.
+//
+//	@Summary	Replace the simulation settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.SimulationSnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.SimulationSnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.simulation [put]
 func (h *SettingsHandler) PutSimulation(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupSimulation, h.mgr.UpdateSimulation,
 		func() any { return h.mgr.Simulation() }, nil)
 }
 
 // PutFoundry replaces the Foundry snapshot.
+//
+//	@Summary	Replace the Foundry settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.FoundrySnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.FoundrySnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.foundry [put]
 func (h *SettingsHandler) PutFoundry(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupFoundry, h.mgr.UpdateFoundry,
 		func() any { return h.mgr.Foundry() }, nil)
 }
 
 // PutRPCGateway replaces the RPC-gateway snapshot.
+//
+//	@Summary	Replace the RPC-gateway settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.RPCGatewaySnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.RPCGatewaySnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.rpc_gateway [put]
 func (h *SettingsHandler) PutRPCGateway(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupRPCGateway, h.mgr.UpdateRPCGateway,
 		func() any { return h.mgr.RPCGateway() }, nil)
 }
 
 // PutMaterialCheck replaces the material-check snapshot.
+//
+//	@Summary	Replace the material-check settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.MaterialCheckSnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.MaterialCheckSnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/evm.material_check [put]
 func (h *SettingsHandler) PutMaterialCheck(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupMaterialCheck, h.mgr.UpdateMaterialCheck,
 		func() any { return h.mgr.MaterialCheck() }, nil)
 }
 
 // PutWeb replaces the Web UI snapshot.
+//
+//	@Summary	Replace the Web UI settings
+//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
+//	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
+//	@Tags	settings
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	settings.WebSnapshot	true	"the complete replacement snapshot"
+//	@Success	200	{object}	settings.WebSnapshot
+//	@Failure	400	{string}	string	"invalid JSON (text/plain)"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{string}	string	"the store rejected the write (text/plain)"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/admin/settings/web [put]
 func (h *SettingsHandler) PutWeb(w http.ResponseWriter, r *http.Request) {
 	putSettingsGroup(h, w, r, settings.GroupWeb, h.mgr.UpdateWeb,
 		func() any { return h.mgr.Web() }, nil)

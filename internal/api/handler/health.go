@@ -123,6 +123,14 @@ func (h *HealthHandler) approvalGuardHealth() *ApprovalGuardHealth {
 }
 
 // ServeHTTP handles GET /health
+//
+//	@Summary		Liveness and readiness
+//	@Description	Unauthenticated on purpose: orchestrators scrape it and `remote-signer server status` calls it before any API key exists.
+//	@Description	⚠️ It answers with more than liveness — version plus a security summary. `security` is absent entirely until SetSecurityConfig has been called, and `security.approval_guard` is absent when the guard is disabled.
+//	@Tags			health
+//	@Produce		json
+//	@Success		200	{object}	HealthResponse
+//	@Router			/health [get]
 func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
 	// ServeMux answers 405 before this runs.

@@ -118,12 +118,21 @@ type ListBudgetsResponse struct {
 // daemon refuses RuleID values that start with "sim:" — those belong
 // to the simulation fallback's owned namespace.
 type CreateBudgetRequest struct {
-	RuleID     string `json:"rule_id"`
-	Unit       string `json:"unit"`
-	MaxTotal   string `json:"max_total"`
-	MaxPerTx   string `json:"max_per_tx,omitempty"`
-	MaxTxCount int    `json:"max_tx_count,omitempty"`
-	AlertPct   int    `json:"alert_pct,omitempty"`
+	// RuleID is rejected when blank after trimming: 400 "rule_id is required".
+	RuleID string `json:"rule_id" binding:"required"`
+	// Unit is rejected when blank after trimming: 400 "unit is required".
+	Unit string `json:"unit" binding:"required"`
+	// MaxTotal is required, and the reason is not the field name: the check is
+	// isValidBudgetLimit, which rejects the empty string, so an absent
+	// max_total is 400 "max_total must be a non-negative decimal or \"-1\"".
+	// ⚠️ Contrast MaxPerTx below, whose check is guarded by `!= ""`.
+	MaxTotal string `json:"max_total" binding:"required"`
+	// Not required: empty means unlimited and becomes "-1".
+	MaxPerTx string `json:"max_per_tx,omitempty"`
+	// Not required: 0 is a meaningful value (no tx-count cap) and passes.
+	MaxTxCount int `json:"max_tx_count,omitempty"`
+	// Not required: 0 is replaced by the default 80.
+	AlertPct int `json:"alert_pct,omitempty"`
 }
 
 // UpdateBudgetRequest patches mutable fields on an existing budget.
@@ -159,6 +168,24 @@ func (h *BudgetListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ⚠️ The annotation lives here and not on ServeHTTP. ServeHTTP is registered
+// for both GET and POST and switches on r.Method, so a single comment block
+// above it would have to carry one request body for two verbs — the POST
+// body would appear on the GET operation. swag reads comments on unexported
+// functions too, so each verb is documented on the function that implements it.
+//
+//	@Summary	List budgets
+//	@Description	⚠️ No query parameters and no paging: every budget row the caller may see comes back, and `total` is the length of that filtered list rather than a database count.
+//	@Description	⚠️ Visibility is per row and a row the caller may not see is dropped silently.
+//	@Description	⚠️ Rows whose budget period has rolled over are renewed on read, so a GET here is not side-effect free.
+//	@Description	⚠️ `kind` separates real rule budgets from synthetic `simulation` ones, whose rule_id is `sim:<address>`.
+//	@Tags	budgets
+//	@Produce	json
+//	@Success	200	{object}	ListBudgetsResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/budgets [get]
 func (h *BudgetListHandler) handleList(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey) {
 	budgets, err := h.budgetRepo.ListAll(r.Context())
 	if err != nil {
@@ -184,6 +211,29 @@ func (h *BudgetListHandler) handleList(w http.ResponseWriter, r *http.Request, a
 	respond.JSON(w, ListBudgetsResponse{Budgets: entries, Total: len(entries)}, http.StatusOK, h.logger)
 }
 
+// ⚠️ The annotation lives here and not on ServeHTTP. ServeHTTP is registered
+// for both GET and POST and switches on r.Method, so a single comment block
+// above it would have to carry one request body for two verbs — the POST
+// body would appear on the GET operation. swag reads comments on unexported
+// functions too, so each verb is documented on the function that implements it.
+//
+//	@Summary	Create a budget
+//	@Description	The budget id is derived from rule_id + unit, so the pair is the row's identity and cannot be changed later — an identity change is delete plus create.
+//	@Description	⛔ A rule_id starting with `sim:` is 403: that namespace belongs to the simulation fallback and is not client-writable.
+//	@Description	⚠️ Creating a budget for a rule that does not exist is 404, and a duplicate rule+unit is 409 rather than an idempotent 200.
+//	@Tags	budgets
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	CreateBudgetRequest	true	"budget to create"
+//	@Success	201	{object}	BudgetEntry
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"rule_id is in the reserved sim: namespace"
+//	@Failure	404	{object}	map[string]string	"no such rule"
+//	@Failure	409	{object}	map[string]string	"a budget already exists for this rule+unit"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/budgets [post]
 func (h *BudgetListHandler) handleCreate(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey) {
 	var req CreateBudgetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

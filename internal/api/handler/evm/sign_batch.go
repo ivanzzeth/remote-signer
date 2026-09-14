@@ -86,15 +86,27 @@ func (h *BatchSignHandler) SetSignTimeout(d func() time.Duration) {
 
 // BatchSignRequest is the request body for POST /api/v1/evm/sign/batch.
 type BatchSignRequest struct {
-	Requests []BatchSignItem `json:"requests"`
+	// Rejected when absent or empty: 400 "requests array is required and must
+	// not be empty". Capped at 20 items.
+	Requests []BatchSignItem `json:"requests" binding:"required"`
 }
 
 // BatchSignItem is a single sign request within a batch.
+//
+// ⚠️ All four are required per item — each has its own
+// "requests[i].<field> is required" 400. ⛔ What the schema cannot say is the
+// cross-item constraint: every item must carry the SAME chain_id and the SAME
+// signer_address as the first, and sign_type must be exactly "transaction".
 type BatchSignItem struct {
-	ChainID       string          `json:"chain_id"`
-	SignerAddress string          `json:"signer_address"`
-	SignType      string          `json:"sign_type"`
-	Transaction   json.RawMessage `json:"transaction"`
+	ChainID       string `json:"chain_id" binding:"required"`
+	SignerAddress string `json:"signer_address" binding:"required"`
+	// ⛔ Must be the literal "transaction"; anything else is 400 even though it
+	// is a valid sign_type on the single-sign endpoint.
+	SignType string `json:"sign_type" binding:"required"`
+	// Rejected when zero-length. ⚠️ Generated as `{"type":"object"}` via the
+	// .swaggo json.RawMessage override; the real shape is an EVM transaction
+	// object.
+	Transaction json.RawMessage `json:"transaction" binding:"required"`
 }
 
 // BatchSignResponse is the response for POST /api/v1/evm/sign/batch.
@@ -113,6 +125,23 @@ type BatchSignResultItem struct {
 }
 
 // ServeHTTP handles POST /api/v1/evm/sign/batch.
+//
+//	@Summary	Sign a batch of transactions
+//	@Description	Up to 20 transactions, all for the SAME chain_id and the SAME signer_address, all with sign_type \"transaction\". A mismatch anywhere is 400.
+//	@Description	⛔ All-or-nothing: one transaction blocked by a rule fails the WHOLE batch with 403 and nothing is signed. There is no partial success in the 200 body.
+//	@Description	⚠️ When no rule matches, the batch can still be approved by simulation. A simulation that detects an approval, or that cannot run, is 403 — not a 503 — so \"the simulator is down\" and \"your batch was refused\" arrive as the same status.
+//	@Description	⚠️ `net_balance_changes` is present only when simulation actually ran.
+//	@Tags	sign
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	BatchSignRequest	true	"transactions to sign"
+//	@Success	200	{object}	BatchSignResponse
+//	@Failure	400	{object}	map[string]string	"empty or oversized batch, a malformed item, or items that disagree on chain_id / signer_address"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"no signer access, a rule blocked one transaction, or no rule matched and simulation did not auto-approve"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/sign/batch [post]
 func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
 	// ServeMux answers 405 before this runs.

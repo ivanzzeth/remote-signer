@@ -149,6 +149,22 @@ func NewTemplateHandler(
 // swallow, not a reachability defect.
 
 // ListTemplates serves GET /api/v1/templates.
+//
+//	@Summary	List rule templates
+//	@Description	⚠️ Every filter here is silently permissive: an unknown `type` or `source` matches nothing rather than answering 400, `enabled` narrows only on the literal string `true`, and an unparseable `limit`/`offset` leaves the default in place. Nothing in this endpoint returns 400.
+//	@Description	⚠️ `limit` defaults to 100 and is clamped to 1000. `total` is counted without limit/offset, so it is the size of the filtered set.
+//	@Tags	templates
+//	@Produce	json
+//	@Param	type	query	string	false	"rule type; unknown values match nothing"
+//	@Param	source	query	string	false	"config or api; unknown values match nothing"
+//	@Param	enabled	query	string	false	"only the literal `true` narrows; anything else is ignored"
+//	@Param	limit	query	int	false	"default 100, clamped to 1000"
+//	@Param	offset	query	int	false	"rows to skip"
+//	@Success	200	{object}	ListTemplatesResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates [get]
 func (h *TemplateHandler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
@@ -158,6 +174,21 @@ func (h *TemplateHandler) ListTemplates(w http.ResponseWriter, r *http.Request) 
 }
 
 // CreateTemplate serves POST /api/v1/templates.
+//
+//	@Summary	Create a rule template
+//	@Description	⚠️ The id is minted by the daemon as `tmpl_api_<unix nanos>` and cannot be supplied. Source is always `api`.
+//	@Description	⚠️ The config is NOT validated here — it may carry ${var} placeholders and is only checked when an instance is created from it.
+//	@Tags	templates
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	CreateTemplateRequest	true	"template to create"
+//	@Success	201	{object}	TemplateResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"security.rules_api_readonly is on"
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates [post]
 func (h *TemplateHandler) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
@@ -167,6 +198,17 @@ func (h *TemplateHandler) CreateTemplate(w http.ResponseWriter, r *http.Request)
 }
 
 // GetTemplate serves GET /api/v1/templates/{id}.
+//
+//	@Summary	Get one rule template
+//	@Tags	templates
+//	@Produce	json
+//	@Param	id	path	string	true	"template id"
+//	@Success	200	{object}	TemplateResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates/{id} [get]
 func (h *TemplateHandler) GetTemplate(w http.ResponseWriter, r *http.Request) {
 	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
@@ -176,6 +218,23 @@ func (h *TemplateHandler) GetTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateTemplate serves PATCH /api/v1/templates/{id}.
+//
+//	@Summary	Update a rule template
+//	@Description	Partial. ⛔ But not in the usual way: `name` and `description` are plain strings, so an EMPTY string means \"leave unchanged\" and there is no way to clear either through this endpoint. Only `enabled` is a pointer and can be set to false.
+//	@Description	⛔ A template that came from config.yaml cannot be updated through the API at all: 403.
+//	@Tags	templates
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"template id"
+//	@Param	body	body	UpdateTemplateRequest	true	"fields to change"
+//	@Success	200	{object}	TemplateResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"read-only mode, or the template came from config.yaml"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates/{id} [patch]
 func (h *TemplateHandler) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
@@ -185,6 +244,20 @@ func (h *TemplateHandler) UpdateTemplate(w http.ResponseWriter, r *http.Request)
 }
 
 // DeleteTemplate serves DELETE /api/v1/templates/{id}.
+//
+//	@Summary	Delete a rule template
+//	@Description	⛔ A template that came from config.yaml cannot be deleted through the API: 403.
+//	@Description	⚠️ Existing instances created from the template are NOT touched or counted — deletion is not blocked by them.
+//	@Tags	templates
+//	@Produce	json
+//	@Param	id	path	string	true	"template id"
+//	@Success	204	"deleted; no body"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"read-only mode, or the template came from config.yaml"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates/{id} [delete]
 func (h *TemplateHandler) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
@@ -194,6 +267,24 @@ func (h *TemplateHandler) DeleteTemplate(w http.ResponseWriter, r *http.Request)
 }
 
 // InstantiateTemplate serves POST /api/v1/templates/{id}/instantiate.
+//
+//	@Summary	Create a rule instance from a template
+//	@Description	⛔ Test cases ALWAYS run: `skip_validation: true` is a 400 and a missing JS evaluator is a 503. There is no bypass (validation_mandatory.go).
+//	@Description	⚠️ The 201 body is an untyped object, not a named schema: it always carries `rule`, and carries `budget`, `sub_rules` and `sub_budgets` only when the template produced them (a template_bundle expands into sub-rules). A marshal failure on the optional parts is logged and the key is simply omitted from an otherwise successful 201.
+//	@Description	⚠️ Whether the new instance is active or waits for approval is decided by the caller's role and the security settings, not by this request.
+//	@Tags	templates
+//	@Accept	json
+//	@Produce	json
+//	@Param	id	path	string	true	"template id"
+//	@Param	body	body	InstantiateTemplateRequest	true	"instance parameters"
+//	@Success	201	{object}	map[string]interface{}	"`rule`, plus `budget` / `sub_rules` / `sub_budgets` when present"
+//	@Failure	400	{object}	map[string]string	"bad body, bad expires_in or schedule period, unresolvable template, skip_validation, or failed test cases"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"security.rules_api_readonly is on"
+//	@Failure	500	{object}	map[string]string
+//	@Failure	503	{object}	map[string]string	"no JS evaluator, or a solidity template without forge"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates/{id}/instantiate [post]
 func (h *TemplateHandler) InstantiateTemplate(w http.ResponseWriter, r *http.Request) {
 	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)
@@ -209,6 +300,21 @@ func (h *TemplateHandler) InstantiateTemplate(w http.ResponseWriter, r *http.Req
 // it: RouteAuth carries one permission and the route's is PermReadTemplates,
 // exactly as the prefix declared. ⛔ Moving it would be a security change, and
 // deleting it would widen the endpoint to every key holding read_templates.
+//
+//	@Summary	Dry-run a template's test cases
+//	@Description	Runs the template's test cases against its declared test_variables. Creates nothing and takes no request body.
+//	@Description	⛔ Admin ROLE required, checked in the handler and answered as 403 — stricter than the route's read_templates permission, so a non-admin key holding that permission still gets 403.
+//	@Tags	templates
+//	@Produce	json
+//	@Param	id	path	string	true	"template id"
+//	@Success	200	{object}	validateTemplateResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"admin role required"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Failure	503	{object}	map[string]string	"no JS evaluator wired"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates/{id}/validate [post]
 func (h *TemplateHandler) ValidateTemplate(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
@@ -246,6 +352,20 @@ func (h *TemplateHandler) ValidateTemplate(w http.ResponseWriter, r *http.Reques
 // AuthMiddleware runs first — but it is what the two "without_api_key" tests
 // assert, and dropping a 401 on the way past would be a behaviour change
 // smuggled inside a routing change.
+//
+//	@Summary	Revoke a rule instance
+//	@Description	Takes no request body. ⚠️ `ruleID` is one path segment: instance ids are minted as `inst_` + 16 hex and never contain a slash.
+//	@Description	⚠️ Any revocation failure that is not a not-found is a 400 carrying the service's message, including failures a retry would not fix.
+//	@Tags	templates
+//	@Produce	json
+//	@Param	ruleID	path	string	true	"instance rule id"
+//	@Success	200	{object}	map[string]string	"`status` and `rule_id`"
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"security.rules_api_readonly is on"
+//	@Failure	404	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/templates/instances/{ruleID}/revoke [post]
 func (h *TemplateHandler) RevokeInstance(w http.ResponseWriter, r *http.Request) {
 	if middleware.GetAPIKey(r.Context()) == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)

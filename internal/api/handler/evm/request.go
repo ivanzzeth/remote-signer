@@ -126,6 +126,20 @@ type RuleGenerationHints struct {
 //
 // ⚠️ The caller-scoping check inside getRequest is unchanged and is the reason
 // this route carries no permission — see module_requests.go.
+//
+//	@Summary	Get one sign request
+//	@Description	⚠️ Carries the decoded payload and, when the request is still pending, rule-generation hints the approval endpoint can act on.
+//	@Description	⚠️ This route carries no permission on purpose: who may read a row is a per-row decision the handler makes, and a request belonging to another key answers 403.
+//	@Tags	requests
+//	@Produce	json
+//	@Param	id	path	string	true	"sign request id"
+//	@Success	200	{object}	RequestDetailResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"the request belongs to another api key"
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/requests/{id} [get]
 func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
@@ -222,6 +236,30 @@ func NewListHandler(signService service.SignServiceAPI, ruleRepo storage.RuleRep
 // pattern and net/http answers with the headers alone. The collection used to be
 // registered without a method, which is why the guard existed and why HEAD used
 // to get 405 here.
+//
+//	@Summary	List sign requests
+//	@Description	Cursor-paginated. Follow `next_cursor` AND `next_cursor_id` together — the cursor is a RFC3339Nano timestamp and ties break by id.
+//	@Description	⛔ Scoped per caller: admin and dev see every request, everyone else is pinned to their own api key, and `api_key_id` / `role` are read ONLY for admin and dev — a non-admin sending them gets its own rows back rather than a 403.
+//	@Description	⚠️ `limit` outside 1..100 is silently ignored (the default 20 stands), while every other malformed filter is a 400.
+//	@Description	⚠️ Always narrowed to EVM regardless of what is asked.
+//	@Tags	requests
+//	@Produce	json
+//	@Param	signer_address	query	string	false	"0x + 40 hex"
+//	@Param	chain_id	query	string	false	"positive decimal integer"
+//	@Param	status	query	string	false	"comma-separated request statuses; 400 if any is unknown"
+//	@Param	sign_type	query	string	false	"400 if unknown"
+//	@Param	transaction_status	query	string	false	"400 if unknown"
+//	@Param	api_key_id	query	string	false	"admin/dev only; ignored for everyone else"
+//	@Param	role	query	string	false	"admin/dev only; 400 if unknown"
+//	@Param	limit	query	int	false	"1..100; anything else leaves the default 20"
+//	@Param	cursor	query	string	false	"RFC3339Nano timestamp from next_cursor"
+//	@Param	cursor_id	query	string	false	"request id from next_cursor_id; pair it with cursor"
+//	@Success	200	{object}	ListRequestsResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/requests [get]
 func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())

@@ -74,14 +74,26 @@ func NewHDWalletHandler(signerManager evmchain.SignerManager, accessService *ser
 
 // CreateHDWalletRequest is the body of POST /api/v1/evm/hd-wallets.
 type CreateHDWalletRequest struct {
-	Action   string `json:"action"` // "create" or "import"
-	Password string `json:"password"`
+	// ⚠️ Action is NOT required even though it looks like the discriminator:
+	// createOrImport's switch reads `case "create", "":`, so an absent action
+	// means create. Only an unrecognised value is a 400.
+	Action string `json:"action"` // "create" or "import"
+	// Password is rejected when empty: 400 "password is required", checked
+	// before the action switch so it applies to create AND import.
+	Password string `json:"password" binding:"required"`
 
 	// For import — exactly one of Mnemonic / WalletJSON should be set.
+	//
+	// ⛔ Neither is marked required and neither could be: they are required
+	// only when action is "import" (400 "mnemonic or wallet_json is required
+	// for import"), and then exactly one of the two (400 "specify either
+	// mnemonic or wallet_json, not both"). That is a conditional exactly-one-of,
+	// which a flat `required` list cannot say — marking either one would reject
+	// every create request in a generated SDK.
 	Mnemonic   string `json:"mnemonic,omitempty"`
 	WalletJSON string `json:"wallet_json,omitempty"`
 
-	// For create
+	// For create. Not required: 0 means "let the manager choose".
 	EntropyBits int `json:"entropy_bits,omitempty"`
 }
 
@@ -114,6 +126,12 @@ type SignerInfoResponse struct {
 
 // DeriveRequest is the body of POST /api/v1/evm/hd-wallets/{address}/derive:
 // either Index alone, or Start plus Count.
+//
+// ⛔ No field here is marked required and that is not an omission: an empty body
+// IS rejected (400 "either 'index' or 'start'+'count' is required"), but what is
+// required is one of two whole shapes, not any single field. Marking `index`
+// required would break the range form; marking none of them is the only thing a
+// flat `required` list can honestly say.
 type DeriveRequest struct {
 	Index *uint32 `json:"index,omitempty"`
 	Start *uint32 `json:"start,omitempty"`
@@ -159,6 +177,16 @@ type DeriveResponse struct {
 // resolveAccessibleWallet. Only the dispatch left.
 
 // ListWallets serves GET /api/v1/evm/hd-wallets.
+//
+//	@Summary	List HD wallets
+//	@Description	⚠️ Narrowed per row by an access check, and a row whose access check ERRORS is skipped silently — an infrastructure failure looks like \"you do not have that wallet\" rather than a 500.
+//	@Tags	hd-wallets
+//	@Produce	json
+//	@Success	200	{object}	ListHDWalletsResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	501	{object}	map[string]string	"this build has no HD wallet manager"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/hd-wallets [get]
 func (h *HDWalletHandler) ListWallets(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireAPIKey(w, r); !ok {
 		return
@@ -173,6 +201,25 @@ func (h *HDWalletHandler) ListWallets(w http.ResponseWriter, r *http.Request) {
 // all (internal/api/module_hdwallets.go records why), so removing this check
 // would open creation to every authenticated key — which is a strictly larger
 // hole than the one already recorded there.
+//
+//	@Summary	Create or import an HD wallet
+//	@Description	⛔ Admin ROLE required, checked in the handler as 403. The route itself carries no permission at all, so this check is the only thing standing between an authenticated non-admin key and wallet creation.
+//	@Description	⚠️ One endpoint, two operations: `action` selects them and an absent action means create. The import form additionally needs exactly one of `mnemonic` / `wallet_json`.
+//	@Description	⛔ The password, mnemonic and wallet JSON are zeroised in memory after use and none of them is ever echoed back.
+//	@Description	⚠️ Ownership of the new wallet is recorded as active for an admin and pending-approval otherwise — and a FAILURE to record it is logged, not surfaced: the 201 still says the wallet was created.
+//	@Tags	hd-wallets
+//	@Accept	json
+//	@Produce	json
+//	@Param	body	body	CreateHDWalletRequest	true	"wallet to create or import"
+//	@Success	201	{object}	HDWalletResponse
+//	@Failure	400	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"not admin, read-only mode, or the per-key HD wallet limit is reached"
+//	@Failure	409	{object}	map[string]string	"that wallet already exists"
+//	@Failure	500	{object}	map[string]string
+//	@Failure	501	{object}	map[string]string	"this build has no HD wallet manager"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/hd-wallets [post]
 func (h *HDWalletHandler) CreateOrImport(w http.ResponseWriter, r *http.Request) {
 	apiKey, ok := h.requireAPIKey(w, r)
 	if !ok {
@@ -186,6 +233,25 @@ func (h *HDWalletHandler) CreateOrImport(w http.ResponseWriter, r *http.Request)
 }
 
 // Derive serves POST /api/v1/evm/hd-wallets/{address}/derive.
+//
+//	@Summary	Derive addresses from an HD wallet
+//	@Description	Two forms: `{\"index\": n}` derives one, `{\"start\": n, \"count\": m}` derives a range of 1..100. An empty body is a 400.
+//	@Description	⚠️ A locked wallet answers 423, not 403 — unlock it rather than re-authenticating.
+//	@Description	⚠️ A wallet this key may not touch is 403, not 404; an `address` that is not a well-formed EVM address is 400.
+//	@Tags	hd-wallets
+//	@Accept	json
+//	@Produce	json
+//	@Param	address	path	string	true	"primary address of the HD wallet, 0x + 40 hex"
+//	@Param	body	body	DeriveRequest	true	"either index, or start plus count"
+//	@Success	200	{object}	DeriveResponse
+//	@Failure	400	{object}	map[string]string	"bad address, bad body, neither form supplied, or count outside 1..100"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"no access to this wallet, or read-only mode"
+//	@Failure	423	{object}	map[string]string	"the wallet is locked"
+//	@Failure	500	{object}	map[string]string
+//	@Failure	501	{object}	map[string]string	"this build has no HD wallet manager"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/hd-wallets/{address}/derive [post]
 func (h *HDWalletHandler) Derive(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.resolveAccessibleWallet(w, r)
 	if !ok {
@@ -195,6 +261,21 @@ func (h *HDWalletHandler) Derive(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListDerived serves GET /api/v1/evm/hd-wallets/{address}/derived.
+//
+//	@Summary	List an HD wallet's derived addresses
+//	@Description	⚠️ A locked wallet answers 423, not an empty list — the derived set is unreadable until it is unlocked.
+//	@Tags	hd-wallets
+//	@Produce	json
+//	@Param	address	path	string	true	"primary address of the HD wallet, 0x + 40 hex"
+//	@Success	200	{object}	ListDerivedResponse
+//	@Failure	400	{object}	map[string]string	"address is not a well-formed EVM address"
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string	"no access to this wallet"
+//	@Failure	423	{object}	map[string]string	"the wallet is locked"
+//	@Failure	500	{object}	map[string]string
+//	@Failure	501	{object}	map[string]string	"this build has no HD wallet manager"
+//	@Security	Ed25519Signature
+//	@Router	/api/v1/evm/hd-wallets/{address}/derived [get]
 func (h *HDWalletHandler) ListDerived(w http.ResponseWriter, r *http.Request) {
 	address, ok := h.resolveAccessibleWallet(w, r)
 	if !ok {
