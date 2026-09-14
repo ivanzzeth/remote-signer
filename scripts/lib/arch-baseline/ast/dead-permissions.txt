@@ -1,0 +1,72 @@
+# 定义了、按角色授权了、**没有任何代码读它**的权限。
+#
+# 这是一份**债务清单**(与 route-perm-bindings.txt 相反 —— 那张是当前事实的
+# 记录)。行数只许往下走,减到零是目标。
+#
+# ⚠️ 「没有代码读它」不等于「那个能力没人管」。下面 7 条里有 6 条,它描述的能力
+# 其实**是被管着的**,只是管它的不是这个权限,而是 handler 里的 IsAdmin() /
+# IsOwner()。所以危险不是"有个洞",而是**角色表在说谎**:它让人以为
+# 「dev 不持有 modify_any_rule,所以 dev 改不了别人的规则」—— 而真正拦住 dev 的
+# 是另一处代码,改那处代码的人不会知道角色表里还有这么一行。
+#
+# ---------- 它们为什么还在 ----------
+#
+# 2026-09-14 修掉 PermInstantiateTemplate 时数出来的一族。⛔ 它们**不能**靠
+# 「挂到对应路由上」批量修掉 —— 每一条都是一次鉴权判断,而其中至少一条这样做
+# 会把功能改反:
+#
+#   PermUnlockSigner   admin-only,但 unlock 的合法调用者是 signer 的 **owner**,
+#                      通常不是 admin。挂上去等于把功能反过来。那 8 条 signer
+#                      路由是**真正资源级**的(按行 IsOwner,403 与 404 分得开),
+#                      route-mutating-perm 的基线里已经写着这条理由。
+#   PermApproveSigner  同上,approve 走的也是资源级归属判断。
+#   PermCreateRuleAny  规则的写入路径今天用 PermCreateRuleSelf + handler 内的
+#   PermModifyAnyRule  归属判断。"Any" 这一族是给「能改别人的规则」准备的,
+#   PermDeleteAnyRule  而那个能力今天由 IsAdmin() 直接答,没有走权限位。
+#                      ⚠️ 也就是说角色表里 dev/agent 不持有它们这件事,
+#                      **今天不构成任何限制** —— 限制来自 IsAdmin()。
+#
+# ---------- 下面两条是这条门禁自己抓出来的(2026-09-14),此前没人数到 ----------
+#
+#   PermReadMetrics      ⭐ 它的情况**已经被人发现并写下来了**,就写在
+#                        internal/api/router.go:196 那条 Public() 豁免的理由里:
+#                        「PermReadMetrics exists and is granted to admin+dev
+#                        while being referenced by no route — so either that
+#                        permission or this exemption is dead. Recorded, not
+#                        resolved: putting a permission here would silently
+#                        break every scraper.」
+#                        ⚠️ 也就是说这条债**当时就被看见了,却没有任何机制记住它** ——
+#                        一句写在豁免理由里的话,不会在它被解决或被遗忘时发出声音。
+#                        这条门禁存在的意义有一半就是这个。
+#                        ⛔ 修法不是给 /metrics 挂权限(那会打断所有 Prometheus
+#                        scraper),而是二选一:确认"指标公开"是有意的 → 删掉这个
+#                        权限和它的授权;或者认为指标不该公开 → 那是一次独立的
+#                        产品决定,连同 scraper 的迁移路径一起做。
+#
+#   PermListAllRequests  「看所有人的请求」这个能力是**真的、并且真的被管着**,
+#                        但管它的是 handler/evm/request.go:275,320 的
+#                        `IsAdmin() || IsDev()`,不是这个权限。路由挂的是
+#                        PermListOwnRequests。⚠️ 后果同上:角色表让人以为
+#                        strategy/agent 拿不到别人的请求是因为少了这个权限位,
+#                        实际是因为那两行 role 判断 —— 谁改了那两行,不会有任何
+#                        东西提醒他角色表里还有一行在描述同一件事。
+#
+# ---------- 修法 ----------
+#
+# ⭐ 逐条判断「这个权限该不该存在」,两个方向都算修好:
+#   (a) 它描述的能力是真的 → 让检查它的那处代码真的读它(替掉 IsAdmin()/IsDev());
+#   (b) 它描述的能力不存在,或已由别处正确表达 → **删掉常量和授权**,别留着。
+# ⛔ 不许的那条是「挂到最像的那条路由上」凑数 —— 那是在没想清楚的情况下改鉴权。
+#
+# ⚠️ 删掉一条时,同一个 PR 里把它从角色表里也删掉:只删常量会编译不过,
+# 只删授权会让它继续留在这份清单里。⚠️ 还要看一眼 cmd/archcheck/routeauth.go 的
+# readPermissions ——(PermListAllRequests / PermReadMetrics 在那张表里有字符串
+# 条目,删权限时要一起删,否则那张表开始描述不存在的东西。)
+
+PermApproveSigner
+PermCreateRuleAny
+PermDeleteAnyRule
+PermListAllRequests
+PermModifyAnyRule
+PermReadMetrics
+PermUnlockSigner

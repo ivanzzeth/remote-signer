@@ -141,6 +141,12 @@ var checks = []checkDef{
 		Run:      checkRoutePermBinding,
 	},
 	{
+		Name:     "dead-permissions",
+		Baseline: "dead-permissions.txt",
+		Hint:     "A permission that is declared and granted but never read is a door painted on a wall — the role table implies a restriction that nothing enforces. ⛔ Do not fix it by attaching it to the nearest route: that is an authorization change made without deciding anything. Either make the code that gates this capability actually read the constant, or delete the constant and its grants.",
+		Run:      checkDeadPermissions,
+	},
+	{
 		Name:     "respond-shape",
 		Baseline: "respond-shape.txt",
 		Hint:     "One argument order for all of them, then delete the per-handler copies in favour of a shared respond package.",
