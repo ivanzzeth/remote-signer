@@ -11,7 +11,7 @@
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help check hooks openapi build build-embed build-cli web web-deps lint-deps lint-js test test-unit test-integration integration clean tidy desktop-dev desktop-dist
+.PHONY: help check hooks openapi sdk build build-embed build-cli web web-deps lint-deps lint-js test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -39,6 +39,7 @@ help:
 	@echo "  build-cli     Go-only binary, no embedded UI (placeholder page; fast backend dev)"
 	@echo "  lint-deps     Install node_modules + build the SDK dist that gate ⑬ needs"
 	@echo "  openapi       Regenerate internal/apidocs/openapi.json from the handler annotations"
+	@echo "  sdk           Regenerate the Go + TS SDKs from that spec (make sdk WHAT=go|ts|all)"
 	@echo "  lint-js       Run gate ⑬ only (type-aware eslint over pkg/js-client + web)"
 	@echo "  check         Fast feedback gates (fmt/vet/staticcheck/ts-js-lint/test-structure/arch) — parallel, seconds"
 	@echo "  hooks         Install .githooks as this clone's hooks (git config core.hooksPath)"
@@ -146,6 +147,28 @@ check:
 ## 装法:go install github.com/swaggo/swag/v2/cmd/swag@v$(shell tr -d ' \t\r\n' < .swag-version)
 openapi:
 	@bash scripts/gen-openapi.sh
+
+## sdk — 从 internal/apidocs/openapi.json 生成 Go 与 TS SDK。
+##
+##     make sdk           两个都生成
+##     make sdk WHAT=go   只生成 Go(不需要 node_modules)
+##     make sdk WHAT=ts   只生成 TS
+##
+## ⚠️ 前置是 `make openapi`:这一步读的是**已生成的 spec**,不读注解。
+## 顺序反了会拿旧契约生成新 SDK,而两边都不会报错 —— 门禁 ⑮ 的 sha256 记录正是
+## 为这件事存在的。
+##
+## ⛔ **Go 侧的产物进版本库,TS 侧不进**(提案 §4.2)。理由不对称,不是口味:
+##   · pkg/client/internal/gen/*.gen.go 被手写封装 import,而 `go build` 不跑
+##     代码生成 —— 不提交则 fresh clone 编译不过。
+##   · pkg/js-client/src/gen/ 由 `npm run prebuild` 在构建时重生成,tsup 之前
+##     一定跑过,所以它不入库也不会让谁编译不过。
+##
+## ⚠️ Go 侧要 oapi-codegen v$(shell tr -d 'v \t\r\n' < .oapi-codegen-version),
+## 它的 go.mod 写着 go 1.25.0 而本仓库是 1.24.x —— `go run` 会**切换工具链**
+## (冷机要下载一个 Go 发行版)。⛔ 这就是 `make check` 里的 ⑮ 不重新生成的原因。
+sdk:
+	@bash scripts/gen-sdk.sh $(or $(WHAT),all)
 
 ## hooks — 把 .githooks/ 装成这个 clone 的 hooks 目录。
 ##

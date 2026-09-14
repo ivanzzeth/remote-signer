@@ -84,6 +84,26 @@ if [ -z "$SWAG_WANT" ]; then
     fail=1
 fi
 
+# ---------- oapi-codegen(门禁 ⑮ 的漂移档 / `make sdk`):版本钉在 .oapi-codegen-version ----------
+#
+# 与 swag 一模一样的形状,连理由都一样:生成器**不从 PATH 取**,走
+# `go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v<pin>`,
+# 所以这里能断言的只有版本文件本身。
+#
+# ⚠️ 但它比 swag 多一条代价,写在这里免得被人当成没有:**oapi-codegen v2.8.0 的
+# go.mod 要求 go >= 1.25.0**,而本仓库的 go.mod 是 1.24.x。`go run` 因此会切换
+# 工具链(实测下载 go1.26.8)。⛔ 所以 `make check` 里的 ⑮ **不重新生成**,
+# 它比对的是 pkg/client/internal/gen/GENERATED.txt 里记的 spec sha256;
+# 真正重新生成一遍的那一档在 .github/workflows/check.yml 的 sdk-drift job,
+# 那是个独立 job,不占 `make check` 的秒级预算。
+OAPI_WANT=$(tr -d 'v \t\r\n' < .oapi-codegen-version 2>/dev/null)
+if [ -z "$OAPI_WANT" ]; then
+    printf '  ✗ %-16s .oapi-codegen-version 读不到 —— 门禁 ⑮ 与 `make sdk` 钉不住版本\n' "oapi-codegen" >&2
+    printf '    改法:写回一个精确版本(今天是 2.8.0)。⛔ 别改成从 PATH 取 —— 生成结果随版本变,\n' >&2
+    printf '          而 ⑮ 的漂移档逐字节比对生成结果。\n' >&2
+    fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo >&2
     echo "FAIL: 缺依赖 —— 先装上再跑门禁。" >&2

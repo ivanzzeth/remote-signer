@@ -1,0 +1,13 @@
+# oapi-codegen 配置 —— **客户端那一半**。
+#
+# 与 oapi-codegen.types.yaml 同一个 `package: gen`,所以这里生成的代码直接引用
+# 那边的类型,不需要 import,也不会各生成一份。
+#
+# ⛔ 这里**没有**任何 *-server 选项,而且不许加:本仓库的服务端是手写的
+# net/http mux(提案 §2.1「不要另起炉灶」),生成一套 server interface 只会
+# 造出第二个关于「这个 API 长什么样」的事实源。
+#
+# ⛔ 同 types 那份:没有 `output:`,因为配置里的它会压过命令行的 `-o`。
+package: gen
+generate:
+  client: true

@@ -95,6 +95,19 @@ app/metamask-snap/node_modules/
 
 # Build outputs
 pkg/js-client/dist/
+
+# TS SDK generated from internal/apidocs/openapi.json (`make sdk WHAT=ts`, and
+# automatically by js-client's `prebuild`).
+#
+# ⛔ 与 Go 侧**相反**,而理由是构建模型的不同,不是口味(提案 §4.2):
+#   · pkg/client/internal/gen/*.gen.go **入库** —— `go build` 不跑代码生成,
+#     手写封装 import 它,不提交则 fresh clone 编译不过。
+#   · 这一份不入库 —— `npm run build` 之前 npm 一定先跑 `prebuild`,而
+#     `make lint-deps`(门禁 ⑬ 的前置、CI 里 `make check` 之前那一步)走的正是
+#     `npm run build`。
+# ⚠️ 所以门禁 ⑮ 的 TS 档**自己重新生成一份**再读(实测 0.86s),而不是读这里 ——
+# 一个不入库的产物,门禁不能假设它存在。
+pkg/js-client/src/gen/
 pkg/mcp-server/build/
 app/metamask-snap/dist/
 app/metamask-snap/snap.manifest.json.bak

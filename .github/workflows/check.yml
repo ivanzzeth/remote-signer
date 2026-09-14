@@ -89,3 +89,48 @@ jobs:
         run: make lint-deps
       - name: make check
         run: make check
+
+  # ⑮ 的漂移档 —— **独立 job**,不在上面那个秒级 job 里。
+  #
+  # ⛔ 为什么必须分开:oapi-codegen v2.8.0 的 go.mod 写着 `go 1.25.0`,而本仓库的
+  # go.mod 是 1.24.x,于是 `go run …@v2.8.0` 会**切换 Go 工具链** —— 在一台干净的
+  # runner 上那是一次 Go 发行版下载(本机热跑 2.0s;冷机约 1 分钟)。把它塞进
+  # `make check` 会把那个 job 从 13s 变成一分多钟,而那个 job 的**全部意义**是秒级:
+  # 慢了人就开始 `--no-verify`,而那比没有门禁更糟(pre-commit 上一版跑过 208 秒)。
+  #
+  # ⛔ 为什么不挪去 ci.yml:ci.yml 是 `on: push: branches: [main, dev]`,
+  # feature 分支的 push 不触发它 —— 而 2026-09-10 那个 3.8 MB 二进制正是顺着
+  # feature 分支进来的。这个 workflow 跑在**每个分支的每次 push** 上,
+  # 独立 job 与上面那个并行,所以「覆盖面更宽」和「反馈更快」不用二选一。
+  #
+  # ⚠️ `make check` 里的 ⑮ 证明的是「这份 SDK 是这份 spec 生成的」(GENERATED.txt
+  # 记的 sha256 + 版本 + 覆盖计数)。它抓不到的是**有人手改了生成文件** ——
+  # 那件事只有真的重新跑一遍生成器再逐字节比对才看得见,也就是这个 job。
+  # ⛔ 两档各管一半,别把任何一档当成另一档也做了。
+  sdk-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: pkg/js-client/package-lock.json
+      # ⑮ 的 TS 档要 pkg/js-client 里**钉死版本**的 openapi-typescript。
+      # ⛔ 不跑 `make lint-deps`(那还要装 web + 构建 dist,与这个 job 无关)。
+      - name: Install js-client deps (openapi-typescript, pinned)
+        run: cd pkg/js-client && npm ci --no-audit --no-fund
+      # ⛔ 不能省,理由同上面那个 job 里 swag 的 warm 步骤:这个模块**不在
+      # go.sum 里**(生成器是构建期工具),setup-go 按 go.sum 做 key 的缓存不含它,
+      # 而且它还会带下来一次 Go 工具链切换。让那次下载在日志里有名字,
+      # 而不是藏在门禁内部突然失败。
+      - name: Warm the pinned oapi-codegen (gate ⑮)
+        run: |
+          v=$(tr -d 'v \t\r\n' < .oapi-codegen-version)
+          go run "github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v${v}" -version
+      - name: Regenerate the SDKs and byte-compare (gate ⑮d)
+        run: SDK_REGEN=1 ./scripts/check-sdk-coverage.sh

@@ -39,6 +39,15 @@ export { RemoteSignerClient, HealthResponse, ErrorResponse } from "./client";
 // Transport
 export { HttpTransport, ClientConfig, TLSConfig } from "./transport";
 
+// Generated-schema client (⛔ additive — the hand-written API above is unchanged).
+//
+// ⚠️ 类型来自 src/gen/schema.d.ts,那份文件由 `npm run prebuild` 从
+// internal/apidocs/openapi.json 生成且**不入库**。所以从源码构建这个包必须先跑
+// 一次 build(prebuild 会自动跑);⛔ 直接 `npx tsc` 而没跑过 prebuild 会红在
+// "cannot find module './gen/schema'",那不是 bug,那是缺了生成步骤。
+export { createSignedClient } from "./generated-client";
+export type { SignedClientOptions, paths as OpenAPIPaths } from "./generated-client";
+
 // EVM (all services + types)
 export {
   EvmService,

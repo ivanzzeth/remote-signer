@@ -53,6 +53,18 @@ STEPS=(
     # 11.6/12.0s —— 落在噪声里,因为它比 ⑬ 短,整条 `make check` 的 wall clock
     # 仍由 ⑬ 那 7s 决定。⛔ 这也意味着「它很便宜」只在 ⑬ 还在的时候成立。
     "openapi|./scripts/check-openapi.sh"
+    # ⑮ SDK 路由覆盖(门禁 C)。⚠️ 单独跑 ≈1.3s,其中 0.9s 是重新生成一份 TS
+    # schema(那份产物不入库,所以门禁不能假设它存在)。
+    #
+    # ⛔ 它**不**重新生成 Go SDK。oapi-codegen v2.8.0 的 go.mod 要 go >= 1.25.0,
+    # 而本仓库是 1.24.x —— `go run` 会切换工具链,冷机上那是一次 Go 发行版下载。
+    # 一条会花一分钟的门禁,人会绕过去。逐字节比对那一档走
+    # `SDK_REGEN=1 ./scripts/check-sdk-coverage.sh`,由 check.yml 的独立 job
+    # `sdk-drift` 在每个分支每次 push 上执行。
+    #
+    # ⚠️ 实测代价(16 核 i5-12600H,热跑):加它之前 9.9/10.5/11.2s,
+    # 加它之后见下 —— 它比 ⑬ 短得多,wall clock 仍由 ⑬ 那 7s 决定。
+    "sdk-coverage|./scripts/check-sdk-coverage.sh"
     "staticcheck|staticcheck ./... 2>&1 | head -40"
     "lint|./scripts/check-lint.sh"
     "vet|go vet ./... && go vet -tags integration ./internal/... && go vet -tags e2e ./e2e/..."

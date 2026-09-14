@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -68,6 +69,9 @@ func loadRepo(root string) (*repo, error) {
 		if hasBuildConstraint(f) {
 			return nil
 		}
+		if isGenerated(f) {
+			return nil
+		}
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
 		gf := &goFile{Path: rel, Pkg: filepath.ToSlash(filepath.Dir(rel)), File: f, Fset: fset}
@@ -99,6 +103,57 @@ func hasBuildConstraint(f *ast.File) bool {
 		// Build constraints precede the package clause; once past it, stop.
 		if cg.Pos() > f.Package {
 			break
+		}
+	}
+	return false
+}
+
+// generatedMarker is the line `go help generate` specifies for generated
+// files. A file is generated when a comment line matching it exactly appears
+// before the package clause. Every generator in the Go ecosystem emits it,
+// oapi-codegen included.
+var generatedMarker = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)
+
+// isGenerated reports whether this file was written by a code generator.
+//
+// ⛔ Why archcheck must skip these, and why skipping them is not a loophole:
+//
+// Every check in this tool asks a question about a decision somebody made —
+// "which layer did you import from", "did you copy this shape instead of
+// sharing it", "did you branch on the engine list again". A generated file
+// contains no decisions. The one decision is in the generator config, and it
+// is one line.
+//
+// The measured consequence of not skipping them: the oapi-codegen Go SDK
+// (92 operations, 24k lines) added **hundreds** of duplication pairs — every
+// ParseXxxResponse is 90% identical to every other by construction, because
+// that is what a code template is — and tripped engine-dispatch on
+// types.gen.go, which "branches on 11 engines" only because the spec's enum
+// lists all eleven rule types. Neither is debt. Putting them in the baseline
+// would be worse than skipping: the baseline is read by people deciding what
+// to clean up, and several hundred lines of "this template looks like itself"
+// is how a baseline stops being read.
+//
+// ⚠️ What this does NOT excuse: a generated file still has to compile, still
+// goes through go vet / staticcheck / golangci-lint (all three are green on
+// this one — measured), and its *coverage* of the spec is gate ⑮'s job.
+// This only says archcheck's structural questions are not addressed to it.
+//
+// ⚠️ Verified to be a no-op on the tree that introduced it: with
+// pkg/client/internal/gen/ moved aside, ./scripts/check-arch.sh produced
+// byte-identical output before and after this function existed. ⛔ That check
+// matters — "linting less" is the shape of a gate quietly measuring less, and
+// this repo has been bitten by exactly that (⑬'s rule counts moved *downward*
+// when the SDK dist was missing).
+func isGenerated(f *ast.File) bool {
+	for _, cg := range f.Comments {
+		if cg.Pos() > f.Package {
+			break
+		}
+		for _, c := range cg.List {
+			if generatedMarker.MatchString(c.Text) {
+				return true
+			}
 		}
 	}
 	return false
