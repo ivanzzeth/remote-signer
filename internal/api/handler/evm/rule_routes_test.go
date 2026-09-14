@@ -112,14 +112,28 @@ func doRuleRouteRequest(t *testing.T, mux http.Handler, method, path, body strin
 // TestRuleRoutes_RegistersExactlyTheProductionPatterns is the assertion that
 // keeps a decomposition from quietly changing authorization.
 //
-// ⛔ It asserts every pattern *and* its permission. All of them carry
-// PermListRules because that is what the prefix they came from declared — the
-// ⛔ KNOWN LIMIT paragraph in route_auth.go names this exact surface ("
-// /api/v1/evm/rules/ declares PermListRules for all twelve endpoints behind
-// it") — and naming the routes is what lets route-perm-binding and
-// route-mutating-perm see it at all. ⛔ Tightening any of them is a security
-// decision with its own PR, and this test plus those two baselines are what
-// would notice.
+// ⛔ It asserts every pattern *and* its permission.
+//
+// ⭐ 2026-09-14: six of the eight writes moved off PermListRules. Until then all
+// twelve carried it, because that is what the method-less prefix they came from
+// declared — the ⛔ KNOWN LIMIT paragraph in route_auth.go named this exact
+// surface ("/api/v1/evm/rules/ declares PermListRules for all twelve endpoints
+// behind it"). Naming the routes is what let route-perm-binding and
+// route-mutating-perm see the eight at all; this slice answered them one by one.
+//
+// ⚠️ Read the table below as three groups, because they are three decisions:
+//
+//   - **list_rules survives only on reads** — and on the two validate POSTs,
+//     which create nothing and are narrowed by an admin *role* check inside the
+//     handler that RouteAuth cannot express. ⛔ Leaving those two is deliberate;
+//     every candidate permission describes them wrongly.
+//   - **approve and reject are approve_rule**, which admin alone holds. This is
+//     the one real narrowing here, and it only relocates a refusal the handler
+//     was already making.
+//   - **create / modify / delete / propose** take the permission that names
+//     them. Their grant sets are identical to list_rules today, so no access
+//     changes — the value is that the route stops claiming a write costs only
+//     "may look".
 //
 // ⚠️ Negatively verified: swapping any one permission reddens this test and
 // route-perm-binding; turning any of them into AuthenticatedOnly reddens this
@@ -137,19 +151,20 @@ func TestRuleRoutes_RegistersExactlyTheProductionPatterns(t *testing.T) {
 
 	assert.Equal(t, map[string]string{
 		"GET /api/v1/evm/rules":                     "permitted(list_rules)",
-		"POST /api/v1/evm/rules":                    "permitted(list_rules)",
+		"POST /api/v1/evm/rules":                    "permitted(create_rule_self)",
 		"GET /api/v1/evm/rules/{id}":                "permitted(list_rules)",
-		"PATCH /api/v1/evm/rules/{id}":              "permitted(list_rules)",
-		"DELETE /api/v1/evm/rules/{id}":             "permitted(list_rules)",
-		"POST /api/v1/evm/rules/{id}/approve":       "permitted(list_rules)",
-		"POST /api/v1/evm/rules/{id}/reject":        "permitted(list_rules)",
-		"POST /api/v1/evm/rules/{id}/propose":       "permitted(list_rules)",
+		"PATCH /api/v1/evm/rules/{id}":              "permitted(modify_own_rule)",
+		"DELETE /api/v1/evm/rules/{id}":             "permitted(delete_own_rule)",
+		"POST /api/v1/evm/rules/{id}/approve":       "permitted(approve_rule)",
+		"POST /api/v1/evm/rules/{id}/reject":        "permitted(approve_rule)",
+		"POST /api/v1/evm/rules/{id}/propose":       "permitted(propose_rule)",
 		"POST /api/v1/evm/rules/validate":           "permitted(list_rules)",
 		"POST /api/v1/evm/rules/{id}/validate":      "permitted(list_rules)",
 		"GET /api/v1/evm/rules/{id}/budgets":        "permitted(list_rules)",
 		"POST /api/v1/evm/rules/{id}/budgets/reset": "permitted(manage_budgets)",
-	}, got, "⛔ the rules module registers exactly these routes, each with the authorization the prefix "+
-		"gave it; changing either is a security decision, not a refactor (proposal §2.5)")
+	}, got, "⛔ the rules module registers exactly these routes with exactly these permissions. "+
+		"Changing one is a security decision, not a refactor (proposal §2.5) — and note that a write "+
+		"drifting BACK to list_rules is the direction nothing else would catch")
 
 	assert.Equal(t, "rules", rulesModuleFor(t, fx).Name())
 }

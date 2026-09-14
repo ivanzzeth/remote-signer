@@ -404,3 +404,118 @@ func TestTemplate_NonAdminCannotListTemplates(t *testing.T) {
 	require.True(t, ok, "expected APIError, got %T", err)
 	assert.Equal(t, 403, apiErr.StatusCode)
 }
+
+// TestTemplate_DevKeyCannotMutateTemplates is the negative verification for the
+// slice that gave the four template mutations PermInstantiateTemplate.
+//
+// ⛔ It asserts by EFFECT, not by status code. A 403 alone would also be
+// produced by a broken key, a rate limit, or read-only mode, so after every
+// refusal the admin key reads the resource back and the assertion is that
+// nothing moved: no template row appeared, the name did not change, the
+// template still exists, no instance rule was minted, the instance is still
+// enabled. The status code is checked too, but it is the weaker half.
+//
+// # Why `dev` is the right key for this
+//
+// read_templates is held by admin, dev and agent; instantiate_template by admin
+// and agent only. ⭐ So `dev` is exactly "a key holding only the old, weaker
+// permission" — it still passes the route guard on every template *read*, which
+// is what the control arm at the top proves. Without that arm a green run would
+// also be satisfied by a key that cannot reach the template surface at all.
+func TestTemplate_DevKeyCannotMutateTemplates(t *testing.T) {
+	ensureGuardResumed(t)
+	ctx := context.Background()
+
+	devClient := createRoleClient(t, "dev", "e2e-tmpl-perm-dev")
+
+	// ---------- control arm: dev still holds read_templates ----------
+	//
+	// ⛔ Do not delete this. It is the only thing separating "the permission
+	// narrowed" from "this key cannot talk to the daemon at all".
+	if _, err := devClient.Templates.List(ctx, nil); err != nil {
+		t.Fatalf("premise of this test: a dev key still holds read_templates and can list. "+
+			"It could not (%v), so every 403 below proves nothing", err)
+	}
+
+	// ---------- create ----------
+	const devTmplName = "Test Template - dev must not create"
+	_, err := devClient.Templates.Create(ctx, &templates.CreateRequest{
+		Name:    devTmplName,
+		Type:    "evm_address_list",
+		Mode:    "whitelist",
+		Config:  map[string]interface{}{"addresses": []string{"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}},
+		Enabled: true,
+	})
+	expectAPIError(t, err, 403, "dev holds read_templates but not instantiate_template: create must be refused")
+
+	listed, err := adminClient.Templates.List(ctx, nil)
+	require.NoError(t, err)
+	for _, tmpl := range listed.Templates {
+		assert.NotEqual(t, devTmplName, tmpl.Name,
+			"⛔ the 403 was cosmetic: the template row exists anyway (id=%s)", tmpl.ID)
+	}
+
+	// ---------- a real template to aim the rest at ----------
+	created, err := adminClient.Templates.Create(ctx, &templates.CreateRequest{
+		Name:        "Test Template - dev perm fixture",
+		Description: "original description",
+		Type:        "evm_address_list",
+		Mode:        "whitelist",
+		Variables: []templates.TemplateVariable{
+			{Name: "allowed_address", Type: "address", Description: "addr", Required: true},
+		},
+		Config:  map[string]interface{}{"addresses": []string{"${allowed_address}"}},
+		Enabled: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = adminClient.Templates.Delete(context.Background(), created.ID) })
+
+	// ---------- update ----------
+	_, err = devClient.Templates.Update(ctx, created.ID, &templates.UpdateRequest{
+		Description: "dev must not be able to write this",
+	})
+	expectAPIError(t, err, 403, "dev must not update a template")
+
+	after, err := adminClient.Templates.Get(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "original description", after.Description,
+		"⛔ the 403 was cosmetic: the description was written anyway")
+
+	// ---------- instantiate ----------
+	_, err = devClient.Templates.Instantiate(ctx, created.ID, &templates.InstantiateRequest{
+		Variables: map[string]string{"allowed_address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+	})
+	expectAPIError(t, err, 403, "dev must not instantiate a template")
+
+	rules, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
+	require.NoError(t, err)
+	for _, rule := range rules.Rules {
+		if rule.TemplateID != nil && *rule.TemplateID == created.ID {
+			t.Fatalf("⛔ the 403 was cosmetic: an instance of %s exists anyway (rule %s)", created.ID, rule.ID)
+		}
+	}
+
+	// ---------- revoke an instance the admin made ----------
+	inst, err := adminClient.Templates.Instantiate(ctx, created.ID, &templates.InstantiateRequest{
+		Variables: map[string]string{"allowed_address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+	})
+	require.NoError(t, err)
+	var instRule evm.Rule
+	require.NoError(t, json.Unmarshal(inst.Rule, &instRule))
+	t.Cleanup(func() { _ = adminClient.EVM.Rules.Delete(context.Background(), instRule.ID) })
+
+	_, err = devClient.Templates.RevokeInstance(ctx, instRule.ID)
+	expectAPIError(t, err, 403, "dev must not revoke a template instance")
+
+	stillThere, err := adminClient.EVM.Rules.Get(ctx, instRule.ID)
+	require.NoError(t, err)
+	assert.True(t, stillThere.Enabled,
+		"⛔ the 403 was cosmetic: the instance was disabled anyway")
+
+	// ---------- delete ----------
+	err = devClient.Templates.Delete(ctx, created.ID)
+	expectAPIError(t, err, 403, "dev must not delete a template")
+
+	_, err = adminClient.Templates.Get(ctx, created.ID)
+	require.NoError(t, err, "⛔ the 403 was cosmetic: the template was deleted anyway")
+}

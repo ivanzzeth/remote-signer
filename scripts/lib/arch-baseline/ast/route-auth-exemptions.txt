@@ -78,20 +78,32 @@ public-unwrapped /
 authenticated-only GET /api/v1/evm/requests/{id}
 authenticated-only GET /api/v1/evm/requests/{id}/simulation
 
-# ⛔ 已知缺口(四条),不是决定:PermReadHDWallets / PermCreateHDWallet 声明了、
-# 按角色授予了,却没有任何路由引用 —— 任何一把已鉴权的 key(包括本来不持有
-# 任何 HD wallet 权限的 strategy key)都能走到这片。
-# ⚠️ 没有就地补权限:选哪个权限是逐条的安全决定,而失败方向是不对称的 ——
-# **过严会在 e2e 里显形,过松不会**。
-# ⚠️ 2026-09-10 · 提案 S4:这四行里的**前两行换了名字,缺口一个字没变**。
-# 拆解前是 `/api/v1/evm/hd-wallets`(不限方法)+ `/api/v1/evm/hd-wallets/`(前缀,
-# 任意深度);拆解后是 GET 与 POST 两条各自具名的路由,理由字符串逐字照抄
-# (internal/api/module_hdwallets.go 的 hdWalletGap)。⛔ 四条仍然一个权限都不挂 ——
-# 补权限是**另一个 PR** 的事,不许顺手在拆解里做。
-authenticated-only GET /api/v1/evm/hd-wallets
-authenticated-only POST /api/v1/evm/hd-wallets
-authenticated-only GET /api/v1/evm/hd-wallets/{address}/derived
-authenticated-only POST /api/v1/evm/hd-wallets/{address}/derive
+# ⭐ 2026-09-14 · 收紧 PR 第 2 刀:**HD wallet 那四行没有了 —— 它们补上了权限**。
+#
+# 这里曾经躺着四行 `authenticated-only`,理由写的是一个已知缺口:
+# PermReadHDWallets / PermCreateHDWallet 声明了、按角色授予了,却没有任何路由
+# 引用 —— 任何一把已鉴权的 key(包括本来不持有任何 HD wallet 权限的 strategy
+# key)都能走到这片。那不是「权限表达不了」,是**没人补**。现在补了:
+#
+#   POST /api/v1/evm/hd-wallets                  → create_hd_wallet(只有 admin)
+#   GET  /api/v1/evm/hd-wallets                  → read_hd_wallets(admin/dev/agent)
+#   GET  /api/v1/evm/hd-wallets/{address}/derived → read_hd_wallets
+#   POST /api/v1/evm/hd-wallets/{address}/derive  → read_hd_wallets
+#
+# ⭐ 这是这张表**正确的缩短方式**,也是文件开头那句「某条路由补上了权限却没删
+# 基线行就要红」说的那个方向:四行去了 route-perm-bindings.txt,一行(derive)
+# 同时去了 route-mutating-perm.txt 并在那儿写明理由。
+#
+# ⚠️ create 那条在效果上是**空操作**:hdwallet.go:228 本来就 `IsAdmin()` → 403,
+# 而 create_hd_wallet 恰好只有 admin 持有。补它买到的是「那道 handler 检查不再是
+# 唯一的一道」。
+# ⚠️ derive 故意挂只读权限,因为真实判断是资源域的(CheckAccess),而挂
+# create_hd_wallet 会把扩展用的 agent key 关在门外 —— ⛔ 而且是**静悄悄地**关,
+# 全仓没有任何测试用非 admin key 做 derive。「过严会在 e2e 里显形」这句话在这一条
+# 上是假的,这正是它值得单独写下来的原因。
+# ⚠️ 真正被收走的是 **strategy**:四条端点对它从「都能打」变成「都 403」。
+# 替代路径是 GET /api/v1/evm/signers?type=hd_wallet(挂 read_signers,strategy
+# 有,且按同一套 ownership+access 过滤),所以能力没丢,丢的只是这条路由。
 
 # JSON-RPC 信封:能干什么由 body 里的 method 名决定,路由看不见它。
 # 闸门是 handler 的 allowlist(internal/chain/evm/rpc_provider.go:70),

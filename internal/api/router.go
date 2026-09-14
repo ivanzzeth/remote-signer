@@ -616,15 +616,16 @@ func (r *Router) setupRoutes() error {
 		r.mountModules(settingsMod)
 	}
 
-	// Template routes. ⛔ The permission on every one of the eight is
-	// PermReadTemplates, which is what the two prefixes this replaced declared —
-	// see templatesModule.Routes. ⚠️ This comment used to say "mutate:
-	// PermInstantiateTemplate checked in handler"; that was never true.
-	// PermInstantiateTemplate is defined and granted (middleware/rbac.go:42) but
-	// grep finds no check of it anywhere, so create/update/delete/instantiate have
-	// always been reachable with read_templates alone. The decomposition makes
-	// four of them visible to route-mutating-perm for the first time; ⛔ fixing
-	// them is a security decision and its own PR (proposal §2.5).
+	// Template routes — see templatesModule.Routes for the per-route permission.
+	//
+	// ⭐ 2026-09-14: create / update / delete / instantiate now carry
+	// PermInstantiateTemplate; the reads and validate keep PermReadTemplates.
+	// ⚠️ This comment used to say "mutate: PermInstantiateTemplate checked in
+	// handler", and that was never true — the constant was defined
+	// (middleware/rbac.go:42) and granted to admin and agent, and read by
+	// nothing, so those four endpoints were reachable with read_templates alone
+	// (which `dev` also holds). The decomposition made the four visible to
+	// route-mutating-perm; this is the follow-up PR that closed them.
 	if r.config.Template != nil && r.config.Template.TemplateRepo != nil && r.config.Template.TemplateService != nil {
 		templateHandler, err := handler.NewTemplateHandler(
 			r.config.Template.TemplateRepo,

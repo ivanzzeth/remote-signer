@@ -194,6 +194,24 @@ func TestHDWallet_NonAdminCannotCreate(t *testing.T) {
 	assert.Equal(t, 403, apiErr.StatusCode, "Non-admin should get 403 Forbidden")
 }
 
+// TestHDWallet_NonAdminCannotList now asserts what its name has always claimed.
+//
+// ⭐ 2026-09-14. Until the HD-wallet routes were given permissions, this test
+// asserted the opposite of its own name: the strategy key listed successfully
+// and saw an empty array, because GET /api/v1/evm/hd-wallets carried no
+// permission at all and listWallets merely filtered the rows by
+// ownership+access. The body had been relaxed to describe that reality.
+//
+// ⛔ The route now carries PermReadHDWallets, which strategy does not hold, so
+// the refusal happens in middleware before the handler runs. That is a stricter
+// answer than "200 with nothing in it", not a weaker one — an empty list still
+// confirms the endpoint exists and is reachable, which is exactly what a
+// sign-only role should not learn from this surface.
+//
+// ⚠️ The capability a strategy key actually needs is not lost: an HD wallet it
+// has been granted access to still appears in GET /api/v1/evm/signers with
+// type=hd_wallet, which is gated on read_signers (strategy holds it) and scoped
+// by the same access set.
 func TestHDWallet_NonAdminCannotList(t *testing.T) {
 	ensureGuardResumed(t)
 	if nonAdminClient == nil {
@@ -202,11 +220,12 @@ func TestHDWallet_NonAdminCannotList(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Non-admin can list HD wallets but sees only those they own/have access to.
-	// With no ownership or access grants, the list should be empty.
-	listResp, err := nonAdminClient.EVM.HDWallets.List(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, 0, len(listResp.Wallets), "Non-admin should see no HD wallets without access")
+	_, err := nonAdminClient.EVM.HDWallets.List(ctx)
+	require.Error(t, err, "strategy holds neither read_hd_wallets nor create_hd_wallet")
+
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok, "expected APIError, got %T", err)
+	assert.Equal(t, 403, apiErr.StatusCode, "strategy must be refused the HD wallet listing")
 }
 
 func TestHDWallet_ValidationErrors(t *testing.T) {
@@ -229,4 +248,131 @@ func TestHDWallet_ValidationErrors(t *testing.T) {
 		Index: &idx,
 	})
 	require.Error(t, err)
+}
+
+// TestHDWallet_StrategyKeyIsRefusedTheWholeSurface is the negative verification
+// for the slice that gave the four HD-wallet routes a permission.
+//
+// ⛔ Before that slice every route here was AuthenticatedOnly, so a strategy key
+// — which holds neither read_hd_wallets nor create_hd_wallet — reached all four.
+// This walks all four and asserts by EFFECT where an effect exists: after the
+// refused create, the admin key lists the wallets and the count is unchanged.
+//
+// ⚠️ The control arm matters as much as the refusals. A strategy key that could
+// not talk to the daemon at all would satisfy every 403 below, so the test first
+// proves the key works by calling an endpoint strategy IS entitled to
+// (GET /api/v1/evm/signers, gated on read_signers) — which is also the migration
+// path this narrowing relies on being open.
+//
+// # ⛔ What this test does NOT prove, measured rather than assumed
+//
+// Each arm was checked by reverting its route to AuthenticatedOnly and re-running:
+//
+//	list     → FAILS without the permission.  ✅ this test guards it
+//	derive   → FAILS without the permission.  ✅ (only because of the grant below)
+//	derived  → FAILS without the permission.  ✅ (same reason)
+//	create   → still PASSES without it.       ⛔ this test does NOT guard create
+//
+// ⛔ The create arm is over-determined and cannot be fixed here: hdwallet.go:228
+// refuses a non-admin with its own 403 before anything else, so the route
+// permission and the handler check are indistinguishable from outside. That is
+// not a defect in the permission — create_hd_wallet is granted to admin alone,
+// so the two agree exactly by construction — it is the reason the route-level
+// assertion TestHDWalletRoutes_RegistersExactlyTheProductionPatterns is what
+// actually stands guard over that one line. ⚠️ Do not read this test's green as
+// evidence that POST /api/v1/evm/hd-wallets is permissioned.
+func TestHDWallet_StrategyKeyIsRefusedTheWholeSurface(t *testing.T) {
+	ensureGuardResumed(t)
+	ctx := context.Background()
+
+	stratClient := createRoleClient(t, "strategy", "e2e-hdw-perm-strategy")
+
+	// ---------- control arm ----------
+	if _, err := stratClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{Limit: 10}); err != nil {
+		t.Fatalf("premise of this test: a strategy key holds read_signers and can reach the daemon. "+
+			"It could not (%v), so every 403 below proves nothing — and the migration path this "+
+			"narrowing depends on would be shut too", err)
+	}
+
+	before, err := adminClient.EVM.HDWallets.List(ctx)
+	require.NoError(t, err)
+
+	// ---------- list ----------
+	_, err = stratClient.EVM.HDWallets.List(ctx)
+	expectAPIError(t, err, 403, "strategy holds no read_hd_wallets: listing must be refused")
+
+	// ---------- create ----------
+	_, err = stratClient.EVM.HDWallets.Create(ctx, &evm.CreateHDWalletRequest{
+		Password: "strategy-must-not-create",
+	})
+	expectAPIError(t, err, 403, "strategy holds no create_hd_wallet: creation must be refused")
+
+	after, err := adminClient.EVM.HDWallets.List(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, len(before.Wallets), len(after.Wallets),
+		"⛔ the 403 was cosmetic: an HD wallet was created anyway (%d → %d)",
+		len(before.Wallets), len(after.Wallets))
+
+	// ---------- derive / derived, against a wallet this key HAS access to ----------
+	//
+	// ⛔ The access grant is the whole point of this half, and without it this
+	// section proves nothing. Measured: with derive left un-permissioned
+	// (AuthenticatedOnly) and no grant, a strategy key still gets 403 — from
+	// resolveAccessibleWallet's CheckAccess, not from RBAC. The two refusals are
+	// indistinguishable by status code, so the 403s below would have been
+	// over-determined and the test would pass with the hole wide open.
+	//
+	// ⭐ Granting access removes the resource-scoped refusal, so the route
+	// permission is the only thing left that can answer 403. It is also the exact
+	// scenario that made this narrowing a real decision rather than a formality:
+	// a strategy key that legitimately has access to an HD wallet.
+	created, err := adminClient.EVM.HDWallets.Create(ctx, &evm.CreateHDWalletRequest{
+		Password: "e2e-hdw-perm-fixture",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, adminClient.EVM.Signers.GrantAccess(ctx, created.PrimaryAddress,
+		&evm.GrantAccessRequest{APIKeyID: "e2e-hdw-perm-strategy"}),
+		"premise: the admin owns this wallet and can grant the strategy key access to it")
+	t.Cleanup(func() {
+		_ = adminClient.EVM.Signers.RevokeAccess(context.Background(), created.PrimaryAddress, "e2e-hdw-perm-strategy")
+	})
+
+	// ⭐ The migration path, asserted rather than asserted-about: with that grant
+	// the strategy key still reaches the wallet through the signers surface,
+	// which is gated on read_signers. If this ever stops being true the
+	// narrowing above stops being safe.
+	signers, err := stratClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{Type: "hd_wallet", Limit: 100})
+	require.NoError(t, err, "strategy must still be able to list signers it has access to")
+	foundViaSigners := false
+	for _, s := range signers.Signers {
+		if s.Address == created.PrimaryAddress {
+			foundViaSigners = true
+			break
+		}
+	}
+	assert.True(t, foundViaSigners,
+		"⛔ the documented migration path is shut: a strategy key with access to %s cannot find it "+
+			"through GET /api/v1/evm/signers either, so closing the HD-wallet routes removed the "+
+			"capability rather than moving it", created.PrimaryAddress)
+
+	// ⚠️ A freshly created wallet already has its primary derived at index 0, so
+	// the effect assertion is a before/after count, not a zero.
+	derivedBefore, err := adminClient.EVM.HDWallets.ListDerived(ctx, created.PrimaryAddress)
+	require.NoError(t, err)
+
+	idx := uint32(7)
+	_, err = stratClient.EVM.HDWallets.DeriveAddress(ctx, created.PrimaryAddress, &evm.DeriveAddressRequest{
+		Index: &idx,
+	})
+	expectAPIError(t, err, 403, "strategy holds no read_hd_wallets: derive must be refused")
+
+	_, err = stratClient.EVM.HDWallets.ListDerived(ctx, created.PrimaryAddress)
+	expectAPIError(t, err, 403, "strategy holds no read_hd_wallets: listing derived must be refused")
+
+	derivedAfter, err := adminClient.EVM.HDWallets.ListDerived(ctx, created.PrimaryAddress)
+	require.NoError(t, err)
+	assert.Equal(t, len(derivedBefore.Derived), len(derivedAfter.Derived),
+		"⛔ the 403 was cosmetic: the strategy key's derive produced an address anyway (%d → %d)",
+		len(derivedBefore.Derived), len(derivedAfter.Derived))
 }

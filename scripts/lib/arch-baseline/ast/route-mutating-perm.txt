@@ -26,7 +26,22 @@
 # 拿被操作的那个 signer 去查(handler/evm/signer_locking.go:24-38 的 IsOwner:
 # 不是 owner 回 403,连 ownership 记录都没有回 404),路由做不了这个判断,
 # 路由权限在这里只是外面那道门。
-# ⚠️ 留在基线里不代表它是对的,代表**改它是一个安全决定**,不是重构。
+#
+# ⭐ 2026-09-14,收紧 PR 第 3 刀**逐条看过这四行,决定留下**,理由升级为:
+#
+# ⛔ 目录里没有一个权限换过去不是**更糟**的。候选只有两个,两个都错:
+#   · PermUnlockSigner —— 只有 admin 持有。而 unlock / lock 的正当调用者恰恰是
+#     **owner**,owner 通常不是 admin(非 admin 建的 signer 归它自己,
+#     signer_crud.go 的 ownership 流程就是为此存在的)。换过去等于「只有 admin
+#     能解锁自己不拥有的 signer」,把功能拧成反的。
+#   · PermCreateSigners —— 它说的是「可以建 signer」,不是「可以动这一个」。
+# ⛔ 而且这四条的正确答案根本不是一个权限:它是「你是不是**这一个** signer 的
+# owner」,那是一个**行级**判断,RouteAuth 结构上表达不了。handler 里那道 IsOwner
+# 不是「第二重防线」,它就是**唯一那道对的防线**,而路由权限只能是它外面的粗筛。
+#
+# ⚠️ 所以这四行留在基线里的含义变了:从「没人判过的债」变成「**判过,结论是
+# 路由层面无法更好**」。⛔ 谁要再动它,得先解决「行级判断怎么上路由」这个问题,
+# 而不是从权限表里再挑一个名字看起来更凶的。
 #
 # ⭐ 2026-09-10:这四行以前是**一行** `POST /api/v1/evm/signers/{address}/*` ——
 # 注册处是 `for _, action := range {...}` 拼出来的 pattern,`*` 就是那个循环
@@ -54,117 +69,131 @@ POST /api/v1/evm/signers/{address}/unlock
 # handleDeleteSigner / handlePatchSignerLabels / accessService.GrantAccess /
 # RevokeAccess 都拿被操作的那个 signer 去查 owner(不是 owner 回 403,连
 # ownership 记录都没有回 404),路由做不了这个判断。
-# ⛔ 留在基线里不代表它是对的,代表**改它是一个安全决定**,不是重构 ——
-# 按提案 §2.5,失败方向不对称:过严会在 e2e 里显形,过松不会。单独走一个 PR。
+#
+# ⭐ 2026-09-14,收紧 PR 第 3 刀**逐条看过这四行,同样决定留下** —— 理由与上面
+# 那四行逐字相同,而且更强:授权与撤权(`access`)的正当调用者**必须**是 owner,
+# e2e 有一条测试专门钉它(e2e_signer_access_test.go:131 断言非 owner 授权失败)。
+# 挂一个 admin-only 权限会把「owner 给别人授权」这件事整个关掉,那不是收紧,
+# 是删功能。
+# ⛔ 结论同上:**判过,结论是路由层面无法更好**。真正的门在 handler 的行级
+# owner 判断上,路由权限只能是它外面的粗筛。
 DELETE /api/v1/evm/signers/{address}
 DELETE /api/v1/evm/signers/{address}/access/{keyID}
 PATCH /api/v1/evm/signers/{address}
 POST /api/v1/evm/signers/{address}/access
 
-# ⭐ 2026-09-11,提案 S6(templates 的 instances 闭包拆解):第九行,**同一形状的
-# 第三批**。上面两批分别是「循环拼出来的 pattern」和「方法无关的前缀」第一次
-# 被看见;这一条来自 `/api/v1/templates/` —— 同样是**不带 method 的前缀**,
-# 同样挂着 read_templates,同样在它背后藏着一个写操作(把某条模板实例停用)。
+# ⭐ 2026-09-14,收紧 PR 的第 1 刀(templates):**这里原本有六行,现在只剩一行**。
 #
-# ⛔ 它不是这次改出来的债。那条前缀本来就注册着 PermReadTemplates,revoke
-# 一直在它后面;前缀没有 method 前缀,这条判据对它一个字都说不出来
-# (见上面「它看不见的那一半」)。拆解把它从一条糊掉的记录变成一个有名字的条目。
+# 曾经在这儿的五行 —— create / update / delete / instantiate /
+# instances/{ruleID}/revoke —— 全部从 PermReadTemplates 换成了
+# **PermInstantiateTemplate**,所以它们不再是「写操作挂只读权限」,离开了这张表。
+# ⛔ 它们不是被「清理」掉的,是**被修好**的:route-perm-bindings.txt 里那五行
+# 同时从 `read_templates` 变成 `instantiate_template`,两张表一起动才是修好,
+# 只有这张变短那是有人删了行。
 #
-# ⚠️ 权限是**逐字照抄**的。这一条与 signers 那八行不同的是:它的真实判断**不是**
-# 资源域的 —— revokeInstance 只按 ruleID 停用规则,没有 owner 检查。也就是说
-# 「读权限能改状态」在这里是**真的松**,不是「路由做不了这个判断」。
-# ⛔ 留在基线里仍然不代表它是对的,代表**改它是一个安全决定**:提案 §2.5 把
-# 「拆解顺手改权限」列为唯一语义不可逆的风险,失败方向不对称(过严会在 e2e 里
-# 显形,过松不会)。单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
-POST /api/v1/templates/instances/{ruleID}/revoke
-
-# ⭐ 2026-09-11,提案 S6 的后半(templates 的 id 子树拆解):**同一形状的第四批**,
-# 也是最后一批来自 templates 的。上面那一行来自 `/api/v1/templates/` 前缀;这五行
-# 来自**同两个不带 method 的前缀**(`/api/v1/templates` 与 `/api/v1/templates/`)
-# 背后剩下的七个端点 —— 建模板、改模板、删模板、实例化,以及 validate。
+# ⛔ 这一刀补的是这份文件上一版就写下来的那个洞:PermInstantiateTemplate 在
+# middleware/rbac.go:42 有定义、:103(admin)与 :153(agent)有授权,而**全仓
+# 没有任何一处检查它**,router.go 却一直注释着「checked in handler」。也就是说
+# create / update / delete / instantiate 一直只要 read_templates 就能打,而
+# read_templates **`dev` 角色也有**。
 #
-# ⛔ 它们不是这次改出来的债。那两个前缀本来就注册着 PermReadTemplates,这四个写
-# 操作一直在它们后面;前缀没有 method 前缀,这条判据对它一个字都说不出来
-# (见上面「它看不见的那一半」)。拆解把它们从两条糊掉的记录变成五个有名字的条目。
+# ⚠️ 因此这一刀真正收走的是 **`dev`**:read_templates = admin/dev/agent,
+# instantiate_template = admin/agent。全仓没有任何调用方用 dev key 改模板
+# (Go e2e、blackbox CLI、Playwright、helpers_cleanup、MCP 默认配置都是 admin;
+# cmd/smoke-test 是 agent 且只读),所以没有回归 —— ⛔ 但 Web UI 用 dev key 的人
+# 会失去 TemplateDetail 的 instantiate 按钮,那是授权矩阵第一次真正生效。
 #
-# ⛔ 而且**不要以为真正的检查在别处**:router.go 的注释一直写着
-# 「mutate: PermInstantiateTemplate checked in handler」,那是**假的**。
-# PermInstantiateTemplate 在 middleware/rbac.go:42 有定义、:103 与 :153 有授权,
-# 但**全仓没有任何一处检查它**(grep 得到的只有定义、授权和那条注释本身)。
-# 也就是说 create / update / delete / instantiate 一直只要 read_templates 就能打。
-# 那条假注释已在本次改动里改掉 —— ⛔ 改掉的是注释,不是权限。
+# ⚠️ revoke 那一行值得单独说:它是全部模板路由里**唯一真实检查不是资源域**的
+# 一条 —— revokeInstance 只按 ruleID 停用规则,没有 owner 检查
+# (template_actions.go:232)。所以路由权限在它身上是**整道门**而不是外面那层,
+# 「可以看模板」从来就不是对的门。⛔ 换成 instantiate_template 之后它仍然挡不住
+# 一个 agent 去 revoke 另一个 agent 的实例 —— 那需要 handler 里的 owner 检查,
+# 会改变响应码,不在「只动授权决定」的范围内,作为**遗留发现**记在这里。
 #
-# ⚠️ validate 这一行的方向相反,和 presets 的 validate 一样:它其实是只读的
+# ---- 留下来的那一行 ----
+#
+# ⚠️ validate 的方向是**反的**,和 presets / rules 的 validate 一样:它其实是只读的
 # (跑模板自带的 test case),只是动词是 POST,所以这条判据把它算作写操作。
-# 它另有一道 handler 内的 admin **角色**检查(template.go 的 ValidateTemplate,
-# 逐字照抄自 ServeHTTP),RouteAuth 表达不了角色,所以那道检查留在 handler 里。
-#
-# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**:提案 §2.5 把
-# 「拆解顺手改权限」列为唯一语义不可逆的风险,失败方向不对称(过严会在 e2e 里
-# 显形,过松不会)。单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
-DELETE /api/v1/templates/{id}
-PATCH /api/v1/templates/{id}
-POST /api/v1/templates
-POST /api/v1/templates/{id}/instantiate
+# ⛔ 它**没有**跟着换成 instantiate_template,而且不是漏了:
+#   · 它创建不了任何东西,换一个「写」权限反而是把语义写错;
+#   · 真正narrow它的是 handler 内的 admin **角色**检查(template.go 的
+#     ValidateTemplate),RouteAuth 表达不了角色,所以那道检查留在 handler 里;
+#   · agent 持有 instantiate_template 而**不是** admin —— 换过去等于把这条
+#     端点对 agent **放宽**,方向正好反了。
+# ⭐ 所以这一行留在基线里,理由从「这是没人判的债」升级成「这是判过的决定」。
 POST /api/v1/templates/{id}/validate
 
-# ⭐ 2026-09-11,提案 S8 第 1 刀(rule.go 的三个审批动作):**同一形状的第五批**,
-# 而且是这份文件开头「⚠️ 它看不见的那一半」点名的那一条终于开口说话。
+# ⭐ 2026-09-14,收紧 PR 的第 3 刀(rules):**这里原本有八行,现在只剩两行**。
 #
-# 那段话写着:「`/api/v1/evm/rules/` 没有 method 前缀,它背后 12 个端点里的
-# POST/DELETE 全都挂在 PermListRules 上,而这条门禁一个字都说不出来」。
-# ⛔ 这三行就是其中三个,第一次以自己的名字出现。route_auth.go 的
-# ⛔ KNOWN LIMIT 段落说的也是同一件事(「declares PermListRules for all twelve
-# endpoints behind it」)。
+# 这八行是 S8 把 `/api/v1/evm/rules` 与 `/api/v1/evm/rules/` 两条不带 method 的
+# 前缀拆成十二条具名路由时,第一次以自己的名字出现的八个写端点 —— 全部挂着那两条
+# 前缀声明的 PermListRules。文件开头「⚠️ 它看不见的那一半」说的就是它们。
+# 这一刀**逐条**回答了那八个问题,而答案不是同一个:
 #
-# ⛔ 它们不是这次改出来的债,权限是**逐字照抄**前缀的。⚠️ 而且与 signers 那八行
-# 不同:这三条的真实判断**不是**资源域的 —— approve 与 reject 在 handler 里
-# 另有一道 `apiKey.IsAdmin()`(rule_query.go,注释写着 "defense in depth"),
-# propose 检查 agent-or-admin。那是**角色**检查,RouteAuth 表达不了角色,所以
-# 它留在 handler 里;⛔ 但角色检查不是权限检查,拿着 list_rules 的 admin 依然
-# 能 approve,而「approve 该不该只要 list_rules」正是这张表在问的问题。
+#   POST   /rules              → create_rule_self   离开本表
+#   PATCH  /rules/{id}         → modify_own_rule    离开本表
+#   DELETE /rules/{id}         → delete_own_rule    离开本表
+#   POST   /rules/{id}/approve → approve_rule       离开本表 ⭐ 真的收窄了
+#   POST   /rules/{id}/reject  → approve_rule       离开本表 ⭐ 真的收窄了
+#   POST   /rules/{id}/propose → propose_rule       离开本表
+#   POST   /rules/validate      ⛔ **留下**,见下
+#   POST   /rules/{id}/validate ⛔ **留下**,见下
 #
-# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**:提案 §2.5 把
-# 「拆解顺手改权限」列为唯一语义不可逆的风险,失败方向不对称(过严会在 e2e 里
-# 显形,过松不会)。单独走一个 PR,和 hd-wallets 的 RBAC 缺口一起判断。
-POST /api/v1/evm/rules/{id}/approve
-POST /api/v1/evm/rules/{id}/propose
-POST /api/v1/evm/rules/{id}/reject
-
-# ⭐ 2026-09-11,提案 S8 第 2 刀(两条 validate):同一条前缀身后的第二批。
+# ⚠️ 前四类里只有 approve / reject 真的动了访问集合:approve_rule **只有 admin**
+# 持有,而 list_rules 是 admin/dev/agent 都有。⛔ 但没有任何调用方因此坏掉 ——
+# rule_query.go:278/344 本来就把非 admin 挡在外面,而 e2e 从来就在断言这件事
+# (TestE2E_RuleApproval_RBAC_Approve / _Reject 各自对 dev 与 agent 断言 403,
+# 外加 TestRBAC_A2_Dev 的 A2.11 与 TestRBAC_A3_Agent 的 A3.24)。变的是**在哪儿**
+# 被拒,不是**会不会**被拒。
+#
+# ⭐ 顺手退役了一句假注释,和 templates 那句是同一种:rule_query.go:276 一直写着
+# 「enforced by RBAC middleware PermApproveRule, but double-check here for defense
+# in depth」—— 而 PermApproveRule 除了这句注释**全仓没有第二处引用**,中间件根本
+# 没在 enforce。也就是说那道所谓的「第二重防线」当时是**唯一**一重。现在它真了。
+#
+# ⚠️ create / modify / delete / propose 这四条在**今天的授权矩阵下是空操作** ——
+# create_rule_self、modify_own_rule、delete_own_rule、propose_rule 与 list_rules
+# 的持有者集合逐字相同(admin/dev/agent,都不含 strategy;⛔ 是照着 rbac.go 的
+# grant map 核过的,不是照名字猜的)。⭐ 改它们仍然值得:一条「删规则」的路由
+# 把门票写成「可以看规则」,在今天的授权恰好重合时也是错的,而重合随时会变。
+#
+# ⚠️ 它们的真实判断仍然是资源域的(createRule 对非 admin 强制 applied_to=self,
+# updateRule / deleteRule 认 owner 与 source,config 来源的规则谁都改不了),
+# 路由权限只是外面那道门 —— 现在这道门至少说出了它守的是什么。
+#
+# ---- 留下来的两行 ----
 #
 # ⚠️ 和 presets / templates 的 validate 一样,**方向是反的**:它们其实是只读的
 # (跑规则自带的 test case、跑批量校验),只是动词是 POST,所以这条判据把它们
 # 算作写操作。⛔ 留着它们是对的 —— 判据不猜语义,而「POST 到底改不改东西」
 # 只有读了 handler 才知道,那正是判据不该做的事。
 #
-# ⭐ 它们与 templates 那五行有一处**关键的不同**,值得写下来:templates 那边
-# router.go 的注释写着「PermInstantiateTemplate checked in handler」而那是假的;
-# 这两条的 handler 内检查是**真的存在**的 —— rule.go 的 requireAdmin
-# (`apiKey.IsAdmin()` → 403 "forbidden: admin role required"),逐字抄自
-# ServeHTTP 的分支,由 TestRuleRoutes_ValidateAdminCheckIsStillInTheHandler 钉住。
-# ⛔ 但那是**角色**检查,不是权限检查:RouteAuth 表达不了角色,所以路由上只能
-# 是 list_rules,而这张表记录的就是这件事。两者都真,谁也代替不了谁。
+# ⛔ 而且**没有一个权限换过去会更好**:approve_rule 只有 admin,换过去等于假装
+# validate 是一次审批;create_rule_self 等于宣称它写东西,而它不写。真正 narrow
+# 它们的是 rule.go 的 requireAdmin(`apiKey.IsAdmin()` → 403 "forbidden: admin
+# role required"),由 TestRuleRoutes_ValidateAdminCheckIsStillInTheHandler 钉住,
+# 而 RouteAuth 表达不了角色。
 #
-# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**(提案 §2.5)。
+# ⭐ 所以这两行的理由从「这是没人判的债」升级成「**判过,而且决定留下**」。
 POST /api/v1/evm/rules/validate
 POST /api/v1/evm/rules/{id}/validate
 
-# ⭐ 2026-09-11,提案 S8 第 3 刀(集合与 item,两条前缀一并删掉):最后三行,
-# 也是这条前缀身后**全部**八个写端点到齐的那一刻。
+# ⭐ 2026-09-14,收紧 PR 的第 2 刀(hd-wallets):**这张表里唯一一条新增的行**,
+# 而它是一条 RBAC 缺口被补上之后**才有资格出现在这里**的路由。
 #
-# ⛔ 三条权限**逐字照抄**那两条不带 method 的前缀声明的 PermListRules,一个字节
-# 都没改。文件开头「⚠️ 它看不见的那一半」写的就是这件事:
-# 「`/api/v1/evm/rules/` 没有 method 前缀,它背后 12 个端点里的 POST/DELETE 全都
-# 挂在 PermListRules 上,而这条门禁一个字都说不出来」—— 现在它说得出来了,
-# 八行白纸黑字。⛔ 那段话可以在收紧权限的那个 PR 里改写,⛔ 不是现在。
+# derive 以前是 `AuthenticatedOnly` —— 一个权限都不挂,所以这条判据(它只看
+# 「permitted 且权限是只读的」)对它一个字都说不出来。⛔ 注意这个方向:一条
+# **完全没有权限**的写路由比一条挂着只读权限的写路由更松,而这张表看不见前者。
+# 那正是 route-auth-exempt 那张表存在的理由,两张表各管一半。
 #
-# ⚠️ 这三条的真实判断**是资源域的**,和 signers 那八行同类而与 templates 不同:
-# createRule / updateRule / deleteRule 都拿 owner 与 source 去判(config 来源的
-# 规则任何人都改不了删不了、非 admin 只能动自己的),路由做不了这个判断。
-# ⛔ 但那仍然不等于 list_rules 是对的门:一把只该「看规则」的 key 今天能建能删。
+# ⚠️ 挂 read_hd_wallets 是**有意的**,不是没想好:
+#   · 真实判断是资源域的 —— resolveAccessibleWallet 拿被操作的那个钱包去查
+#     accessService.CheckAccess(apiKey.ID, address),不是这把 key 能碰的就 403
+#     (hdwallet.go:310-330)。路由做不了这个判断,路由权限只是外面那道门。
+#   · ⛔ 另一个候选 create_hd_wallet 是**错的,而且错在危险的方向**:它只有 admin
+#     持有,而扩展出厂配的是 `agent` key(extension/background.js:4030)。挂过去
+#     会把一个真实调用方关在门外,并且**不会红任何一个测试** —— 全仓没有任何
+#     测试用非 admin key 做 derive。「过严会在 e2e 里显形」在这一条上是假的。
 #
-# ⛔ 留在基线里不代表它们是对的,代表**改它们是一个安全决定**(提案 §2.5)。
-DELETE /api/v1/evm/rules/{id}
-PATCH /api/v1/evm/rules/{id}
-POST /api/v1/evm/rules
+# ⭐ 所以这一行从出生起就是「判过的决定」,不是「没人判的债」。
+POST /api/v1/evm/hd-wallets/{address}/derive

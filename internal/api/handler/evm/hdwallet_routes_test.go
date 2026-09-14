@@ -36,14 +36,16 @@
 // ServeHTTP is gone.
 //
 // ⚠️ What these tests still do NOT exercise: the middleware chain. The routes
-// register as AuthenticatedOnly, whose chain begins with AuthMiddleware, which
+// register as Permitted(...), whose chain begins with AuthMiddleware, which
 // refuses any request lacking X-API-Key-ID / X-Timestamp / X-Signature
 // (middleware/auth.go:62-69). Every test below injects its API key through the
 // request context instead, as they always have. So the test registrar drops the
 // RouteAuth it is handed and registers the bare handler: what moved is dispatch,
-// and nothing here asserts anything about authorization.
+// and nothing here asserts anything about authorization *being enforced*.
 // ⛔ Do not read a green run as evidence that an HD-wallet route is correctly
-// permissioned — it is not, and module_hdwallets.go says so in writing.
+// permissioned. The permission column is asserted in
+// TestHDWalletRoutes_RegistersExactlyTheProductionPatterns; that it is actually
+// enforced is proved against a real daemon in e2e.
 package evm_test
 
 import (
@@ -116,28 +118,32 @@ func hdWalletMux(t *testing.T, sm evmchain.SignerManager) http.Handler {
 // reason a green run here means anything about the daemon.
 //
 // ⛔ Its more important half is the authorization column, and on this module it
-// is load-bearing in a way it is not anywhere else: all four routes are
-// AuthenticatedOnly with a written reason recording a KNOWN RBAC GAP —
-// PermReadHDWallets and PermCreateHDWallet exist, are granted by role, and are
-// referenced by no route. Splitting one prefix into four endpoints is exactly
-// the moment someone "fixes" that in passing. It is not this PR's to fix (see
-// hdWalletGap in module_hdwallets.go): the failure direction is asymmetric — too
-// strict shows up in e2e, too loose ships silently — so it goes in its own PR,
-// argued on its own. Nothing else in the HD-wallet family would notice a change
-// here: the test registrar drops the RouteAuth entirely, so not one test below
-// runs the middleware chain. The full reason string is compared, not just the
-// shape, so weakening the reason fails here too.
+// is load-bearing in a way it is not anywhere else. Until 2026-09-14 all four
+// routes were AuthenticatedOnly with a written reason recording a KNOWN RBAC
+// GAP: PermReadHDWallets and PermCreateHDWallet existed, were granted by role,
+// and were referenced by no route, so **any authenticated key of any role**
+// reached this surface. ⭐ That gap is now closed, and this assertion is what
+// keeps it closed — the four permissions below are three different decisions,
+// and each one is argued in module_hdwallets.go's Routes comment:
+//
+//   - create is create_hd_wallet, which admin alone holds. It agrees exactly
+//     with the handler's own IsAdmin() check, so it changes no caller.
+//   - ⛔ derive is read_hd_wallets **even though it writes**, because its real
+//     gate is per-wallet CheckAccess and because create_hd_wallet would lock out
+//     the `agent` key the extension ships with — silently, since no test in this
+//     repo derives with a non-admin key.
+//   - the two reads are read_hd_wallets.
+//
+// ⛔ Do not "simplify" these to one permission. Nothing else in the HD-wallet
+// family would notice: the test registrar drops the RouteAuth entirely, so not
+// one test below runs the middleware chain. Enforcement is proved in e2e
+// (TestHDWallet_StrategyKeyIsRefusedTheWholeSurface), by effect.
 func TestHDWalletRoutes_RegistersExactlyTheProductionPatterns(t *testing.T) {
 	h, err := evm.NewHDWalletHandler(newDefaultMockSignerManager(), evm.NewTestAccessService(t), slog.Default(), nil)
 	require.NoError(t, err)
 	mod, err := api.NewHDWalletsModule(h)
 	require.NoError(t, err)
 	require.NotNil(t, mod)
-
-	const gap = `authenticated-only("⛔ KNOWN GAP, not a decision: PermReadHDWallets/PermCreateHDWallet exist and are granted by role, ` +
-		`but no HD-wallet route references them, so any authenticated key reaches this surface. ` +
-		`Left as-is here because assigning the permission is a security decision that has to be made per route, ` +
-		`and a too-loose guess would ship silently while a too-strict one would fail e2e.")`
 
 	var got []string
 	mod.Routes(recordingRegistrar{record: func(pattern string, auth api.RouteAuth) {
@@ -147,11 +153,13 @@ func TestHDWalletRoutes_RegistersExactlyTheProductionPatterns(t *testing.T) {
 	// ⚠️ Order is the registration order, not sorted: a module registering the
 	// same set in a different order is a different edit and worth seeing.
 	assert.Equal(t, []string{
-		"GET /api/v1/evm/hd-wallets → " + gap,
-		"POST /api/v1/evm/hd-wallets → " + gap,
-		"POST /api/v1/evm/hd-wallets/{address}/derive → " + gap,
-		"GET /api/v1/evm/hd-wallets/{address}/derived → " + gap,
-	}, got)
+		"GET /api/v1/evm/hd-wallets → permitted(read_hd_wallets)",
+		"POST /api/v1/evm/hd-wallets → permitted(create_hd_wallet)",
+		"POST /api/v1/evm/hd-wallets/{address}/derive → permitted(read_hd_wallets)",
+		"GET /api/v1/evm/hd-wallets/{address}/derived → permitted(read_hd_wallets)",
+	}, got, "⛔ these four patterns each carry a permission, and that is the whole point of the "+
+		"2026-09-14 slice: before it they were AuthenticatedOnly and any authenticated key reached "+
+		"all four. An AuthenticatedOnly reappearing here is the gap reopening")
 	assert.Equal(t, "hd-wallets", mod.Name())
 }
 

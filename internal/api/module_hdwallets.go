@@ -5,28 +5,20 @@ import (
 	"net/http"
 
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
+	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 )
 
-// hdWalletGap is the written reason on all four HD-wallet routes, and it is the
-// exemption itself rather than a comment about one — route_auth.go's
-// AuthenticatedOnly refuses an empty one, and scripts/lib/arch-baseline/ast/
-// route-auth-exemptions.txt ratchets every line that carries it.
+// ⭐ 2026-09-14: hdWalletGap is GONE, and its deletion is the point of slice 2.
 //
-// ⛔ It is reproduced here byte for byte from where it stood in router.go before
-// S4. Decomposing a route may not change what it declares about authorization,
-// and this string is what these four declare.
+// It used to be the written reason on all four HD-wallet routes, recording that
+// PermReadHDWallets and PermCreateHDWallet existed, were granted by role, and
+// were referenced by no route — so any authenticated key, of any role, reached
+// this whole surface. All four routes now carry a permission, so there is no
+// exemption left to justify and the four lines have left
+// scripts/lib/arch-baseline/ast/route-auth-exemptions.txt (16 → 12).
 //
-// ⛔ Do NOT "fix" the gap while decomposing. PermReadHDWallets and
-// PermCreateHDWallet exist and are granted by role, and assigning them here
-// would look like tidying up. It is a security decision with an asymmetric
-// failure direction — too strict fails e2e, too loose ships silently — and it
-// belongs to its own PR, argued on its own. Proposal §2.5 records "the
-// decomposition quietly changed a permission" as the single semantically
-// irreversible risk in this plan.
-const hdWalletGap = "⛔ KNOWN GAP, not a decision: PermReadHDWallets/PermCreateHDWallet exist and are granted by role, " +
-	"but no HD-wallet route references them, so any authenticated key reaches this surface. " +
-	"Left as-is here because assigning the permission is a security decision that has to be made per route, " +
-	"and a too-loose guess would ship silently while a too-strict one would fail e2e."
+// ⛔ Do not reintroduce an AuthenticatedOnly here. The four permissions chosen,
+// and why each one rather than the other, are argued on Routes() below.
 
 // hdWalletsModule serves HD wallet creation, listing and derivation.
 //
@@ -83,13 +75,58 @@ func (m *hdWalletsModule) Name() string { return "hd-wallets" }
 // That is fixed by construction now: the two functions are reachable only from
 // the two patterns that name them.
 //
-// ⛔ Every one of the four is AuthenticatedOnly(hdWalletGap), byte for byte what
-// the four patterns declared. See hdWalletGap: the permission gap is real, known,
-// and deliberately not closed here.
+// # ⛔ Permissions: the gap is closed, one decision per route
+//
+// ⭐ 2026-09-14, slice 2. All four used to be AuthenticatedOnly with a written
+// reason saying, in full, that this was a known RBAC gap: **any authenticated
+// key of any role reached this surface**. Each now names a permission, and the
+// four decisions are not the same decision:
+//
+//	POST /hd-wallets                  → PermCreateHDWallet  (admin only)
+//	GET  /hd-wallets                  → PermReadHDWallets   (admin, dev, agent)
+//	GET  /hd-wallets/{addr}/derived   → PermReadHDWallets
+//	POST /hd-wallets/{addr}/derive    → PermReadHDWallets   ⚠️ see below
+//
+// ⭐ **create is a no-op in practice, and that is why it is the safe one.**
+// hdwallet.go:228 already refuses a non-admin with 403 "admin access required",
+// and PermCreateHDWallet is granted to admin alone — so the route guard and the
+// handler guard now agree exactly and no caller changes behaviour. What it buys
+// is that the check is no longer the *only* thing standing there: deleting the
+// handler's IsAdmin() would now leave the route still closed.
+//
+// ⛔ derive is a WRITE on a read permission, deliberately, and it is a new row
+// in route-mutating-perm.txt with that reason. The alternative was
+// PermCreateHDWallet, and it is wrong here in the dangerous direction: derive's
+// real check is resource-scoped — resolveAccessibleWallet runs
+// accessService.CheckAccess(apiKey.ID, address) and answers 403 for a wallet
+// this key may not touch — and a non-admin key legitimately derives from a
+// wallet it was granted. ⚠️ Admin-only would break the extension, which is
+// configured with an `agent` key (extension/background.js:4030), and it would
+// break it **silently**: no test in this repo derives with a non-admin key, so
+// e2e would stay green while a real caller started failing. Too strict does not
+// always fail e2e — that is the asymmetry the old exemption assumed away.
+//
+// ⚠️ Who loses access, stated rather than buried: **`strategy`**. It holds
+// neither permission, so all four endpoints are now 403 for it where all four
+// used to answer. That is the grant matrix taking effect — strategy is the
+// sign-only role, and rbac.go grants it read_signers but deliberately not
+// read_hd_wallets. ⭐ The capability is not lost, only this route: a strategy
+// key that has been granted access to an HD wallet still finds its primary
+// address through GET /api/v1/evm/signers?type=hd_wallet, which is gated on
+// PermReadSigners (which strategy holds) and is scoped by the same
+// ownership+access set. That migration is what makes this narrowing safe rather
+// than merely strict.
+//
+// ⚠️ One existing e2e test changed as a direct result and it is worth reading:
+// TestHDWallet_NonAdminCannotList asserted that a strategy key CAN list and sees
+// an empty array. Its name already said "CannotList"; the body had been relaxed
+// to describe the un-gated reality. It now asserts 403, which is the stricter
+// answer, not a weakened one.
+//
 // TestHDWalletRoutes_RegistersExactlyTheProductionPatterns asserts the pattern
-// *and* its authorization for all four, and is the only thing in the HD-wallet
-// family that would notice a change here — none of those tests runs the
-// middleware chain.
+// *and* its authorization for all four — none of those tests runs the middleware
+// chain, so e2e's TestHDWallet_StrategyKeyIsRefusedTheWholeSurface is the
+// negative verification by effect.
 //
 // ⚠️ Client-visible answers that changed, all of them consequences of the mux
 // taking over dispatch, none avoidable without keeping a prefix pattern (which
@@ -131,13 +168,17 @@ func (m *hdWalletsModule) Name() string { return "hd-wallets" }
 // would shadow nothing, but it would restore the prefix's habit of answering for
 // paths that are not HD-wallet endpoints, which is the property being removed.
 func (m *hdWalletsModule) Routes(reg RouteRegistrar) {
-	// ⚠️ AuthenticatedOnly(hdWalletGap) is written out at each call rather than
-	// hoisted into a per-call local: cmd/archcheck reads these registrations
-	// syntactically. A package-level const it can resolve; a local variable in
-	// the argument slot it cannot, and the exemption gate would silently stop
-	// seeing these four routes.
-	reg.Handle("GET /api/v1/evm/hd-wallets", AuthenticatedOnly(hdWalletGap), http.HandlerFunc(m.h.ListWallets))
-	reg.Handle("POST /api/v1/evm/hd-wallets", AuthenticatedOnly(hdWalletGap), http.HandlerFunc(m.h.CreateOrImport))
-	reg.Handle("POST /api/v1/evm/hd-wallets/{address}/derive", AuthenticatedOnly(hdWalletGap), http.HandlerFunc(m.h.Derive))
-	reg.Handle("GET /api/v1/evm/hd-wallets/{address}/derived", AuthenticatedOnly(hdWalletGap), http.HandlerFunc(m.h.ListDerived))
+	// ⚠️ Permitted(...) is written out at each call rather than hoisted into a
+	// local: cmd/archcheck reads these registrations syntactically, and a
+	// variable in the argument slot is a value it cannot resolve — the route
+	// gates would silently stop seeing these four routes' permission.
+	reg.Handle("GET /api/v1/evm/hd-wallets", Permitted(middleware.PermReadHDWallets), http.HandlerFunc(m.h.ListWallets))
+	reg.Handle("POST /api/v1/evm/hd-wallets", Permitted(middleware.PermCreateHDWallet), http.HandlerFunc(m.h.CreateOrImport))
+
+	// ⛔ PermReadHDWallets on a POST, on purpose — see the block above. The gate
+	// that matters is resolveAccessibleWallet's per-wallet CheckAccess, which a
+	// route cannot express; PermCreateHDWallet would lock out the `agent` key the
+	// extension ships with, and would do it without reddening a single test.
+	reg.Handle("POST /api/v1/evm/hd-wallets/{address}/derive", Permitted(middleware.PermReadHDWallets), http.HandlerFunc(m.h.Derive))
+	reg.Handle("GET /api/v1/evm/hd-wallets/{address}/derived", Permitted(middleware.PermReadHDWallets), http.HandlerFunc(m.h.ListDerived))
 }

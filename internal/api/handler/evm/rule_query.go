@@ -273,8 +273,12 @@ func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID
 		return
 	}
 
-	// Only admin can approve (enforced by RBAC middleware PermApproveRule,
-	// but double-check here for defense in depth)
+	// Only admin can approve. ⭐ Since 2026-09-14 this really is defense in
+	// depth: the route carries Permitted(PermApproveRule), which admin alone
+	// holds, so RequirePermission refuses a non-admin before this runs.
+	// ⛔ Until then this sentence was false — the route carried PermListRules and
+	// PermApproveRule was referenced by nothing but this comment, so this check
+	// was not a second line of defense, it was the only one. Keep it anyway.
 	if !apiKey.IsAdmin() {
 		respond.Error(w, "permission denied: only admin can approve rules", http.StatusForbidden, h.logger)
 		return

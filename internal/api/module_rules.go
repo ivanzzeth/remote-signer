@@ -76,30 +76,41 @@ func (m *rulesModule) Name() string { return "rules" }
 
 // Routes registers the rule endpoints this slice has named.
 //
-// # ⛔ Permissions: copied verbatim, and what that makes visible
+// # ⛔ Permissions: six of the eight writes moved off list_rules
 //
-// Eleven of the twelve carry PermListRules because that is what the two prefixes
-// they came out of declared — `r.handle("/api/v1/evm/rules", …)` and
-// `r.handle("/api/v1/evm/rules/", Permitted(middleware.PermListRules), ruleHandler)`
-// — and route_auth.go's ⛔ KNOWN LIMIT section has said for as long as it has
-// existed that the prefix "declares PermListRules for all twelve endpoints
-// behind it". The twelfth, POST .../{id}/budgets/reset, keeps the
-// PermManageBudgets it already had as a separately registered route.
+// Eleven of the twelve used to carry PermListRules, because that is what the two
+// prefixes they came out of declared — route_auth.go's ⛔ KNOWN LIMIT section
+// said for as long as it existed that the prefix "declares PermListRules for all
+// twelve endpoints behind it". Naming them turned that sentence into eight rows
+// of route-mutating-perm.txt: eight mutating routes gated on a read permission.
 //
-// ⚠️ Naming them turns that sentence into **eight rows** of
-// scripts/lib/arch-baseline/ast/route-mutating-perm.txt: eight mutating routes
-// gated on a read permission. ⛔ They are pre-existing debt becoming *visible*,
-// not debt created here, and tightening them is a security decision with its own
-// PR — the same treatment the four signer actions, the four signer sub-tree
-// routes and the five template routes got in S1, S4 and S6.
+// ⭐ 2026-09-14, slice 3 of the RBAC-gap PR, resolved those eight one at a time
+// rather than as a batch, because they are not one question:
 //
-// ⚠️ Several endpoints additionally check a *role* inside the handler: approve
-// and reject re-check `apiKey.IsAdmin()` ("double-check here for defense in
-// depth", rule_query.go), propose checks agent-or-admin, and both validate
-// endpoints are admin-only (RuleHandler.requireAdmin, copied verbatim from the
-// ServeHTTP branch — proposal §2.1 names that pair). ⛔ RouteAuth cannot express
-// a role, so none of these could have become a route permission even if
-// converting one were allowed, and it is not.
+//	POST   /rules            → create_rule_self   (same roles; declares the truth)
+//	PATCH  /rules/{id}       → modify_own_rule    (same roles)
+//	DELETE /rules/{id}       → delete_own_rule    (same roles)
+//	POST   /rules/{id}/approve → approve_rule     ⭐ narrows to admin
+//	POST   /rules/{id}/reject  → approve_rule     ⭐ narrows to admin
+//	POST   /rules/{id}/propose → propose_rule     (same roles)
+//	POST   /rules/validate      ⛔ LEFT on list_rules — read-only POST
+//	POST   /rules/{id}/validate ⛔ LEFT on list_rules — read-only POST
+//
+// ⚠️ Only approve and reject change anyone's access, and only on paper: the
+// handler already refused every non-admin, and four e2e tests have asserted that
+// for dev and agent all along. ⛔ The other four moves are no-ops in role terms
+// (verified against rbac.go's grant maps, not guessed from the names) and are
+// worth making anyway — a route that declares "may look at rules" as the price
+// of deleting one is wrong even when today's grants happen to coincide.
+//
+// ⚠️ The twelfth, POST .../{id}/budgets/reset, keeps the PermManageBudgets it
+// already had as a separately registered route.
+//
+// ⚠️ Every one of these still has a handler check that is strictly narrower, and
+// none of them could be replaced by a route permission: approve/reject/propose
+// and both validates test a *role*, and create/update/delete test ownership and
+// source per row. RouteAuth expresses neither. ⛔ The route is the outer door,
+// and the point of this slice is that the outer door now says what it guards.
 //
 // # Behaviour, measured before and after
 //
@@ -192,29 +203,70 @@ func (m *rulesModule) Routes(reg RouteRegistrar) {
 	// variable in the argument slot is a value it cannot resolve — the route
 	// gates (route-perm-binding, route-auth-exempt, route-mutating-perm) would
 	// silently stop seeing these routes.
-	// ---------- slice 3: the collection and the item ----------
+	// ---------- the collection and the item ----------
 	//
-	// ⛔ PermListRules on all five, verbatim from the two prefixes they replace.
-	// ⚠️ Three of them mutate, so they join route-mutating-perm as newly visible
-	// pre-existing debt — the same treatment every earlier slice's writes got.
+	// ⛔ The two reads keep PermListRules. The three writes do NOT: 2026-09-14
+	// gave each the permission that names what it does.
+	//
+	// ⚠️ These three are a **no-op in role terms today, and that is the point**:
+	// create_rule_self, modify_own_rule and delete_own_rule are granted to
+	// exactly the same set as list_rules (admin, dev, agent — never strategy),
+	// so nobody's access changes. What changes is that the route now declares the
+	// truth, so a future role granted list_rules without create_rule_self is
+	// actually refused instead of silently able to create rules. ⛔ Verified
+	// against rbac.go's grant maps, not inferred from the names.
+	//
+	// ⚠️ Each is additionally resource-scoped inside the handler — createRule
+	// forces applied_to=self for non-admin, updateRule and deleteRule refuse a
+	// row this key does not own and refuse config-sourced rules outright — and
+	// that is still the check that matters. The route is the outer door.
 	reg.Handle("GET /api/v1/evm/rules", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.ListRules))
-	reg.Handle("POST /api/v1/evm/rules", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.CreateRule))
+	reg.Handle("POST /api/v1/evm/rules", Permitted(middleware.PermCreateRuleSelf), http.HandlerFunc(m.h.CreateRule))
 	reg.Handle("GET /api/v1/evm/rules/{id}", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.GetRule))
-	reg.Handle("PATCH /api/v1/evm/rules/{id}", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.UpdateRule))
-	reg.Handle("DELETE /api/v1/evm/rules/{id}", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.DeleteRule))
+	reg.Handle("PATCH /api/v1/evm/rules/{id}", Permitted(middleware.PermModifyOwnRule), http.HandlerFunc(m.h.UpdateRule))
+	reg.Handle("DELETE /api/v1/evm/rules/{id}", Permitted(middleware.PermDeleteOwnRule), http.HandlerFunc(m.h.DeleteRule))
 
-	reg.Handle("POST /api/v1/evm/rules/{id}/approve", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.ApproveRule))
-	reg.Handle("POST /api/v1/evm/rules/{id}/reject", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.RejectRule))
-	reg.Handle("POST /api/v1/evm/rules/{id}/propose", Permitted(middleware.PermListRules), http.HandlerFunc(m.h.ProposeRule))
-
-	// ---------- slice 2: the two validate endpoints ----------
+	// ---------- the three approval-state actions ----------
 	//
-	// ⛔ PermListRules on both, verbatim from the prefix — and ⛔ the admin check
-	// that actually narrows them stays inside the handler (RuleHandler's
-	// requireAdmin, copied word for word from the ServeHTTP branch). RouteAuth
-	// expresses permissions, not roles; making these Permitted(something-admin-
-	// only) would be a different decision about who may call them, taken during a
-	// refactor. Proposal §2.1 names this exact pair.
+	// ⭐ approve and reject are the one place in this module where the role set
+	// really narrows: PermApproveRule is granted to **admin alone**, while
+	// list_rules is held by admin, dev and agent. ⚠️ No caller loses anything,
+	// because rule_query.go:278/344 already refused a non-admin with 403 — and
+	// e2e has asserted that for both verbs, for both dev and agent, all along
+	// (TestE2E_RuleApproval_RBAC_Approve / _Reject, TestRBAC_A2_Dev A2.11,
+	// TestRBAC_A3_Agent A3.24). What moves is *where* the refusal happens.
+	//
+	// ⛔ And it retires a false comment, the twin of the one router.go carried
+	// about templates: rule_query.go:276 said "enforced by RBAC middleware
+	// PermApproveRule, but double-check here for defense in depth". The
+	// middleware was NOT enforcing it — PermApproveRule was referenced by nothing
+	// but that sentence — so the "defense in depth" was the only defense there
+	// was. Now the comment is true and the depth is real.
+	//
+	// ⚠️ propose takes PermProposeRule, which is granted to the same three roles
+	// as list_rules, so it changes no access either. The handler's agent-or-admin
+	// test stays: it is a *role* check and narrower than the permission, and
+	// RouteAuth cannot express a role.
+	reg.Handle("POST /api/v1/evm/rules/{id}/approve", Permitted(middleware.PermApproveRule), http.HandlerFunc(m.h.ApproveRule))
+	reg.Handle("POST /api/v1/evm/rules/{id}/reject", Permitted(middleware.PermApproveRule), http.HandlerFunc(m.h.RejectRule))
+	reg.Handle("POST /api/v1/evm/rules/{id}/propose", Permitted(middleware.PermProposeRule), http.HandlerFunc(m.h.ProposeRule))
+
+	// ---------- the two validate endpoints ----------
+	//
+	// ⛔ PermListRules on both, and 2026-09-14 deliberately LEFT them there.
+	// They are POSTs that create nothing — they run the rules' own test cases —
+	// so this is route-mutating-perm's known false-positive direction, and the
+	// check that actually narrows them is an admin *role* test inside the handler
+	// (RuleHandler.requireAdmin, copied word for word from the ServeHTTP branch;
+	// pinned by TestRuleRoutes_ValidateAdminCheckIsStillInTheHandler). RouteAuth
+	// expresses permissions, not roles.
+	//
+	// ⚠️ There is no permission that would improve them: approve_rule is
+	// admin-only and would duplicate the role check at the cost of pretending
+	// validate is an approval; create_rule_self would say they write, which they
+	// do not. ⭐ So their route-mutating-perm rows stay, with the reason upgraded
+	// from "nobody has judged this" to "judged, and left". Proposal §2.1 names
+	// this exact pair.
 	//
 	// ⚠️ "validate" is one legal path segment, so POST /api/v1/evm/rules/validate
 	// is also matched by POST /api/v1/evm/rules/{id} (slice 3). The literal is a

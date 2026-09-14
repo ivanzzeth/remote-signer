@@ -91,28 +91,43 @@ func (m *templatesModule) Name() string { return "templates" }
 // r.URL.EscapedPath(), so a client replaying its headers at the redirect target
 // would 401 on every request.
 //
-// # ⛔ Permissions: copied verbatim, and four of them are newly visible debt
+// # ⛔ Permissions: the four mutations now cost instantiate_template
 //
-// All eight carry Permitted(PermReadTemplates), byte for byte what the prefixes
-// declared. ⚠️ Four are mutating routes on a read permission and appear in
-// scripts/lib/arch-baseline/ast/route-mutating-perm.txt for the first time:
-// create, update, delete and instantiate. That is newly **visible** pre-existing
-// debt, not a change made here — a method-less prefix is something
-// route-mutating-perm cannot see at all (its own baseline says so), and those
-// four endpoints have always been reachable holding only read_templates.
+// ⭐ 2026-09-14, slice 1 of the RBAC-gap PR the decomposition kept deferring.
+// Five routes moved from Permitted(PermReadTemplates) to
+// Permitted(PermInstantiateTemplate): create, update, delete, instantiate and
+// revoke-instance. The other three are unchanged and still read_templates.
 //
-// ⚠️ And the reason is not "the real check is elsewhere": router.go's comment
-// claimed "mutate: PermInstantiateTemplate checked in handler", and that was
-// false. PermInstantiateTemplate is defined and granted (middleware/rbac.go:42,
-// :103, :153) and checked *nowhere* — grep the tree. ⛔ Fixing that is a security
-// decision and its own PR (proposal §2.5 names "the decomposition quietly
-// changed a permission" as the single semantically irreversible risk in this
-// plan, and that applies in both directions).
+// ⛔ What this closes, stated as it was measured: PermInstantiateTemplate was
+// defined (middleware/rbac.go:42) and granted to admin (:103) and agent (:153),
+// and **read by nothing in the tree** — grep returned the definition, the two
+// grants, and a router.go comment claiming "mutate: PermInstantiateTemplate
+// checked in handler" that was simply false. So template create / update /
+// delete / instantiate were reachable holding only read_templates, which the
+// `dev` role also holds. That is the hole; this is the fix.
 //
-// ⚠️ validate keeps its admin *role* check inside the handler. RouteAuth carries
-// a permission, not a role, so the route layer cannot express it.
+// ⚠️ Who this narrows, named rather than implied. read_templates is held by
+// admin, dev and agent; instantiate_template by admin and agent only. **The
+// role that loses these four endpoints is `dev`.** That is not a side effect —
+// it is the grant matrix being enforced for the first time. No caller in this
+// tree mutates templates with a dev key: the Go e2e suite, the blackbox CLI
+// tests, the Playwright suite, helpers_cleanup and the MCP server's documented
+// default all use admin; cmd/smoke-test uses an agent key and only reads.
+// ⚠️ A human driving the Web UI with a dev key loses the TemplateDetail
+// "instantiate" button, and that is the intended consequence of the grant.
+//
+// ⚠️ The three that did NOT move, and why:
+//   - GET on the collection and on an item are reads. read_templates is right.
+//   - POST /{id}/validate is a POST but creates nothing (it runs the template's
+//     own test cases), and it is already narrower than either permission: the
+//     handler demands the admin *role*. RouteAuth carries a permission, not a
+//     role, so that check stays where it is. It keeps its
+//     route-mutating-perm.txt row, with the reason strengthened there.
+//
 // TestTemplateRoutes_RegistersExactlyTheProductionPatterns asserts the pattern
-// *and* its authorization for all eight.
+// *and* its authorization for all eight, and e2e's
+// TestTemplate_DevKeyCannotMutateTemplates is the negative verification by
+// effect: a dev key is refused and no template row appears.
 //
 // ⚠️ Client-visible answers that changed, measured on both sides — the before
 // column against the old ServeHTTP, the after column against these patterns
@@ -180,11 +195,17 @@ func (m *templatesModule) Routes(reg RouteRegistrar) {
 	// gates (route-perm-binding, route-mutating-perm) would silently stop
 	// seeing these routes' permission.
 	reg.Handle("GET /api/v1/templates", Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.ListTemplates))
-	reg.Handle("POST /api/v1/templates", Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.CreateTemplate))
+	reg.Handle("POST /api/v1/templates", Permitted(middleware.PermInstantiateTemplate), http.HandlerFunc(m.h.CreateTemplate))
 	reg.Handle("GET /api/v1/templates/{id}", Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.GetTemplate))
-	reg.Handle("PATCH /api/v1/templates/{id}", Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.UpdateTemplate))
-	reg.Handle("DELETE /api/v1/templates/{id}", Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.DeleteTemplate))
-	reg.Handle("POST /api/v1/templates/{id}/instantiate", Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.InstantiateTemplate))
+	reg.Handle("PATCH /api/v1/templates/{id}", Permitted(middleware.PermInstantiateTemplate), http.HandlerFunc(m.h.UpdateTemplate))
+	reg.Handle("DELETE /api/v1/templates/{id}", Permitted(middleware.PermInstantiateTemplate), http.HandlerFunc(m.h.DeleteTemplate))
+	reg.Handle("POST /api/v1/templates/{id}/instantiate", Permitted(middleware.PermInstantiateTemplate), http.HandlerFunc(m.h.InstantiateTemplate))
+
+	// ⛔ validate stays on PermReadTemplates deliberately. It creates nothing
+	// (it runs the template's own test cases) and the check that actually
+	// narrows it is the admin *role* test inside the handler, which RouteAuth
+	// cannot express. Moving it to instantiate_template would widen it for
+	// agent keys while changing nothing for anyone else.
 	reg.Handle("POST /api/v1/templates/{id}/validate", Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.ValidateTemplate))
 
 	// The instances sub-tree. ⚠️ Its wildcard is a rule id, not a file stem:
@@ -193,6 +214,15 @@ func (m *templatesModule) Routes(reg RouteRegistrar) {
 	// caller — pkg/client, pkg/js-client, web/src/pages/Rules.tsx — passes one
 	// straight through. That is why this one route could be named a step before
 	// the other seven.
+	//
+	// ⛔ PermInstantiateTemplate, not PermReadTemplates: revoke disables the rule
+	// an instantiate created, and it is the one template route whose real check
+	// is NOT resource-scoped — revokeInstance looks the rule up by id and
+	// disables it with no owner test at all (template_actions.go:232). So the
+	// route permission is the whole gate here, and "may look at templates" was
+	// never the right one. ⚠️ It still does not stop one agent revoking another
+	// agent's instance; that needs an owner check in the handler and is recorded
+	// as a finding rather than fixed here, because it would change responses.
 	reg.Handle("POST /api/v1/templates/instances/{ruleID}/revoke",
-		Permitted(middleware.PermReadTemplates), http.HandlerFunc(m.h.RevokeInstance))
+		Permitted(middleware.PermInstantiateTemplate), http.HandlerFunc(m.h.RevokeInstance))
 }

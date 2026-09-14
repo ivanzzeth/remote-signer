@@ -24,15 +24,15 @@
 // exists for.
 //
 // ⚠️ What these tests do NOT exercise: the middleware chain. Every route
-// registers as Permitted(PermReadTemplates), whose chain begins with
-// AuthMiddleware, which refuses any request lacking X-API-Key-ID / X-Timestamp /
-// X-Signature. These tests inject an API key through the request context
-// instead, as the template family always has. So the test registrar drops the
-// RouteAuth it is handed and registers the bare handler: what is under test is
-// dispatch. ⛔ Do not read a green run here as evidence that these routes are
-// correctly permissioned — four of them are mutating routes on a read
-// permission, which module_templates.go records in writing and
-// scripts/lib/arch-baseline/ast/route-mutating-perm.txt ratchets.
+// registers as Permitted(...), whose chain begins with AuthMiddleware, which
+// refuses any request lacking X-API-Key-ID / X-Timestamp / X-Signature. These
+// tests inject an API key through the request context instead, as the template
+// family always has. So the test registrar drops the RouteAuth it is handed and
+// registers the bare handler: what is under test is dispatch. ⛔ Do not read a
+// green run here as evidence that these routes are correctly permissioned —
+// nothing in this file runs RequirePermission. The permission *column* below is
+// asserted; whether it is enforced is proved in e2e
+// (TestTemplate_DevKeyCannotMutateTemplates), against a real daemon.
 //
 // ⚠️ The mux these tests build holds only the module's own routes — no
 // "/api/v1/templates/" prefix (there is none any more) and no /api/v1/ fallback
@@ -119,17 +119,17 @@ func doTemplateRouteRequest(t *testing.T, mux http.Handler, method, path string,
 // TestTemplateRoutes_RegistersExactlyTheProductionPatterns is the assertion that
 // keeps a decomposition from quietly changing authorization.
 //
-// ⛔ It asserts every pattern *and* its RouteAuth. The permission is copied
-// verbatim from the two prefixes these routes came out of, and this test plus
+// ⛔ It asserts every pattern *and* its RouteAuth. This test plus
 // route-perm-binding are the only two things that would notice a change.
-// Negatively verified: swapping PermReadTemplates for another permission on any
-// one route reddens both.
+// Negatively verified: swapping any one route's permission reddens both.
 //
-// ⚠️ Read the four mutating rows deliberately. create, update, delete and
-// instantiate carry a *read* permission, and that is not a mistake introduced
-// here — it is what the method-less prefix declared for all seven endpoints
-// behind it, and a method-less prefix is precisely what route-mutating-perm
-// cannot see. ⛔ Tightening them is a security decision and its own PR.
+// ⭐ 2026-09-14: the four mutating rows moved off the read permission.
+// create, update, delete and instantiate are instantiate_template, which admin
+// and agent hold and `dev` does not. ⚠️ The three reads and validate are still
+// read_templates — validate because it creates nothing and is already narrowed
+// by an admin *role* check in the handler that a route cannot express.
+// ⛔ If a future edit makes any of these read_templates again it is widening the
+// surface back to `dev`; that is a security decision, not a tidy-up.
 func TestTemplateRoutes_RegistersExactlyTheProductionPatterns(t *testing.T) {
 	fx := handler.NewTemplateInstanceFixture(t, routeRuleID)
 	mod, err := api.NewTemplatesModule(fx.Handler)
@@ -142,15 +142,17 @@ func TestTemplateRoutes_RegistersExactlyTheProductionPatterns(t *testing.T) {
 
 	assert.Equal(t, map[string]string{
 		"GET /api/v1/templates":                            "permitted(read_templates)",
-		"POST /api/v1/templates":                           "permitted(read_templates)",
+		"POST /api/v1/templates":                           "permitted(instantiate_template)",
 		"GET /api/v1/templates/{id}":                       "permitted(read_templates)",
-		"PATCH /api/v1/templates/{id}":                     "permitted(read_templates)",
-		"DELETE /api/v1/templates/{id}":                    "permitted(read_templates)",
-		"POST /api/v1/templates/{id}/instantiate":          "permitted(read_templates)",
+		"PATCH /api/v1/templates/{id}":                     "permitted(instantiate_template)",
+		"DELETE /api/v1/templates/{id}":                    "permitted(instantiate_template)",
+		"POST /api/v1/templates/{id}/instantiate":          "permitted(instantiate_template)",
 		"POST /api/v1/templates/{id}/validate":             "permitted(read_templates)",
-		"POST /api/v1/templates/instances/{ruleID}/revoke": "permitted(read_templates)",
-	}, got, "⛔ the templates module registers exactly these eight routes, each with the permission the "+
-		"prefix it replaced declared; changing either is a security decision, not a refactor (proposal §2.5)")
+		"POST /api/v1/templates/instances/{ruleID}/revoke": "permitted(instantiate_template)",
+	}, got, "⛔ the templates module registers exactly these eight routes with exactly these permissions. "+
+		"Changing one is a security decision, not a refactor (proposal §2.5): read_templates is held by "+
+		"admin/dev/agent, instantiate_template by admin/agent only, so any move between them adds or "+
+		"removes the `dev` role from an endpoint")
 	assert.Equal(t, "templates", mod.Name())
 }
 
