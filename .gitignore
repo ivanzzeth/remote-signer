@@ -96,17 +96,28 @@ app/metamask-snap/node_modules/
 # Build outputs
 pkg/js-client/dist/
 
-# TS SDK generated from internal/apidocs/openapi.json (`make sdk WHAT=ts`, and
-# automatically by js-client's `prebuild`).
+# 从 internal/apidocs/openapi.json 生成的 SDK —— **两侧都不入库**(2026-09-15)。
 #
-# ⛔ 与 Go 侧**相反**,而理由是构建模型的不同,不是口味(提案 §4.2):
-#   · pkg/client/internal/gen/*.gen.go **入库** —— `go build` 不跑代码生成,
-#     手写封装 import 它,不提交则 fresh clone 编译不过。
-#   · 这一份不入库 —— `npm run build` 之前 npm 一定先跑 `prebuild`,而
-#     `make lint-deps`(门禁 ⑬ 的前置、CI 里 `make check` 之前那一步)走的正是
-#     `npm run build`。
-# ⚠️ 所以门禁 ⑮ 的 TS 档**自己重新生成一份**再读(实测 0.86s),而不是读这里 ——
-# 一个不入库的产物,门禁不能假设它存在。
+# ⭐ 这里曾经写着相反的话,而那句话是错的,留个记录免得有人照着改回去:
+#   「pkg/client/internal/gen/*.gen.go 入库 —— go build 不跑代码生成,手写封装
+#     import 它,不提交则 fresh clone 编译不过。」
+# 实测(`go list -deps`)手写封装**并不** import 它:全仓只有
+# pkg/client/internal/transport/signing_differential_test.go 一个**测试**文件
+# import。把两个 .gen.go 移开之后 `go build ./...` 退出码 0。
+# 那条理由是写提案(§4.2)时的预期,落地时从未兑现 —— 实际形状是手写 transport
+# 提供 SigningRequestEditor 给生成的客户端用,而不是反过来。
+#
+# ⚠️ 那个测试因此带 `//go:build sdkgen`,由 layers.sh 的 `sdk-diff` 层跑,
+# 层的前置 `make sdk WHAT=go` 现生成一份。
+#
+# ⛔ **唯一还入库的生成产物是 internal/apidocs/openapi.json**,而且只有一个理由:
+# internal/apidocs/doc.go 用 `//go:embed` 引它,那是**生产代码**,文件不在就真的
+# 编译不过。⚠️ 别把这条理由复制给别的产物 —— 上面那半就是这么错的。
+#
+# ⚠️ 所以门禁 ⑮ 两侧都**自己重新生成一份**再读,而不是读工作区:
+# 一个不入库的产物,门禁不能假设它存在,更不能假设它是新的。
+pkg/client/internal/gen/*.gen.go
+pkg/client/internal/gen/GENERATED.txt
 pkg/js-client/src/gen/
 pkg/mcp-server/build/
 app/metamask-snap/dist/

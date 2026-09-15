@@ -499,9 +499,22 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 | 产物 | 提交？ | 理由 |
 |---|---|---|
 | `internal/apidocs/openapi.json` | ✅ | `//go:embed` 需要它在构建时存在 |
-| `pkg/client/internal/gen/*.gen.go` | ✅ | 手写封装 import 它 |
+| `pkg/client/internal/gen/*.gen.go` | ❌ | ⛔ **本表原先写 ✅，理由「手写封装 import 它」——那是预期，落地时从未兑现**（见下） |
 | `pkg/js-client/src/gen/` | ❌ | `npm run prebuild` 从已提交的 `openapi.json` 重生成 |
 | 根目录 `/openapi.json` | ❌ | 导出副本，随时可再生 |
+
+⛔ **订正（2026-09-15，实测）**：`go list -deps ./pkg/client/...` 显示手写封装**并不**
+import 生成包；全仓只有 `pkg/client/internal/transport/signing_differential_test.go`
+一个**测试**文件 import 它。把两个 `.gen.go` 移开后 `go build ./...` **退出码 0**。
+
+实际形状与提案预期相反：手写 transport **提供** `SigningRequestEditor` 给生成的
+客户端用，而不是生成的客户端被手写封装 import。所以「不提交则 fresh clone 编译
+不过」对 Go SDK 不成立 —— 它只对 `openapi.json` 成立（那一行仍然是 ✅）。
+
+⚠️ 那个差分测试因此带 `//go:build sdkgen`，由 `scripts/lib/layers.sh` 的 `sdk-diff`
+层跑，层的前置 `make sdk WHAT=go` 现生成一份。⭐ 这也顺带消灭了「有人手改生成
+文件」这一整类问题：文件不进版本库，就没人能手改它 —— 原 ⑮d 的逐字节比对因此
+不是被删弱，是失去了对象。
 
 ### 4.3 生成器与注入式 transport
 

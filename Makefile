@@ -171,11 +171,18 @@ openapi:
 ## 顺序反了会拿旧契约生成新 SDK,而两边都不会报错 —— 门禁 ⑮ 的 sha256 记录正是
 ## 为这件事存在的。
 ##
-## ⛔ **Go 侧的产物进版本库,TS 侧不进**(提案 §4.2)。理由不对称,不是口味:
-##   · pkg/client/internal/gen/*.gen.go 被手写封装 import,而 `go build` 不跑
-##     代码生成 —— 不提交则 fresh clone 编译不过。
-##   · pkg/js-client/src/gen/ 由 `npm run prebuild` 在构建时重生成,tsup 之前
-##     一定跑过,所以它不入库也不会让谁编译不过。
+## ⛔ **两侧的产物都不进版本库**(2026-09-15)。这里曾经写着「Go 侧进、TS 侧不进」,
+## 理由是「手写封装 import 它,不提交则 fresh clone 编译不过」—— 那句话是错的:
+## `go list -deps` 实测手写封装**并不** import 它,全仓只有一个**测试**文件
+## (signing_differential_test.go)import,把两个 .gen.go 移开后 `go build ./...`
+## 退出码 0。那是写提案时的预期,落地时从未兑现。
+##   · 那个测试因此带 `//go:build sdkgen`,由 `make test LAYER=sdk-diff` 跑,
+##     层的前置会现生成一份(层定义在 scripts/lib/layers.sh)。
+##   · pkg/js-client/src/gen/ 一直不入库 —— `npm run build` 之前必跑 `prebuild`。
+##
+## ⚠️ 唯一还入库的生成产物是 internal/apidocs/openapi.json,只因为
+## internal/apidocs/doc.go 用 `//go:embed` 引它(生产代码,不在就编译不过)。
+## ⛔ 别把这条理由复制给别的产物 —— 上面那半就是这么错的。
 ##
 ## ⚠️ Go 侧要 oapi-codegen v$(shell tr -d 'v \t\r\n' < .oapi-codegen-version),
 ## 它的 go.mod 写着 go 1.25.0 而本仓库是 1.24.x —— `go run` 会**切换工具链**

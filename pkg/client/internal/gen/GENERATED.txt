@@ -1,4 +1,0 @@
-# ⛔ 生成的,别手改 —— scripts/gen-sdk.sh 写的。
-generator github.com/oapi-codegen/oapi-codegen/v2 v2.8.0
-spec internal/apidocs/openapi.json sha256:0f84d2aed29a60134697afe578de83d4071d0c24057e75b002aeb37ce6572af0
-operations 92
