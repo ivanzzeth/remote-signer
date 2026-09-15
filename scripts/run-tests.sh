@@ -18,7 +18,10 @@ SLOW_LAYERS="integration blackbox e2e"
 # ⚠️ 需要 node + playwright 浏览器(`npx playwright install chromium`),装不上的
 # 机器上会红在环境而不是代码 —— 所以 `all` 不含它,必须显式 LAYER=web-e2e。
 # ⛔ 但它**必须**留在 layers.sh 里:不在那张表里的 tier,红了没人看得见。
-OPT_IN_LAYERS="web-e2e"
+# ⚠️ sdk-diff 的前置 `make sdk WHAT=go` 会切换 Go 工具链(oapi-codegen v2.8.0 的
+# go.mod 要 go ≥ 1.25,本仓库 1.24.x),冷机上是一次 Go 发行版下载 —— 同样是
+# 「装不上/装得慢的机器上红在环境」,所以与 web-e2e 同组,不进 all。
+OPT_IN_LAYERS="web-e2e sdk-diff"
 # ⭐ 只要 node 的层 —— 进 `all`,不进默认。
 #
 # 不进默认:`make test` 是「改一行 Go 代码想知道对不对」的循环,不该为此付
@@ -54,6 +57,16 @@ for name in $layers; do
         printf '==> %s 层 (%s)\n' "$name" "$cmd"
         bash -c "$cmd" || rc=1
         continue
+    fi
+    # 前置(第四段,可选)。⛔ 失败就停这一层 —— 一个前置没跑成的层,它的绿和红
+    # 都不可信(本仓库反复踩的形状:门禁/测试在缺前提时「什么都没做而报告成功」)。
+    prep=$(layer_prep "$name")
+    if [ -n "$prep" ]; then
+        printf '==> %s 层前置:%s\n' "$name" "$prep"
+        if ! bash -c "$prep"; then
+            printf '  ✗ %s 层的前置失败 —— 这一层没有跑(⛔ 别读成「没有失败」)\n' "$name" >&2
+            rc=1; continue
+        fi
     fi
     pkgs=$(layer_pkgs "$name")
     if [ -z "$(printf '%s' "$pkgs" | tr -d ' ')" ]; then

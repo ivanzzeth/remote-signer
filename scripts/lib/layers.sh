@@ -81,6 +81,23 @@ LAYERS=(
     # 是 .gitignore 掉的(见 .gitignore:110),不生成的话 ts-jest 直接红在
     # "cannot find module './gen/schema'",即红在环境而不是代码。
     "js-client-unit|@cmd|make js-client-deps && cd pkg/js-client && npm run test:unit"
+    # ⭐ 生成的 Go SDK 与手写 transport 的**签名差分测试**。
+    #
+    # 它是 go test 而不是 @cmd,理由是门禁 ①:@cmd 层覆盖不到 `*_test.go`
+    # (check-tests.sh 里那一行 `[ "$tag" = "@cmd" ] && continue`),而这个文件
+    # 是真的 `*_test.go` —— 写成 @cmd 的话它会被门禁 ① 判成「没有任何层编译得到」。
+    # 所以它用第四段带前置,这也是第四段存在的原因。
+    #
+    # ⚠️ 为什么要 tag:pkg/client/internal/gen 的 *.gen.go **不入库**(2026-09-15,
+    # 生成产物不跟踪)。没有 tag 的话 cli 层(含 ./pkg/...)会在一台没生成过 SDK
+    # 的机器上编译失败。加了 tag,默认层看不见它,这一层带 tag 才编译它。
+    #
+    # ⚠️ 它**不进 `all`**,进 OPT_IN(见 run-tests.sh):前置 `make sdk WHAT=go` 会
+    # 触发 Go 工具链切换(oapi-codegen v2.8.0 要 go ≥ 1.25,本仓库 1.24.x) ——
+    # 冷机上那是一次 Go 发行版下载。判据与 web-e2e 逐字相同:
+    # 「装不上的机器上会不会红在环境?」会。
+    # ⛔ 但它**必须**留在这张表里:不在表里的 tier,红了没人看得见。
+    "sdk-diff|sdkgen| ./pkg/client/...|make sdk WHAT=go"
 )
 
 # ⚠️ 已知缺口(登记在此,不假装不存在):pkg/js-client/tests/e2e.test.ts 目前
@@ -102,9 +119,30 @@ LAYERS=(
 #    所以更稳的做法是串行。
 SLOW_SERIAL_LAYERS="e2e web-e2e"
 
+# 每项格式:`层名|tag|包 pattern[|前置命令]` —— 第四段可选。
+#
+# ⚠️ 第三段(包 pattern / @cmd 的命令)与第四段都**不许含 `|`**。解析是按字段切的,
+# 含 `|` 会被截断。⛔ 上一版 layer_raw 用 `${l##*|}`(取最末段),那个写法同样
+# 假设命令不含 `|`,只是假设藏在写法里没写出来 —— 现在写出来了。
 layer_tag()   { local l; for l in "${LAYERS[@]}"; do [ "${l%%|*}" = "$1" ] && { local r=${l#*|}; echo "${r%%|*}"; return; }; done; return 1; }
 layer_names() { local l; for l in "${LAYERS[@]}"; do echo "${l%%|*}"; done; }
-layer_raw()   { local l; for l in "${LAYERS[@]}"; do [ "${l%%|*}" = "$1" ] && { echo "${l##*|}"; return; }; done; return 1; }
+layer_raw()   { local l; for l in "${LAYERS[@]}"; do [ "${l%%|*}" = "$1" ] && { local r=${l#*|}; r=${r#*|}; echo "${r%%|*}"; return; }; done; return 1; }
+
+# layer_prep <名> —— 该层跑之前必须先执行的命令(没有则输出空)。
+#
+# ⭐ 为什么它必须在这张表里,而不是在 run-tests.sh 里对某个层名特判:
+# layers.sh 是**唯一事实来源**。前置写在别处,就等于「这一层怎么跑」有两个出处,
+# 而本文件顶上那段讲的正是两份出处开始漂之后没人发现。
+layer_prep()  {
+    local l r
+    for l in "${LAYERS[@]}"; do
+        [ "${l%%|*}" = "$1" ] || continue
+        r=${l#*|}; r=${r#*|}          # r = 第三段[|第四段]
+        case "$r" in *"|"*) echo "${r#*|}" ;; *) echo "" ;; esac
+        return
+    done
+    return 1
+}
 
 # 无 tag 层里被 repo/http/cli 显式认领的包 —— unit 要减掉的就是这些。
 _claimed_untagged_pkgs() {

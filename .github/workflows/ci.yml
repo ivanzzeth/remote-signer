@@ -175,6 +175,29 @@ jobs:
       - name: make test LAYER=js-client-unit
         run: make test LAYER=js-client-unit
 
+  # 生成的 Go SDK 与手写 transport 的签名差分测试(layers.sh 的 `sdk-diff` 层)。
+  #
+  # ⚠️ 它带 build tag `sdkgen`,因为 pkg/client/internal/gen/*.gen.go 不入库 ——
+  # 层的前置 `make sdk WHAT=go` 现生成一份。没有这个 job,这一层的红没人看得见
+  # (门禁 ⑥ 正是钉这件事:每一层都必须在 ci.yml 里被跑到)。
+  sdk-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      # ⛔ 不能省,理由同 check.yml 的 sdk-drift job:oapi-codegen 不在 go.sum 里
+      # (生成器是构建期工具),setup-go 的缓存不含它,而且它会带来一次 Go 工具链
+      # 切换。让那次下载在日志里**有名字**,而不是藏在层前置内部突然变慢或失败。
+      - name: Warm the pinned oapi-codegen
+        run: |
+          v=$(tr -d 'v \t\r\n' < .oapi-codegen-version)
+          go run "github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v${v}" -version
+      - name: make test LAYER=sdk-diff
+        run: make test LAYER=sdk-diff
+
   web-e2e:
     runs-on: ubuntu-latest
     steps:

@@ -1,3 +1,18 @@
+//go:build sdkgen
+
+// ⛔ 这个 tag 不是「可选的慢测试」,是**构建前提**:本文件 import
+// pkg/client/internal/gen,而那份 SDK 是生成的、**不入库**(2026-09-15)。
+// 没有 tag 的话,`make test` 的 cli 层(含 ./pkg/...)会在一台还没生成过 SDK 的
+// 机器上编译失败 —— 而失败信息是 `undefined: gen.Client`,读不出「你需要先生成」。
+//
+// ⚠️ 实测过一个更糟的形态,写在这里免得有人把 tag 去掉:`go list` 只做**包级**
+// 解析,gen/ 目录里还有手写的 doc.go,所以 import 路径解析得到 —— 门禁 ①
+// (「每个测试文件都被某一层编译到」)会**绿**,而 `go test` 编译不过。
+// 也就是说这一类错误没有任何门禁抓得住,只有真的跑那一层才会知道。
+//
+// 跑它:`make test LAYER=sdk-diff`(层定义在 scripts/lib/layers.sh,
+// 前置 `make sdk WHAT=go` 写在那里)。
+
 package transport
 
 import (
