@@ -668,27 +668,29 @@ func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, t
 			results = append(results, item)
 			continue
 		}
-		// ⛔ 同一个形状的第二处:test_cases 的**形状不对**与**一条都没有**,
-		// 以前都走「Valid:true 跳过」。前者是一份写错的模板,而它会被报告成通过。
-		// ⚠️ 顺带把被丢掉的 Marshal 错误接住(门禁 ⑫ 管的就是这一类)。
-		tcJSON, err := json.Marshal(testCasesRaw)
-		if err != nil {
-			item.Valid = false
-			item.Error = fmt.Sprintf("test_cases cannot be re-encoded: %v", err)
-			allPassed = false
-			results = append(results, item)
-			continue
-		}
+		// ⚠️ 这里**保持原样**(2026-09-17 退回了一次改动,记在这里免得有人再改一遍)。
+		//
+		// 我曾把「test_cases 形状不对」从「跳过」改成「判失败」,理由是:一条
+		// evm_js 规则里 test_cases 就该是数组,写错了却报告通过等于掩盖错误。
+		// ⛔ 但那是一个**判断**,而既有代码有相反的判断并且写成了测试
+		// (preset_test.go 的 TestRunTemplateValidation_InvalidTestCasesJSON,
+		// 紧挨着的 EmptyTestCases 同样断言 Valid=true —— 作者是有意把「空」和
+		// 「形状不对」一并当作「没有用例可跑」的)。
+		//
+		// 退回的依据不是「谁更有道理」,而是代价与收益:实测 shipped 模板里
+		// **没有任何一处** test_cases 不是数组(rules/ 全扫,0 处),所以那个改动
+		// 抓不到任何既有问题;而它会让 instantiate / apply 开始拒绝这类模板,
+		// 并与一条既有测试正面冲突 —— 那是该单独拿出来判的事,不该夹在
+		// 「修 fail-open」里顺手做掉。
+		//
+		// ⭐ 真正的 fail-open 已经在函数顶部修掉了(json.Valid):那一处是
+		// **校验器自己解析不了输入**却报告通过,与这里不是一回事。
+		// ⚠️ 接住 Marshal 的错误而不是 `_` 丢掉(门禁 ⑫ 管这一类)。**行为一字未变**:
+		// 原先 Marshal 失败时 tcJSON 为 nil,紧接着的 Unmarshal 必然出错,同样落进
+		// 下面这条跳过分支 —— 这里只是把「必然发生的失败」写出来,不是改判断。
+		tcJSON, marshalErr := json.Marshal(testCasesRaw)
 		var testCases []evmhandlerJSRuleTestCase
-		if err := json.Unmarshal(tcJSON, &testCases); err != nil {
-			item.Valid = false
-			item.Error = fmt.Sprintf("test_cases has the wrong shape: %v", err)
-			allPassed = false
-			results = append(results, item)
-			continue
-		}
-		// ⚠️ 与上面同理:一条测试用例都没有是合法的,跳过它不是放水。
-		if len(testCases) == 0 {
+		if marshalErr != nil || json.Unmarshal(tcJSON, &testCases) != nil || len(testCases) == 0 {
 			item.Valid = true
 			results = append(results, item)
 			continue

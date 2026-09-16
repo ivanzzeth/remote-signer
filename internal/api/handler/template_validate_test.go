@@ -164,10 +164,18 @@ func TestValidateTemplateConfig_NonBundleShapeIsSkipped(t *testing.T) {
 	assert.Contains(t, results[0].Error, "skipped")
 }
 
-// TestValidateTemplateConfig_BrokenTestCasesIsInvalid 是同一形状的第二处:
-// test_cases 的形状不对(这里是字符串而非数组)以前同样被跳过成 Valid:true。
-// ⚠️ 与「一条用例都没有」区分开 —— 后者合法,由下面那条测试钉住。
-func TestValidateTemplateConfig_BrokenTestCasesIsInvalid(t *testing.T) {
+// TestValidateTemplateConfig_MalformedTestCasesIsSkipped 钉住一个**现状**,
+// 而不是一个理想 —— 它记录的是 2026-09-17 退回的那次改动。
+//
+// test_cases 形状不对(这里是字符串)与「一条用例都没有」走同一条路:跳过、
+// Valid=true。⚠️ 这与 preset_test.go 的 TestRunTemplateValidation_InvalidTestCasesJSON
+// 是同一个断言,两处都在,别只改一处。
+//
+// ⭐ 这**可能**值得改成判失败(写错的 test_cases 被报告成通过,确实掩盖了一个
+// 错误),但那是一次独立的判断:实测 rules/ 下没有任何模板踩在这个形状上,
+// 所以改动抓不到既有问题,却会让 instantiate / apply 拒绝这类模板。
+// ⛔ 要改就连同 preset_test.go 那条一起改,并且单独走 —— 别夹在别的改动里。
+func TestValidateTemplateConfig_MalformedTestCasesIsSkipped(t *testing.T) {
 	eval := newTestJSEvaluator(t)
 	config := []byte(`{
 		"rules": [{
@@ -176,10 +184,9 @@ func TestValidateTemplateConfig_BrokenTestCasesIsInvalid(t *testing.T) {
 		}]
 	}`)
 	results, allPassed := ValidateTemplateConfig(eval, "test-template", config, nil)
-	assert.False(t, allPassed, "形状不对的 test_cases 被报告成通过")
+	assert.True(t, allPassed, "现状是跳过;要改成判失败请连 preset_test.go 一起改")
 	require.Len(t, results, 1)
-	assert.False(t, results[0].Valid)
-	assert.Contains(t, results[0].Error, "wrong shape")
+	assert.True(t, results[0].Valid)
 }
 
 // TestValidateTemplateConfig_EmptyTestCasesIsSkipped 是上一条的**反方向**:

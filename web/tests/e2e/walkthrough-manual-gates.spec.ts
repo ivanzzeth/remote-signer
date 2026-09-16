@@ -90,8 +90,24 @@ test("walkthrough step 1 — Simulations page runs dry-run and surfaces a result
 
   // E2E daemon may not register the simulate handler (404). Either outcome
   // proves the UI wired the POST and rendered feedback.
+  //
+  // ⚠️ 这个 daemon **一定**走 404 分支:global-setup 写的 config.yaml 里
+  // chains.evm 下没有 simulation 段,于是 cfg.Chains.EVM.Simulation.Enabled
+  // 为 false,run.go 不创建 Simulator,POST /api/v1/evm/simulate 这条路由压根
+  // 不注册。
+  //
+  // ⛔ 文案 2026-09-17 改过,别改回去:c17665b 起,/api/v1/ 下未匹配的路径由
+  // Router.apiNotFound 回**JSON 错误信封** {"error":"not found: no such API
+  // endpoint"},不再是 Go mux 默认的纯文本 "404 page not found"。前端
+  // transport.ts 取 env.error 当 APIError.message,formatErr 渲染成
+  // `HTTP <code>: <message>`。
+  //
+  // ⚠️ 这句断言写死了旧文案,而**它从来没跑过**:ci.yml 只在 main/dev 上触发,
+  // 那个改动一直待在功能分支上(功能分支只跑 check),直到合并进 main 才暴露。
   const result = authedPage.getByRole("heading", { name: "Result" });
-  const simError = authedPage.getByText("HTTP 404: 404 page not found").first();
+  const simError = authedPage
+    .getByText("HTTP 404: not found: no such API endpoint")
+    .first();
   await expect(result.or(simError).first()).toBeVisible({ timeout: 20_000 });
 });
 
