@@ -4346,18 +4346,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**, and only fields actually present are written. To flip one switch, send that one field.\n⛔ This differs from the other eight settings groups, which still REPLACE wholesale — see each of their descriptions. Security was changed first because half its fields are security switches and every omission failed in the same direction, **looser**: nonce_required / manual_approval_enabled / require_approval_for_agent_rules all default to true and became false; max_keystores_per_key / max_hd_wallets_per_key default to 5 / 3 and became 0 — and 0 on those two means **no limit**.\n⚠️ Values you do write still apply, including `false` and `0`. Absence (JSON null / omitted key) is the only thing that means \"leave it alone\" — so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.SecuritySnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -4410,7 +4410,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the security settings",
+                "summary": "Update the security settings (partial patch)",
                 "tags": [
                     "settings"
                 ]

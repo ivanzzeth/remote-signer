@@ -199,21 +199,27 @@ func (h *SettingsHandler) GetWeb(w http.ResponseWriter, _ *http.Request) {
 // PUT — one endpoint per group, each with its own body type
 // ---------------------------------------------------------------------------
 
-// PutSecurity replaces the security snapshot.
+// PutSecurity merges a patch into the security snapshot.
 //
 // ⚠️ The only group with an after-save hook: the router passes syncApprovalGuard
 // through SetOnSecurityUpdated, so a changed approval policy takes effect
 // without a restart. Written here rather than inside putSettingsGroup because
 // "security is special" is a fact about this endpoint, not about the mechanism.
 //
-//	@Summary	Replace the security settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+// ⛔ It is also the only group that MERGES. The other eight still replace
+// wholesale, and their docs still say so — ⚠️ do not "unify" those sentences:
+// eight of them are true.
+//
+//	@Summary	Update the security settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**, and only fields actually present are written. To flip one switch, send that one field.
+//	@Description	⛔ This differs from the other eight settings groups, which still REPLACE wholesale — see each of their descriptions. Security was changed first because half its fields are security switches and every omission failed in the same direction, **looser**: nonce_required / manual_approval_enabled / require_approval_for_agent_rules all default to true and became false; max_keystores_per_key / max_hd_wallets_per_key default to 5 / 3 and became 0 — and 0 on those two means **no limit**.
+//	@Description	⚠️ Values you do write still apply, including `false` and `0`. Absence (JSON null / omitted key) is the only thing that means "leave it alone" — so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.SecuritySnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.SecuritySnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.SecuritySnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string

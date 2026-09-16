@@ -78,8 +78,8 @@ func TestSetSecurityConfig_ResponseShape(t *testing.T) {
 	// happily reported a value that had since been changed.
 	mgr := settings.NewManager(newHealthTestStore(t), slog.Default())
 	sec := settings.DefaultSecurity()
-	sec.AutoLockTimeout = 10 * time.Minute
-	sec.SignTimeout = 45 * time.Second
+	sec.AutoLockTimeout = settings.Ptr(10 * time.Minute)
+	sec.SignTimeout = settings.Ptr(45 * time.Second)
 	if err := mgr.UpdateSecurity(t.Context(), sec, settings.UpdatedBySystem); err != nil {
 		t.Fatalf("update security: %v", err)
 	}

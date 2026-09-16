@@ -72,7 +72,10 @@ func (h *HealthHandler) securityConfigNow() *SecurityConfigInfo {
 	autoLock, signTimeout := time.Duration(0), time.Duration(0)
 	if h.settingsMgr != nil {
 		if snap := h.settingsMgr.Security(); snap != nil {
-			autoLock, signTimeout = snap.AutoLockTimeout, snap.SignTimeout
+			// ⚠️ 两个 0 兜底与 applySecurityDurations 下面的渲染规则一致:
+			// autoLock 0 → "disabled",signTimeout 0 → "30s"。
+			autoLock = settings.Deref(snap.AutoLockTimeout, 0)
+			signTimeout = settings.Deref(snap.SignTimeout, 0)
 		}
 	}
 	applySecurityDurations(&out, autoLock, signTimeout)
@@ -107,7 +110,7 @@ func (h *HealthHandler) SetApprovalGuard(guard *service.ManualApprovalGuard) {
 func (h *HealthHandler) approvalGuardHealth() *ApprovalGuardHealth {
 	enabled := false
 	if h.settingsMgr != nil {
-		enabled = h.settingsMgr.Security().ApprovalGuard.Enabled
+		enabled = h.settingsMgr.Security().Guard().Enabled
 	}
 	if !enabled {
 		return nil

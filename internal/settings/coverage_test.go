@@ -256,11 +256,11 @@ func TestSeedMaterialCheck(t *testing.T) {
 func TestSecurityFromConfigValues_Defaults(t *testing.T) {
 	s := SecurityFromConfigValues(SecurityYAMLView{})
 	assert.NotNil(t, s)
-	assert.Equal(t, 60*time.Second, s.MaxRequestAge)
-	assert.Equal(t, 100, s.RateLimitDefault)
-	assert.Equal(t, 200, s.IPRateLimit)
-	assert.True(t, s.NonceRequired)
-	assert.False(t, s.ManualApprovalEnabled)
+	assert.Equal(t, 60*time.Second, *s.MaxRequestAge)
+	assert.Equal(t, 100, *s.RateLimitDefault)
+	assert.Equal(t, 200, *s.IPRateLimit)
+	assert.True(t, *s.NonceRequired)
+	assert.False(t, *s.ManualApprovalEnabled)
 }
 
 func TestSecurityFromConfigValues_Overrides(t *testing.T) {
@@ -270,9 +270,9 @@ func TestSecurityFromConfigValues_Overrides(t *testing.T) {
 		IPRateLimit:      1000,
 	}
 	s := SecurityFromConfigValues(v)
-	assert.Equal(t, 120*time.Second, s.MaxRequestAge)
-	assert.Equal(t, 500, s.RateLimitDefault)
-	assert.Equal(t, 1000, s.IPRateLimit)
+	assert.Equal(t, 120*time.Second, *s.MaxRequestAge)
+	assert.Equal(t, 500, *s.RateLimitDefault)
+	assert.Equal(t, 1000, *s.IPRateLimit)
 }
 
 func TestSecurityFromConfigValues_ApprovalGuard(t *testing.T) {
@@ -326,12 +326,12 @@ func TestSecurityFromConfigValues_BoolPointers(t *testing.T) {
 		RequireApprovalForAgentRules: &trueVal,
 	}
 	s := SecurityFromConfigValues(v)
-	assert.True(t, s.NonceRequired)
-	assert.True(t, s.RulesAPIReadonly)
-	assert.True(t, s.SignersAPIReadonly)
-	assert.True(t, s.APIKeysAPIReadonly)
-	assert.True(t, s.AllowSIGHUPRulesReload)
-	assert.True(t, s.RequireApprovalForAgentRules)
+	assert.True(t, *s.NonceRequired)
+	assert.True(t, *s.RulesAPIReadonly)
+	assert.True(t, *s.SignersAPIReadonly)
+	assert.True(t, *s.APIKeysAPIReadonly)
+	assert.True(t, *s.AllowSIGHUPRulesReload)
+	assert.True(t, *s.RequireApprovalForAgentRules)
 }
 
 func TestSecurityFromConfigValues_OverflowFields(t *testing.T) {
@@ -343,11 +343,11 @@ func TestSecurityFromConfigValues_OverflowFields(t *testing.T) {
 		MaxHDWalletsPerKey: 5,
 	}
 	s := SecurityFromConfigValues(v)
-	assert.Equal(t, 100, s.MaxRulesPerAPIKey)
-	assert.Equal(t, 5*time.Minute, s.AutoLockTimeout)
-	assert.Equal(t, 60*time.Second, s.SignTimeout)
-	assert.Equal(t, 10, s.MaxKeystoresPerKey)
-	assert.Equal(t, 5, s.MaxHDWalletsPerKey)
+	assert.Equal(t, 100, *s.MaxRulesPerAPIKey)
+	assert.Equal(t, 5*time.Minute, *s.AutoLockTimeout)
+	assert.Equal(t, 60*time.Second, *s.SignTimeout)
+	assert.Equal(t, 10, *s.MaxKeystoresPerKey)
+	assert.Equal(t, 5, *s.MaxHDWalletsPerKey)
 }
 
 // =============================================================================
@@ -384,22 +384,25 @@ func TestFallbackFloat_Positive(t *testing.T) {
 
 func TestDefaultSecurity_Full(t *testing.T) {
 	s := DefaultSecurity()
-	assert.Equal(t, 60*time.Second, s.MaxRequestAge)
-	assert.Equal(t, 100, s.RateLimitDefault)
-	assert.Equal(t, 200, s.IPRateLimit)
-	assert.True(t, s.NonceRequired)
-	assert.True(t, s.ManualApprovalEnabled)
-	assert.False(t, s.RulesAPIReadonly)
-	assert.False(t, s.SignersAPIReadonly)
-	assert.False(t, s.APIKeysAPIReadonly)
-	assert.False(t, s.AllowSIGHUPRulesReload)
-	assert.Equal(t, 50, s.MaxRulesPerAPIKey)
-	assert.True(t, s.RequireApprovalForAgentRules)
-	assert.Equal(t, 30*time.Second, s.SignTimeout)
-	assert.Equal(t, 5, s.MaxKeystoresPerKey)
-	assert.Equal(t, 3, s.MaxHDWalletsPerKey)
-	assert.Equal(t, ApprovalGuard{}, s.ApprovalGuard)
-	assert.Equal(t, IPWhitelist{}, s.IPWhitelist)
+	assert.Equal(t, 60*time.Second, *s.MaxRequestAge)
+	assert.Equal(t, 100, *s.RateLimitDefault)
+	assert.Equal(t, 200, *s.IPRateLimit)
+	assert.True(t, *s.NonceRequired)
+	assert.True(t, *s.ManualApprovalEnabled)
+	assert.False(t, *s.RulesAPIReadonly)
+	assert.False(t, *s.SignersAPIReadonly)
+	assert.False(t, *s.APIKeysAPIReadonly)
+	assert.False(t, *s.AllowSIGHUPRulesReload)
+	assert.Equal(t, 50, *s.MaxRulesPerAPIKey)
+	assert.True(t, *s.RequireApprovalForAgentRules)
+	assert.Equal(t, 30*time.Second, *s.SignTimeout)
+	assert.Equal(t, 5, *s.MaxKeystoresPerKey)
+	assert.Equal(t, 3, *s.MaxHDWalletsPerKey)
+	// ⚠️ 走访问器而不是解引用:这两个字段整体是指针了,而断言的是「未配置时等于
+	// 零值块」—— Guard()/Whitelist() 正是把 nil 也读成零值块的那层,断言它才是在
+	// 断言读取路径的真实行为。
+	assert.Equal(t, ApprovalGuard{}, s.Guard())
+	assert.Equal(t, IPWhitelist{}, s.Whitelist())
 }
 
 // =============================================================================

@@ -83,25 +83,32 @@ func seedIfMissing(ctx context.Context, store Store, key Group, value any) error
 // avoid importing the internal/config package (avoids an import cycle); the
 // helper applies the same defaults config.setDefaults() would.
 func SecurityFromConfigValues(v SecurityYAMLView) *SecuritySnapshot {
+	// ⭐ 这个函数因为指针化**变短也变直白了**:`SecurityYAMLView` 的五个 *bool
+	// 以前要「解引用再存进裸值」(`s.X = *v.X`),那一行正是「没写」这个信息在这一层
+	// 被丢掉的地方 —— 现在指针直接传下去,信息不再损失。
+	//
+	// ⚠️ 数值字段仍然是 `> 0 才覆盖`,语义没变:YAMLView 那几个是裸值,分不出
+	// 「没写」和「写了 0」。⛔ 那是 YAML 层自己的限制,不是这里能修的 ——
+	// 要修得先把 config.SecurityConfig 的数值字段也指针化,那是另一步。
 	s := DefaultSecurity()
 	if v.MaxRequestAge > 0 {
-		s.MaxRequestAge = v.MaxRequestAge
+		s.MaxRequestAge = Ptr(v.MaxRequestAge)
 	}
 	if v.RateLimitDefault > 0 {
-		s.RateLimitDefault = v.RateLimitDefault
+		s.RateLimitDefault = Ptr(v.RateLimitDefault)
 	}
 	if v.IPRateLimit > 0 {
-		s.IPRateLimit = v.IPRateLimit
+		s.IPRateLimit = Ptr(v.IPRateLimit)
 	}
-	s.IPWhitelist = IPWhitelist{
+	s.IPWhitelist = &IPWhitelist{
 		Enabled:        v.IPWhitelistEnabled,
 		AllowedIPs:     v.IPWhitelistAllowedIPs,
 		TrustProxy:     v.IPWhitelistTrustProxy,
 		TrustedProxies: v.IPWhitelistTrustedProxies,
 	}
-	s.ManualApprovalEnabled = v.ManualApprovalEnabled
+	s.ManualApprovalEnabled = Ptr(v.ManualApprovalEnabled)
 	if v.ApprovalGuardEnabled {
-		s.ApprovalGuard = ApprovalGuard{
+		s.ApprovalGuard = &ApprovalGuard{
 			Enabled:               true,
 			Window:                fallbackDuration(v.ApprovalGuardWindow, time.Hour),
 			RejectionThresholdPct: fallbackFloat(v.ApprovalGuardRejectionPct, 50),
@@ -109,38 +116,39 @@ func SecurityFromConfigValues(v SecurityYAMLView) *SecuritySnapshot {
 			ResumeAfter:           fallbackDuration(v.ApprovalGuardResumeAfter, 2*time.Hour),
 		}
 	}
+	// 五个 *bool:直接传指针,nil 时保留 DefaultSecurity 给的值。
 	if v.NonceRequired != nil {
-		s.NonceRequired = *v.NonceRequired
+		s.NonceRequired = v.NonceRequired
 	}
 	if v.RulesAPIReadonly != nil {
-		s.RulesAPIReadonly = *v.RulesAPIReadonly
+		s.RulesAPIReadonly = v.RulesAPIReadonly
 	}
 	if v.SignersAPIReadonly != nil {
-		s.SignersAPIReadonly = *v.SignersAPIReadonly
+		s.SignersAPIReadonly = v.SignersAPIReadonly
 	}
 	if v.APIKeysAPIReadonly != nil {
-		s.APIKeysAPIReadonly = *v.APIKeysAPIReadonly
+		s.APIKeysAPIReadonly = v.APIKeysAPIReadonly
 	}
 	if v.AllowSIGHUPRulesReload != nil {
-		s.AllowSIGHUPRulesReload = *v.AllowSIGHUPRulesReload
+		s.AllowSIGHUPRulesReload = v.AllowSIGHUPRulesReload
 	}
 	if v.MaxRulesPerAPIKey > 0 {
-		s.MaxRulesPerAPIKey = v.MaxRulesPerAPIKey
+		s.MaxRulesPerAPIKey = Ptr(v.MaxRulesPerAPIKey)
 	}
 	if v.RequireApprovalForAgentRules != nil {
-		s.RequireApprovalForAgentRules = *v.RequireApprovalForAgentRules
+		s.RequireApprovalForAgentRules = v.RequireApprovalForAgentRules
 	}
 	if v.AutoLockTimeout > 0 {
-		s.AutoLockTimeout = v.AutoLockTimeout
+		s.AutoLockTimeout = Ptr(v.AutoLockTimeout)
 	}
 	if v.SignTimeout > 0 {
-		s.SignTimeout = v.SignTimeout
+		s.SignTimeout = Ptr(v.SignTimeout)
 	}
 	if v.MaxKeystoresPerKey > 0 {
-		s.MaxKeystoresPerKey = v.MaxKeystoresPerKey
+		s.MaxKeystoresPerKey = Ptr(v.MaxKeystoresPerKey)
 	}
 	if v.MaxHDWalletsPerKey > 0 {
-		s.MaxHDWalletsPerKey = v.MaxHDWalletsPerKey
+		s.MaxHDWalletsPerKey = Ptr(v.MaxHDWalletsPerKey)
 	}
 	return s
 }

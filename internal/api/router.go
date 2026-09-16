@@ -242,7 +242,7 @@ func (r *Router) setupRoutes() error {
 		signHandler.SetAlertService(r.config.AlertService)
 	}
 	signHandler.SetSignTimeout(
-		r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return s.SignTimeout }))
+		r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return settings.Deref(s.SignTimeout, 0) }))
 
 	requestHandler, err := evmhandler.NewRequestHandler(r.signService, r.ruleRepo, r.logger)
 	if err != nil {
@@ -254,7 +254,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }))
+	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.RulesAPIReadonly, false) }))
 	if err != nil {
 		return err
 	}
@@ -286,13 +286,13 @@ func (r *Router) setupRoutes() error {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithTemplateRepo(r.config.Template.TemplateRepo))
 	}
 	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly(
-		r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly })))
+		r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.RulesAPIReadonly, false) })))
 	if r.config.APIKeyRepo != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithAPIKeyRepo(r.config.APIKeyRepo))
 	}
 	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithMaxRulesPerKey(
-		r.liveInt(func(s *settings.SecuritySnapshot) int { return s.MaxRulesPerAPIKey })))
-	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RequireApprovalForAgentRules })))
+		r.liveInt(func(s *settings.SecuritySnapshot) int { return settings.Deref(s.MaxRulesPerAPIKey, 0) })))
+	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.RequireApprovalForAgentRules, false) })))
 	if r.signService != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRuleActivatedCallback(func(callerName string) {
 			r.signService.ReevaluatePending(context.Background(), callerName)
@@ -303,7 +303,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.SignersAPIReadonly }))
+	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.SignersAPIReadonly, false) }))
 	if err != nil {
 		return err
 	}
@@ -317,9 +317,9 @@ func (r *Router) setupRoutes() error {
 		signerHandler.SetAuditLogger(r.config.AuditLogger)
 	}
 	signerHandler.SetMaxKeystoresPerKey(
-		r.liveInt(func(s *settings.SecuritySnapshot) int { return s.MaxKeystoresPerKey }))
+		r.liveInt(func(s *settings.SecuritySnapshot) int { return settings.Deref(s.MaxKeystoresPerKey, 0) }))
 
-	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.SignersAPIReadonly }))
+	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.SignersAPIReadonly, false) }))
 	if err != nil {
 		return err
 	}
@@ -327,7 +327,7 @@ func (r *Router) setupRoutes() error {
 		hdWalletHandler.SetAuditLogger(r.config.AuditLogger)
 	}
 	hdWalletHandler.SetMaxHDWalletsPerKey(
-		r.liveInt(func(s *settings.SecuritySnapshot) int { return s.MaxHDWalletsPerKey }))
+		r.liveInt(func(s *settings.SecuritySnapshot) int { return settings.Deref(s.MaxHDWalletsPerKey, 0) }))
 
 	// Audit handler
 	auditHandler, err := handler.NewAuditHandler(r.auditRepo, r.logger)
@@ -531,7 +531,7 @@ func (r *Router) setupRoutes() error {
 			batchSignHandler.SetAlertService(r.config.AlertService)
 		}
 		batchSignHandler.SetSignTimeout(
-			r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return s.SignTimeout }))
+			r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return settings.Deref(s.SignTimeout, 0) }))
 		r.handle("POST /api/v1/evm/sign/batch", Permitted(middleware.PermSignRequest), batchSignHandler)
 	}
 
@@ -554,7 +554,7 @@ func (r *Router) setupRoutes() error {
 
 	// API key management routes (admin only)
 	if r.config.APIKeyRepo != nil {
-		apiKeyHandler, err := handler.NewAPIKeyHandler(r.config.APIKeyRepo, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.APIKeysAPIReadonly }))
+		apiKeyHandler, err := handler.NewAPIKeyHandler(r.config.APIKeyRepo, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.APIKeysAPIReadonly, false) }))
 		if err != nil {
 			return err
 		}
@@ -631,8 +631,8 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateRepo,
 			r.config.Template.TemplateService,
 			r.logger,
-			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }),
-			handler.WithTemplateRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RequireApprovalForAgentRules })),
+			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.RulesAPIReadonly, false) }),
+			handler.WithTemplateRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.RequireApprovalForAgentRules, false) })),
 			handler.WithTemplateAPIKeyRepo(r.config.APIKeyRepo),
 			handler.WithTemplateJSEvaluator(r.config.JSEvaluator),
 			handler.WithTemplateSolidityValidator(r.config.SolidityValidator),
@@ -660,9 +660,9 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateRepo,
 			r.config.PresetsDB,
 			r.config.Template.TemplateService,
-			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }),
+			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.RulesAPIReadonly, false) }),
 			r.logger,
-			handler.WithPresetRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RequireApprovalForAgentRules })),
+			handler.WithPresetRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return settings.Deref(s.RequireApprovalForAgentRules, false) })),
 			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
 			handler.WithPresetJSEvaluator(r.config.JSEvaluator),
 			handler.WithPresetSolidityValidator(r.config.SolidityValidator),
@@ -810,7 +810,7 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
-		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.liveInt(func(s *settings.SecuritySnapshot) int { return s.IPRateLimit }), r.config.AlertService),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.liveInt(func(s *settings.SecuritySnapshot) int { return settings.Deref(s.IPRateLimit, 0) }), r.config.AlertService),
 		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
 		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
 		middleware.ContentTypeMiddleware(),
@@ -833,7 +833,7 @@ func (r *Router) withAuthAndPerm(perm middleware.Permission, h http.Handler) htt
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
-		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.liveInt(func(s *settings.SecuritySnapshot) int { return s.IPRateLimit }), r.config.AlertService),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.liveInt(func(s *settings.SecuritySnapshot) int { return settings.Deref(s.IPRateLimit, 0) }), r.config.AlertService),
 		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
 		middleware.RequirePermission(perm, r.logger, r.config.AlertService),
 		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
@@ -859,7 +859,7 @@ func (r *Router) handleGuardResume(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if r.config.SettingsManager == nil || !r.config.SettingsManager.Security().ApprovalGuard.Enabled {
+	if r.config.SettingsManager == nil || !r.config.SettingsManager.Security().Guard().Enabled {
 		http.Error(w, "approval guard is disabled in runtime settings", http.StatusNotImplemented)
 		return
 	}
@@ -883,7 +883,7 @@ func (r *Router) syncApprovalGuard() {
 	if r.config.SettingsManager == nil {
 		return
 	}
-	ag := r.config.SettingsManager.Security().ApprovalGuard
+	ag := r.config.SettingsManager.Security().Guard()
 	if !ag.Enabled {
 		r.config.ApprovalGuard = nil
 		r.signService.SetApprovalGuard(nil)

@@ -15,24 +15,94 @@ import "time"
 // Field names are derived from the existing YAML/JSON keys so that PUT
 // requests against /api/v1/admin/settings/security accept the same shape an
 // operator already understands from config.example.yaml.
+// ⛔ 为什么每一个字段都是指针 —— 动它之前先读这一段
+//
+// nil 表示**「这次请求没有提到它」**,而不是「把它设成零值」。这两件事在裸值上
+// 不可区分,而它们的后果相反。
+//
+// 2026-09-15 实测的真实形状:`PUT /api/v1/admin/settings/security` 把 body 解进一个
+// **全零值**的结构体,再把那个结构体整份存下去。于是一个只想调限流的调用方发
+// `{"rate_limit_default":500}`,会顺带:
+//
+//	nonce_required                → false   (默认 true,**防重放关掉**)
+//	manual_approval_enabled       → false   (默认 true,**人工审批关掉**)
+//	require_approval_for_agent_rules → false (默认 true,agent 建规则不再需批准)
+//	max_rules_per_api_key         → 0       (默认 50)
+//	max_keystores_per_key         → 0       (默认 5,而 **0 = 无限制**,config.go:341)
+//	max_hd_wallets_per_key        → 0       (默认 3,同上,config.go:345)
+//
+// ⭐ 规律是单向的:**少写一个字段,后果一律是更松**。而 PRD §6 写着 ——
+//
+//	N3「『没设置』被当成『不限制』:空着不填的后果必须是**更严**,不是更松」
+//	N1「配置写错,结果比写对**更宽松**」
+//
+// 这个形状正面撞上那两条,而 N1 本身正是从 incidents.md 里「一个拼写错误让额度
+// 上限变成无限」那次事故学来的 —— 同一个形状,换个地方又长了一遍。
+//
+// ⚠️ 三层里**只有这一层**是裸值:config.SecurityConfig 与 SecurityYAMLView 早就用
+// `*bool` 表达「没写」,而 seed.go 的 `if v.X != nil { s.X = *v.X }` 就是信息在这一层
+// 被丢掉的那一行。所以指针化不是发明新语义,是把 API 层补齐到 YAML 层早有的表达力。
+//
+// ⛔ **不变式:Manager 手上的快照永远不含 nil。** NewManager 用 DefaultSecurity()
+// 播种,UpdateSecurity 只把非 nil 的字段合并进当前值 —— 所以读取路径拿到的字段
+// 一定非 nil。⚠️ 即便如此也请走下面的访问器(Guard/Whitelist/…)或 Deref:
+// 一次 nil 解引用在一个持有私钥的守护进程里是**停摆**,而停摆和被攻击在主人眼里
+// 长得一样(incidents.md N6)。
 type SecuritySnapshot struct {
-	MaxRequestAge                time.Duration `json:"max_request_age"`
-	RateLimitDefault             int           `json:"rate_limit_default"`
-	IPRateLimit                  int           `json:"ip_rate_limit"`
-	IPWhitelist                  IPWhitelist   `json:"ip_whitelist"`
-	ManualApprovalEnabled        bool          `json:"manual_approval_enabled"`
-	ApprovalGuard                ApprovalGuard `json:"approval_guard"`
-	NonceRequired                bool          `json:"nonce_required"`
-	RulesAPIReadonly             bool          `json:"rules_api_readonly"`
-	SignersAPIReadonly           bool          `json:"signers_api_readonly"`
-	APIKeysAPIReadonly           bool          `json:"api_keys_api_readonly"`
-	AllowSIGHUPRulesReload       bool          `json:"allow_sighup_rules_reload"`
-	MaxRulesPerAPIKey            int           `json:"max_rules_per_api_key"`
-	RequireApprovalForAgentRules bool          `json:"require_approval_for_agent_rules"`
-	AutoLockTimeout              time.Duration `json:"auto_lock_timeout"`
-	SignTimeout                  time.Duration `json:"sign_timeout"`
-	MaxKeystoresPerKey           int           `json:"max_keystores_per_key"`
-	MaxHDWalletsPerKey           int           `json:"max_hd_wallets_per_key"`
+	MaxRequestAge                *time.Duration `json:"max_request_age,omitempty"`
+	RateLimitDefault             *int           `json:"rate_limit_default,omitempty"`
+	IPRateLimit                  *int           `json:"ip_rate_limit,omitempty"`
+	IPWhitelist                  *IPWhitelist   `json:"ip_whitelist,omitempty"`
+	ManualApprovalEnabled        *bool          `json:"manual_approval_enabled,omitempty"`
+	ApprovalGuard                *ApprovalGuard `json:"approval_guard,omitempty"`
+	NonceRequired                *bool          `json:"nonce_required,omitempty"`
+	RulesAPIReadonly             *bool          `json:"rules_api_readonly,omitempty"`
+	SignersAPIReadonly           *bool          `json:"signers_api_readonly,omitempty"`
+	APIKeysAPIReadonly           *bool          `json:"api_keys_api_readonly,omitempty"`
+	AllowSIGHUPRulesReload       *bool          `json:"allow_sighup_rules_reload,omitempty"`
+	MaxRulesPerAPIKey            *int           `json:"max_rules_per_api_key,omitempty"`
+	RequireApprovalForAgentRules *bool          `json:"require_approval_for_agent_rules,omitempty"`
+	AutoLockTimeout              *time.Duration `json:"auto_lock_timeout,omitempty"`
+	SignTimeout                  *time.Duration `json:"sign_timeout,omitempty"`
+	MaxKeystoresPerKey           *int           `json:"max_keystores_per_key,omitempty"`
+	MaxHDWalletsPerKey           *int           `json:"max_hd_wallets_per_key,omitempty"`
+}
+
+// Ptr returns a pointer to v. Exists so callers can write field: Ptr(true)
+// instead of hoisting a variable for every field.
+func Ptr[T any](v T) *T { return &v }
+
+// Deref returns *p, or def when p is nil.
+//
+// ⚠️ def is what "the caller never said" means for that field — it is not a
+// safety net for a snapshot that should have been complete. On a snapshot from
+// Manager every field is non-nil (see the invariant above), so a def that gets
+// used there is a bug somewhere else, not a value to rely on.
+func Deref[T any](p *T, def T) T {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+// Guard returns the approval-guard block, zero-valued when unset.
+// ⭐ The zero ApprovalGuard has Enabled=false, which is the safe reading of
+// "nobody configured a guard": no guard, rather than a guard that never trips.
+func (s *SecuritySnapshot) Guard() ApprovalGuard {
+	if s == nil || s.ApprovalGuard == nil {
+		return ApprovalGuard{}
+	}
+	return *s.ApprovalGuard
+}
+
+// Whitelist returns the IP-whitelist block, zero-valued when unset.
+// ⚠️ The zero IPWhitelist has Enabled=false — i.e. no IP restriction. That is
+// the existing meaning of an absent ip_whitelist block, not a new decision.
+func (s *SecuritySnapshot) Whitelist() IPWhitelist {
+	if s == nil || s.IPWhitelist == nil {
+		return IPWhitelist{}
+	}
+	return *s.IPWhitelist
 }
 
 // IPWhitelist matches the YAML shape.
@@ -63,22 +133,36 @@ type ApprovalGuard struct {
 // which stay on. Operators who want to freeze a hand-curated config
 // against further API edits flip these to true via the Settings UI or
 // config.yaml — and that's the load-bearing knob, not the default.
+// ⛔ 每一个字段都必须显式给值,一个都不能省 —— 这是「Manager 手上的快照永不含
+// nil」那条不变式的**唯一**来源。
+//
+// ⚠️ 三个字段以前靠零值、这里改成显式写出来,值与行为**一字不差**:
+//
+//	AutoLockTimeout: 0     以前不写(零值 0),0 的含义是**不自动锁定**(config.go:333)
+//	IPWhitelist:     {}     以前不写,零值的 Enabled=false 意为不做 IP 限制
+//	ApprovalGuard:   {}     以前不写,零值的 Enabled=false 意为没有守卫
+//
+// ⛔ 别把它们删回去「反正是零值」:指针化之后不写就是 nil,而 nil 会让读取路径
+// 拿到 Deref 的兜底值,那是另一条语义。
 func DefaultSecurity() *SecuritySnapshot {
 	return &SecuritySnapshot{
-		MaxRequestAge:                60 * time.Second,
-		RateLimitDefault:             100,
-		IPRateLimit:                  200,
-		NonceRequired:                true,
-		ManualApprovalEnabled:        true,
-		RulesAPIReadonly:             false,
-		SignersAPIReadonly:           false,
-		APIKeysAPIReadonly:           false,
-		AllowSIGHUPRulesReload:       false,
-		MaxRulesPerAPIKey:            50,
-		RequireApprovalForAgentRules: true,
-		SignTimeout:                  30 * time.Second,
-		MaxKeystoresPerKey:           5,
-		MaxHDWalletsPerKey:           3,
+		MaxRequestAge:                Ptr(60 * time.Second),
+		RateLimitDefault:             Ptr(100),
+		IPRateLimit:                  Ptr(200),
+		IPWhitelist:                  &IPWhitelist{},
+		NonceRequired:                Ptr(true),
+		ManualApprovalEnabled:        Ptr(true),
+		ApprovalGuard:                &ApprovalGuard{},
+		RulesAPIReadonly:             Ptr(false),
+		SignersAPIReadonly:           Ptr(false),
+		APIKeysAPIReadonly:           Ptr(false),
+		AllowSIGHUPRulesReload:       Ptr(false),
+		MaxRulesPerAPIKey:            Ptr(50),
+		RequireApprovalForAgentRules: Ptr(true),
+		AutoLockTimeout:              Ptr(time.Duration(0)),
+		SignTimeout:                  Ptr(30 * time.Second),
+		MaxKeystoresPerKey:           Ptr(5),
+		MaxHDWalletsPerKey:           Ptr(3),
 	}
 }
 

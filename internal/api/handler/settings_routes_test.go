@@ -412,7 +412,7 @@ func TestSettingsHandler_GET_Security(t *testing.T) {
 
 	var s settings.SecuritySnapshot
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &s))
-	assert.True(t, s.NonceRequired)
+	assert.True(t, *s.NonceRequired)
 }
 
 // TestSettingsHandler_GET_EveryGroup absorbs the eight one-line GET tests that
@@ -466,8 +466,8 @@ func TestSettingsHandler_PUT_Security(t *testing.T) {
 		`{"nonce_required": false, "rate_limit_default": 200}`, settingsAdminKey())
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	assert.False(t, mgr.Security().NonceRequired)
-	assert.Equal(t, 200, mgr.Security().RateLimitDefault)
+	assert.False(t, *mgr.Security().NonceRequired)
+	assert.Equal(t, 200, *mgr.Security().RateLimitDefault)
 }
 
 // TestSettingsHandler_PUT_Security_OnSecurityUpdatedHook pins the one thing that

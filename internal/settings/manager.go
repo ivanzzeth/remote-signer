@@ -215,11 +215,91 @@ func (m *Manager) applyRow(row *Setting) {
 // UpdateSecurity persists the patch to the store and refreshes the local
 // snapshot. actor identifies the caller (e.g. an api_key_id) for audit; pass
 // UpdatedBySystem for daemon-initiated writes.
-func (m *Manager) UpdateSecurity(ctx context.Context, s *SecuritySnapshot, actor string) error {
-	if s == nil {
+// UpdateSecurity merges patch into the current snapshot and persists the result.
+//
+// ⛔ **合并,不是替换 —— 这一半不能省。** 指针只负责「表达」调用方没提到某个字段;
+// 真正让「没提到」等于「别动它」的是这里。少了这一步,指针化只会把
+// 「没填的字段被写成 false」换成「被写成 null」,比原来更糟。
+//
+// ⚠️ 2026-09-15 之前这里是整份替换:handler 把 body 解进一个**全零值**结构体再原样
+// 存下去,于是一个只想改限流的 PUT 会顺手关掉防重放、人工审批、agent 规则审批,
+// 并把三个「每 key 上限」写成 0(= 无限制)。详见 SecuritySnapshot 的类型注释。
+//
+// ⭐ 基线取 m.Security() 而不是 DefaultSecurity():要保留的是**当前生效值**,
+// 不是出厂值。⚠️ 那个快照由不变式保证不含 nil(NewManager 播种 + 这里只增不减),
+// 所以合并结果同样不含 nil —— 存进库的永远是一份完整配置,读回来不会有 null。
+func (m *Manager) UpdateSecurity(ctx context.Context, patch *SecuritySnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil security snapshot")
 	}
-	return m.put(ctx, GroupSecurity, s, actor)
+	return m.put(ctx, GroupSecurity, mergeSecurity(m.Security(), patch), actor)
+}
+
+// mergeSecurity returns base with every non-nil field of patch applied.
+//
+// ⛔ Written out field by field on purpose. Reflection would survive a new field
+// being added without anyone thinking about it — and "a field nobody thought
+// about" is exactly the failure this whole change is about. A new field added to
+// SecuritySnapshot and forgotten here stops being settable through the API,
+// which is loud; the reflective version would instead silently do the wrong
+// thing in whichever direction the zero value points.
+func mergeSecurity(base, patch *SecuritySnapshot) *SecuritySnapshot {
+	if base == nil {
+		base = DefaultSecurity()
+	}
+	out := *base
+	if patch.MaxRequestAge != nil {
+		out.MaxRequestAge = patch.MaxRequestAge
+	}
+	if patch.RateLimitDefault != nil {
+		out.RateLimitDefault = patch.RateLimitDefault
+	}
+	if patch.IPRateLimit != nil {
+		out.IPRateLimit = patch.IPRateLimit
+	}
+	if patch.IPWhitelist != nil {
+		out.IPWhitelist = patch.IPWhitelist
+	}
+	if patch.ManualApprovalEnabled != nil {
+		out.ManualApprovalEnabled = patch.ManualApprovalEnabled
+	}
+	if patch.ApprovalGuard != nil {
+		out.ApprovalGuard = patch.ApprovalGuard
+	}
+	if patch.NonceRequired != nil {
+		out.NonceRequired = patch.NonceRequired
+	}
+	if patch.RulesAPIReadonly != nil {
+		out.RulesAPIReadonly = patch.RulesAPIReadonly
+	}
+	if patch.SignersAPIReadonly != nil {
+		out.SignersAPIReadonly = patch.SignersAPIReadonly
+	}
+	if patch.APIKeysAPIReadonly != nil {
+		out.APIKeysAPIReadonly = patch.APIKeysAPIReadonly
+	}
+	if patch.AllowSIGHUPRulesReload != nil {
+		out.AllowSIGHUPRulesReload = patch.AllowSIGHUPRulesReload
+	}
+	if patch.MaxRulesPerAPIKey != nil {
+		out.MaxRulesPerAPIKey = patch.MaxRulesPerAPIKey
+	}
+	if patch.RequireApprovalForAgentRules != nil {
+		out.RequireApprovalForAgentRules = patch.RequireApprovalForAgentRules
+	}
+	if patch.AutoLockTimeout != nil {
+		out.AutoLockTimeout = patch.AutoLockTimeout
+	}
+	if patch.SignTimeout != nil {
+		out.SignTimeout = patch.SignTimeout
+	}
+	if patch.MaxKeystoresPerKey != nil {
+		out.MaxKeystoresPerKey = patch.MaxKeystoresPerKey
+	}
+	if patch.MaxHDWalletsPerKey != nil {
+		out.MaxHDWalletsPerKey = patch.MaxHDWalletsPerKey
+	}
+	return &out
 }
 
 // UpdateNotify persists a new notify snapshot (providers + channels).

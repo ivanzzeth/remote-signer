@@ -63,10 +63,10 @@ func TestNotifyYAMLToSnapshot(t *testing.T) {
 func TestApplySecuritySnapshot(t *testing.T) {
 	cfg := &config.Config{}
 	snap := &settings.SecuritySnapshot{
-		MaxRequestAge:    120 * time.Second,
-		RateLimitDefault: 500,
-		NonceRequired:    true,
-		IPWhitelist: settings.IPWhitelist{
+		MaxRequestAge:    settings.Ptr(120 * time.Second),
+		RateLimitDefault: settings.Ptr(500),
+		NonceRequired:    settings.Ptr(true),
+		IPWhitelist: &settings.IPWhitelist{
 			Enabled:    true,
 			AllowedIPs: []string{"10.0.0.0/8"},
 		},

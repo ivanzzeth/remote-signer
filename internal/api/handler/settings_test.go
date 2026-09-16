@@ -194,5 +194,5 @@ func TestSettingsHandler_RecordAudit_WithAuditLogger(t *testing.T) {
 	h := NewSettingsHandler(mgr, SettingsTestLogger())
 	h.SetAuditLogger(auditLogger)
 	// Should not panic with a real audit logger; the mock repo records the event.
-	h.recordAudit(context.Background(), "admin-key", settings.GroupSecurity, &settings.SecuritySnapshot{NonceRequired: true})
+	h.recordAudit(context.Background(), "admin-key", settings.GroupSecurity, &settings.SecuritySnapshot{NonceRequired: settings.Ptr(true)})
 }

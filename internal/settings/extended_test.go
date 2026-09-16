@@ -141,8 +141,8 @@ func TestSeedDataInitialization(t *testing.T) {
 	if err := mgr.Reload(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if mgr.Security().IPRateLimit != 200 {
-		t.Fatalf("IPRateLimit = %d", mgr.Security().IPRateLimit)
+	if *mgr.Security().IPRateLimit != 200 {
+		t.Fatalf("IPRateLimit = %d", *mgr.Security().IPRateLimit)
 	}
 	if mgr.Web().Enabled != true {
 		t.Fatal("web should be enabled")
@@ -171,19 +171,21 @@ func TestManagerStartStop(t *testing.T) {
 
 	// Write through a second Manager sharing the same store
 	mgr2 := NewManager(store, discardLog())
-	if err := mgr2.UpdateSecurity(ctx, &SecuritySnapshot{IPRateLimit: 7777}, "test"); err != nil {
+	// ⭐ 只给一个字段 —— 指针化之后这正是要断言的形状:其余字段为 nil,
+	// UpdateSecurity 合并时应保留它们的当前值,而不是写成零值。
+	if err := mgr2.UpdateSecurity(ctx, &SecuritySnapshot{IPRateLimit: Ptr(7777)}, "test"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Wait for the background loop to pick it up
 	deadline := time.After(2 * time.Second)
 	for {
-		if mgr.Security().IPRateLimit == 7777 {
+		if *mgr.Security().IPRateLimit == 7777 {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("background refresh did not pick up IPRateLimit=7777, got %d", mgr.Security().IPRateLimit)
+			t.Fatalf("background refresh did not pick up IPRateLimit=7777, got %d", *mgr.Security().IPRateLimit)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
@@ -206,8 +208,8 @@ func TestApplyRowBadJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Snapshot should still have defaults
-	if mgr.Security().IPRateLimit != 200 {
-		t.Fatalf("IPRateLimit = %d after bad JSON", mgr.Security().IPRateLimit)
+	if *mgr.Security().IPRateLimit != 200 {
+		t.Fatalf("IPRateLimit = %d after bad JSON", *mgr.Security().IPRateLimit)
 	}
 }
 

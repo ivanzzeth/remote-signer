@@ -11,41 +11,46 @@ import (
 // place security values cross the snapshot → config boundary; PR7e/g remove
 // SecurityConfig from the YAML schema entirely and the rest of the daemon
 // switches to mgr.Security() directly.
+// ⭐ 指针化(2026-09-16)之后这个函数两头的类型终于对上了:六个 `*bool` 以前要
+// 「先把 snapshot 的裸 bool 复制进局部变量,再取地址」才能塞进 cfg 的 `*bool`,
+// 现在直接传指针。⚠️ 那六行局部变量不是风格问题 —— 它们是把「没写」这个信息
+// 补回来的徒劳尝试:信息在 snapshot 那一层就已经丢了,取地址取到的只是一个
+// 必然非 nil 的 false。
+//
+// ⚠️ 数值与 duration 仍要 Deref:cfg.Security 那几个是裸值,接不住 nil。
+// 兜底值全部取 Go 零值,与指针化之前「snapshot 裸字段的零值」逐字节等价 ——
+// ⛔ 这里不是挑默认值的地方,默认值只有一个出处:settings.DefaultSecurity()。
 func applySecuritySnapshot(cfg *config.Config, s *settings.SecuritySnapshot) {
-	cfg.Security.MaxRequestAge = s.MaxRequestAge
-	cfg.Security.RateLimitDefault = s.RateLimitDefault
-	cfg.Security.IPRateLimit = s.IPRateLimit
+	cfg.Security.MaxRequestAge = settings.Deref(s.MaxRequestAge, 0)
+	cfg.Security.RateLimitDefault = settings.Deref(s.RateLimitDefault, 0)
+	cfg.Security.IPRateLimit = settings.Deref(s.IPRateLimit, 0)
+	wl := s.Whitelist()
 	cfg.Security.IPWhitelist = config.IPWhitelistConfig{
-		Enabled:        s.IPWhitelist.Enabled,
-		AllowedIPs:     append([]string(nil), s.IPWhitelist.AllowedIPs...),
-		TrustProxy:     s.IPWhitelist.TrustProxy,
-		TrustedProxies: append([]string(nil), s.IPWhitelist.TrustedProxies...),
+		Enabled:        wl.Enabled,
+		AllowedIPs:     append([]string(nil), wl.AllowedIPs...),
+		TrustProxy:     wl.TrustProxy,
+		TrustedProxies: append([]string(nil), wl.TrustedProxies...),
 	}
-	cfg.Security.ManualApprovalEnabled = s.ManualApprovalEnabled
+	cfg.Security.ManualApprovalEnabled = settings.Deref(s.ManualApprovalEnabled, false)
+	ag := s.Guard()
 	cfg.Security.ApprovalGuard = config.ApprovalGuardConfig{
-		Enabled:               s.ApprovalGuard.Enabled,
-		Window:                s.ApprovalGuard.Window,
-		RejectionThresholdPct: s.ApprovalGuard.RejectionThresholdPct,
-		MinSamples:            s.ApprovalGuard.MinSamples,
-		ResumeAfter:           s.ApprovalGuard.ResumeAfter,
+		Enabled:               ag.Enabled,
+		Window:                ag.Window,
+		RejectionThresholdPct: ag.RejectionThresholdPct,
+		MinSamples:            ag.MinSamples,
+		ResumeAfter:           ag.ResumeAfter,
 	}
-	nonce := s.NonceRequired
-	cfg.Security.NonceRequired = &nonce
-	rulesRO := s.RulesAPIReadonly
-	cfg.Security.RulesAPIReadonly = &rulesRO
-	signersRO := s.SignersAPIReadonly
-	cfg.Security.SignersAPIReadonly = &signersRO
-	apiKeysRO := s.APIKeysAPIReadonly
-	cfg.Security.APIKeysAPIReadonly = &apiKeysRO
-	sighup := s.AllowSIGHUPRulesReload
-	cfg.Security.AllowSIGHUPRulesReload = &sighup
-	cfg.Security.MaxRulesPerAPIKey = s.MaxRulesPerAPIKey
-	agentApprov := s.RequireApprovalForAgentRules
-	cfg.Security.RequireApprovalForAgentRules = &agentApprov
-	cfg.Security.AutoLockTimeout = s.AutoLockTimeout
-	cfg.Security.SignTimeout = s.SignTimeout
-	cfg.Security.MaxKeystoresPerKey = s.MaxKeystoresPerKey
-	cfg.Security.MaxHDWalletsPerKey = s.MaxHDWalletsPerKey
+	cfg.Security.NonceRequired = s.NonceRequired
+	cfg.Security.RulesAPIReadonly = s.RulesAPIReadonly
+	cfg.Security.SignersAPIReadonly = s.SignersAPIReadonly
+	cfg.Security.APIKeysAPIReadonly = s.APIKeysAPIReadonly
+	cfg.Security.AllowSIGHUPRulesReload = s.AllowSIGHUPRulesReload
+	cfg.Security.MaxRulesPerAPIKey = settings.Deref(s.MaxRulesPerAPIKey, 0)
+	cfg.Security.RequireApprovalForAgentRules = s.RequireApprovalForAgentRules
+	cfg.Security.AutoLockTimeout = settings.Deref(s.AutoLockTimeout, 0)
+	cfg.Security.SignTimeout = settings.Deref(s.SignTimeout, 0)
+	cfg.Security.MaxKeystoresPerKey = settings.Deref(s.MaxKeystoresPerKey, 0)
+	cfg.Security.MaxHDWalletsPerKey = settings.Deref(s.MaxHDWalletsPerKey, 0)
 }
 
 // securityYAMLView lifts the security-related fields out of the loaded
