@@ -62,7 +62,7 @@ offpath_dropped           126   # ⚠️ 其中约 105 条是 cmd/ 与 internal/
                                 # 或文件),按函数名整类排除会连那些一起放过。
                                 # 剩下约 21 条是真的:os.Remove、(*os.File).Close、
                                 # (*sql.Rows).Close、UpsertLimits…
-offpath_blanked            57
+offpath_blanked            56
 offpath_assert             71
 offpath_errorlint          25
 offpath_nilerr              2

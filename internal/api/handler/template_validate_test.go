@@ -127,6 +127,78 @@ func TestValidateTemplateConfig_EmptyRules(t *testing.T) {
 	assert.Equal(t, "no rules array in config (skipped)", results[0].Error)
 }
 
+// TestValidateTemplateConfig_BrokenJSONIsInvalid 钉住 2026-09-16 修掉的 fail-open。
+//
+// ⛔ 改动之前这里返回的是 Valid:true / allPassed:true —— 校验器在**自己解析不了
+// 输入**的时候报告「通过」。判据一句话:*校验器失效时,它说的是通过还是不通过?*
+//
+// ⚠️ 生产可达性(查过,不是假设):这个函数有**五个**调用点,只有
+// template.go:479 那条前面挡了一道 isUnrecognizedTemplateConfig(语法坏的配置
+// 在那里就被判成 "non-evm_js template" 提前返回了)。而另外两个恰恰是做**放行
+// 决定**的,且都没有那道关、传的还是未经 normalize 的 tmpl.Config:
+//   - template_actions.go:163  template instantiate(强制校验,注释标着 fund-loss risk)
+//   - preset.go:714            preset apply
+func TestValidateTemplateConfig_BrokenJSONIsInvalid(t *testing.T) {
+	eval := newTestJSEvaluator(t)
+	results, allPassed := ValidateTemplateConfig(eval, "test-template", []byte(`{"rules": [`), nil)
+	assert.False(t, allPassed, "解析不了的配置被报告成通过")
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Valid)
+	assert.Contains(t, results[0].Error, "not valid JSON")
+}
+
+// TestValidateTemplateConfig_NonBundleShapeIsSkipped 是上一条的**边界**,
+// 也是我第一版改过头的地方:`rules` 键在、但不是数组 —— 这是合法 JSON,
+// 按 normalizeTemplateConfigForValidation 的规则属于「bundle 形态、不许包装」,
+// 原样传到这里应当**跳过**而不是判失败。
+//
+// ⛔ 少了这条,把「语法坏」和「形状不是 bundle」一刀切的回归就没有东西拦得住 ——
+// 那会让一批合法的扁平模板在 instantiate / apply 上突然被拒。
+func TestValidateTemplateConfig_NonBundleShapeIsSkipped(t *testing.T) {
+	eval := newTestJSEvaluator(t)
+	config := []byte(`{"rules":"not-an-array","script":"function validate(i){return {valid:true};}"}`)
+	results, allPassed := ValidateTemplateConfig(eval, "test-template", config, nil)
+	assert.True(t, allPassed, "合法 JSON 但非 bundle 形态被判成了失败")
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Valid)
+	assert.Contains(t, results[0].Error, "skipped")
+}
+
+// TestValidateTemplateConfig_BrokenTestCasesIsInvalid 是同一形状的第二处:
+// test_cases 的形状不对(这里是字符串而非数组)以前同样被跳过成 Valid:true。
+// ⚠️ 与「一条用例都没有」区分开 —— 后者合法,由下面那条测试钉住。
+func TestValidateTemplateConfig_BrokenTestCasesIsInvalid(t *testing.T) {
+	eval := newTestJSEvaluator(t)
+	config := []byte(`{
+		"rules": [{
+			"name": "js-rule", "type": "evm_js", "mode": "whitelist",
+			"config": {"script": "function validate(i){return {valid:true};}", "test_cases": "not-an-array"}
+		}]
+	}`)
+	results, allPassed := ValidateTemplateConfig(eval, "test-template", config, nil)
+	assert.False(t, allPassed, "形状不对的 test_cases 被报告成通过")
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Valid)
+	assert.Contains(t, results[0].Error, "wrong shape")
+}
+
+// TestValidateTemplateConfig_EmptyTestCasesIsSkipped 是上一条的**反方向**:
+// 一条测试用例都没有是合法的,不该被判失败 —— 否则这次修复就从「校验器不再
+// 说谎」变成了「校验器开始误伤」。
+func TestValidateTemplateConfig_EmptyTestCasesIsSkipped(t *testing.T) {
+	eval := newTestJSEvaluator(t)
+	config := []byte(`{
+		"rules": [{
+			"name": "js-rule", "type": "evm_js", "mode": "whitelist",
+			"config": {"script": "function validate(i){return {valid:true};}", "test_cases": []}
+		}]
+	}`)
+	results, allPassed := ValidateTemplateConfig(eval, "test-template", config, nil)
+	assert.True(t, allPassed, "空的 test_cases 不该被判失败")
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Valid)
+}
+
 func TestValidateTemplateConfig_JSWithScriptAndTestCases(t *testing.T) {
 	eval := newTestJSEvaluator(t)
 	config := []byte(`{

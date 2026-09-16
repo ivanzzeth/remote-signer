@@ -610,6 +610,35 @@ func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, t
 			Config map[string]interface{} `json:"config"`
 		} `json:"rules"`
 	}
+	// ⛔ 这里以前是一个分支,而它混了**三件语义不同**的事:
+	//
+	//   ① 根本不是合法 JSON              → 校验器自己解析不了输入
+	//   ② 合法 JSON,但不是 bundle 形态   → 交给扁平路径,跳过是对的
+	//   ③ 是 bundle 形态                 → 逐条校验
+	//
+	// ①②③ 以前都走「Valid:true / allPassed:true」,于是 ① **在校验器失效的时候
+	// 报告通过**。判据一句话:*校验器解析不了输入时,它说的是通过还是不通过?*
+	//
+	// ⛔ 这不是够不着的洞。ValidateTemplateConfig 有**五个**调用点,只有
+	// template.go:460 那条在前面挡了一道 isUnrecognizedTemplateConfig;另外两个
+	// 恰恰是做**放行决定**的:
+	//   · template_actions.go:163  template instantiate —— 那里的注释写着
+	//     「FORCED VALIDATION … Do not restore optional skip」「fund-loss risk」
+	//   · preset.go:714            preset apply
+	// 这两处传的还是**未经 normalize** 的 tmpl.Config。所以一份语法坏掉的模板
+	// 会被报告成 allPassed=true,当作「验过了」放行。
+	if !json.Valid(templateConfig) {
+		return []*validateRuleResultItem{{
+			RuleName: tmplName,
+			Valid:    false,
+			Error:    "config is not valid JSON",
+		}}, false
+	}
+	// ⚠️ ② 保持原样,它**不是**放水,而且我第一版就在这里改过头了:
+	// normalizeTemplateConfigForValidation 的注释说明「rules 键在、但不是数组」
+	// 属于 bundle 形态、不许包装,这类配置原样传到这里,跳过它是既有设计
+	// (TestValidateTemplate_FlatConfigPath 钉的正是这条路)。
+	// 模板也可以合法地没有 rules 数组(纯变量模板、非 JS 模板)。
 	if err := json.Unmarshal(templateConfig, &configDoc); err != nil || len(configDoc.Rules) == 0 {
 		return []*validateRuleResultItem{{
 			RuleName: tmplName,
@@ -639,9 +668,27 @@ func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, t
 			results = append(results, item)
 			continue
 		}
-		tcJSON, _ := json.Marshal(testCasesRaw)
+		// ⛔ 同一个形状的第二处:test_cases 的**形状不对**与**一条都没有**,
+		// 以前都走「Valid:true 跳过」。前者是一份写错的模板,而它会被报告成通过。
+		// ⚠️ 顺带把被丢掉的 Marshal 错误接住(门禁 ⑫ 管的就是这一类)。
+		tcJSON, err := json.Marshal(testCasesRaw)
+		if err != nil {
+			item.Valid = false
+			item.Error = fmt.Sprintf("test_cases cannot be re-encoded: %v", err)
+			allPassed = false
+			results = append(results, item)
+			continue
+		}
 		var testCases []evmhandlerJSRuleTestCase
-		if json.Unmarshal(tcJSON, &testCases) != nil || len(testCases) == 0 {
+		if err := json.Unmarshal(tcJSON, &testCases); err != nil {
+			item.Valid = false
+			item.Error = fmt.Sprintf("test_cases has the wrong shape: %v", err)
+			allPassed = false
+			results = append(results, item)
+			continue
+		}
+		// ⚠️ 与上面同理:一条测试用例都没有是合法的,跳过它不是放水。
+		if len(testCases) == 0 {
 			item.Valid = true
 			results = append(results, item)
 			continue
