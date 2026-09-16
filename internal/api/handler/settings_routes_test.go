@@ -360,13 +360,13 @@ func TestSettingsRoutes_WrongVerbIsRefusedByTheMux(t *testing.T) {
 	for _, method := range []string{http.MethodPost, http.MethodDelete, http.MethodPatch} {
 		t.Run(method, func(t *testing.T) {
 			h, mgr := handler.NewSettingsHandlerForTest(t)
-			require.False(t, mgr.Foundry().Enabled, "fixture premise: foundry starts disabled")
+			require.False(t, settings.Deref(mgr.Foundry().Enabled, false), "fixture premise: foundry starts disabled")
 
 			rr := doSettingsRequest(t, settingsMux(t, h), method,
 				"/api/v1/admin/settings/evm.foundry", `{"enabled":true}`, settingsAdminKey())
 
 			assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
-			assert.False(t, mgr.Foundry().Enabled,
+			assert.False(t, settings.Deref(mgr.Foundry().Enabled, false),
 				"%s reached a settings endpoint — the state change happened", method)
 			// ⚠️ 405 is what this bare mux answers because GET and PUT are
 			// registered on the same path. ⛔ A daemon answers 404 instead:
@@ -392,13 +392,13 @@ func TestSettingsRoutes_WrongVerbIsRefusedByTheMux(t *testing.T) {
 // is read back.
 func TestSettingsRoutes_HeadIsServedByTheGetRoute(t *testing.T) {
 	h, mgr := handler.NewSettingsHandlerForTest(t)
-	require.False(t, mgr.Foundry().Enabled, "fixture premise: foundry starts disabled")
+	require.False(t, settings.Deref(mgr.Foundry().Enabled, false), "fixture premise: foundry starts disabled")
 
 	rr := doSettingsRequest(t, settingsMux(t, h), http.MethodHead,
 		"/api/v1/admin/settings/evm.foundry", `{"enabled":true}`, settingsAdminKey())
 
 	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.False(t, mgr.Foundry().Enabled, "HEAD reached a write endpoint — the state change happened")
+	assert.False(t, settings.Deref(mgr.Foundry().Enabled, false), "HEAD reached a write endpoint — the state change happened")
 }
 
 // ---------------------------------------------------------------------------

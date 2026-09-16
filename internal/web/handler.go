@@ -60,13 +60,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snap := h.mgr.Web()
-	if snap == nil || !snap.Enabled {
+	// ⚠️ 两处兜底都取「关闭 / 空」,与指针化之前 `snap == nil` 那条分支的行为
+	// 逐字一致:读不到配置时**不**提供 UI,而不是按 DefaultWeb 把它打开。
+	// ⛔ 别把这里的兜底改成 true —— 那会让「配置读取失败」变成「UI 对外开着」。
+	if snap == nil || !settings.Deref(snap.Enabled, false) {
 		http.NotFound(w, r)
 		return
 	}
 
-	if snap.DevProxy != "" {
-		h.serveDevProxy(w, r, snap.DevProxy)
+	if devProxy := settings.Deref(snap.DevProxy, ""); devProxy != "" {
+		h.serveDevProxy(w, r, devProxy)
 		return
 	}
 

@@ -303,67 +303,284 @@ func mergeSecurity(base, patch *SecuritySnapshot) *SecuritySnapshot {
 }
 
 // UpdateNotify persists a new notify snapshot (providers + channels).
-func (m *Manager) UpdateNotify(ctx context.Context, s *NotifySnapshot, actor string) error {
-	if s == nil {
+// ---------------------------------------------------------------------------
+// 其余八组:合并语义,与 UpdateSecurity 一致(2026-09-16)
+//
+// ⛔ 八个 merge 都是**逐字段手写**的,理由与 mergeSecurity 一字不差:反射版本会
+// 在有人新加字段时照样「工作」,而这整件事针对的就是「没人想过的那个字段」。
+// 漏加一行的后果是那个字段从 API 改不动 —— 响亮;反射版本的后果是它安静地朝
+// 零值指向的方向跑偏。
+//
+// ⚠️ 这八组与 security 的差别:它们(除 Web)没有 DefaultXxx(),出厂默认就是零值,
+// 所以 base 为 nil 时退回空快照即可,而不是一份「安全默认值」。
+// ---------------------------------------------------------------------------
+
+// UpdateNotify merges patch into the current notify snapshot and persists it.
+func (m *Manager) UpdateNotify(ctx context.Context, patch *NotifySnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil notify snapshot")
 	}
-	return m.put(ctx, GroupNotify, s, actor)
+	return m.put(ctx, GroupNotify, mergeNotify(m.Notify(), patch), actor)
 }
 
-// UpdateFoundry persists a new foundry snapshot.
-func (m *Manager) UpdateFoundry(ctx context.Context, s *FoundrySnapshot, actor string) error {
-	if s == nil {
+// UpdateFoundry merges patch into the current foundry snapshot and persists it.
+func (m *Manager) UpdateFoundry(ctx context.Context, patch *FoundrySnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil foundry snapshot")
 	}
-	return m.put(ctx, GroupFoundry, s, actor)
+	return m.put(ctx, GroupFoundry, mergeFoundry(m.Foundry(), patch), actor)
 }
 
-// UpdateSimulation persists a new simulation snapshot.
-func (m *Manager) UpdateSimulation(ctx context.Context, s *SimulationSnapshot, actor string) error {
-	if s == nil {
+// UpdateSimulation merges patch into the current simulation snapshot.
+func (m *Manager) UpdateSimulation(ctx context.Context, patch *SimulationSnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil simulation snapshot")
 	}
-	return m.put(ctx, GroupSimulation, s, actor)
+	return m.put(ctx, GroupSimulation, mergeSimulation(m.Simulation(), patch), actor)
 }
 
-// UpdateBlocklist persists a new blocklist snapshot.
-func (m *Manager) UpdateBlocklist(ctx context.Context, s *BlocklistSnapshot, actor string) error {
-	if s == nil {
+// UpdateBlocklist merges patch into the current blocklist snapshot.
+func (m *Manager) UpdateBlocklist(ctx context.Context, patch *BlocklistSnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil blocklist snapshot")
 	}
-	return m.put(ctx, GroupBlocklist, s, actor)
+	return m.put(ctx, GroupBlocklist, mergeBlocklist(m.Blocklist(), patch), actor)
 }
 
-// UpdateAuditMonitor persists a new audit-monitor snapshot.
-func (m *Manager) UpdateAuditMonitor(ctx context.Context, s *AuditMonitorSnapshot, actor string) error {
-	if s == nil {
+// UpdateAuditMonitor merges patch into the current audit-monitor snapshot.
+func (m *Manager) UpdateAuditMonitor(ctx context.Context, patch *AuditMonitorSnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil audit monitor snapshot")
 	}
-	return m.put(ctx, GroupAuditMonitor, s, actor)
+	return m.put(ctx, GroupAuditMonitor, mergeAuditMonitor(m.AuditMonitor(), patch), actor)
 }
 
-// UpdateRPCGateway persists a new RPC gateway snapshot.
-func (m *Manager) UpdateRPCGateway(ctx context.Context, s *RPCGatewaySnapshot, actor string) error {
-	if s == nil {
+// UpdateRPCGateway merges patch into the current RPC-gateway snapshot.
+func (m *Manager) UpdateRPCGateway(ctx context.Context, patch *RPCGatewaySnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil rpc gateway snapshot")
 	}
-	return m.put(ctx, GroupRPCGateway, s, actor)
+	return m.put(ctx, GroupRPCGateway, mergeRPCGateway(m.RPCGateway(), patch), actor)
 }
 
-// UpdateMaterialCheck persists a new material-check snapshot.
-func (m *Manager) UpdateMaterialCheck(ctx context.Context, s *MaterialCheckSnapshot, actor string) error {
-	if s == nil {
+// UpdateMaterialCheck merges patch into the current material-check snapshot.
+func (m *Manager) UpdateMaterialCheck(ctx context.Context, patch *MaterialCheckSnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil material check snapshot")
 	}
-	return m.put(ctx, GroupMaterialCheck, s, actor)
+	return m.put(ctx, GroupMaterialCheck, mergeMaterialCheck(m.MaterialCheck(), patch), actor)
 }
 
-// UpdateWeb persists a new web-UI snapshot.
-func (m *Manager) UpdateWeb(ctx context.Context, s *WebSnapshot, actor string) error {
-	if s == nil {
+// UpdateWeb merges patch into the current web-UI snapshot.
+func (m *Manager) UpdateWeb(ctx context.Context, patch *WebSnapshot, actor string) error {
+	if patch == nil {
 		return fmt.Errorf("nil web snapshot")
 	}
-	return m.put(ctx, GroupWeb, s, actor)
+	return m.put(ctx, GroupWeb, mergeWeb(m.Web(), patch), actor)
+}
+
+func mergeFoundry(base, patch *FoundrySnapshot) *FoundrySnapshot {
+	if base == nil {
+		base = &FoundrySnapshot{}
+	}
+	out := *base
+	if patch.Enabled != nil {
+		out.Enabled = patch.Enabled
+	}
+	if patch.ForgePath != nil {
+		out.ForgePath = patch.ForgePath
+	}
+	if patch.CacheDir != nil {
+		out.CacheDir = patch.CacheDir
+	}
+	if patch.TempDir != nil {
+		out.TempDir = patch.TempDir
+	}
+	if patch.Timeout != nil {
+		out.Timeout = patch.Timeout
+	}
+	return &out
+}
+
+func mergeSimulation(base, patch *SimulationSnapshot) *SimulationSnapshot {
+	if base == nil {
+		base = &SimulationSnapshot{}
+	}
+	out := *base
+	if patch.Enabled != nil {
+		out.Enabled = patch.Enabled
+	}
+	if patch.Timeout != nil {
+		out.Timeout = patch.Timeout
+	}
+	if patch.BatchWindow != nil {
+		out.BatchWindow = patch.BatchWindow
+	}
+	if patch.BatchMaxSize != nil {
+		out.BatchMaxSize = patch.BatchMaxSize
+	}
+	if patch.AutoCreateBudget != nil {
+		out.AutoCreateBudget = patch.AutoCreateBudget
+	}
+	if patch.MaxDynamicUnits != nil {
+		out.MaxDynamicUnits = patch.MaxDynamicUnits
+	}
+	if patch.BudgetNativeMaxTotal != nil {
+		out.BudgetNativeMaxTotal = patch.BudgetNativeMaxTotal
+	}
+	if patch.BudgetNativeMaxPerTx != nil {
+		out.BudgetNativeMaxPerTx = patch.BudgetNativeMaxPerTx
+	}
+	if patch.BudgetERC20MaxTotal != nil {
+		out.BudgetERC20MaxTotal = patch.BudgetERC20MaxTotal
+	}
+	if patch.BudgetERC20MaxPerTx != nil {
+		out.BudgetERC20MaxPerTx = patch.BudgetERC20MaxPerTx
+	}
+	return &out
+}
+
+// ⚠️ Sources 用 slice 自己的 nil 语义:nil = 没提到(保留原有来源列表),
+// 非 nil(含空切片)= 明确要求换成这一份。⛔ 别改成 len()>0 才覆盖,
+// 那样就再也清不空来源列表了 —— 与「显式 false 必须生效」是同一条道理。
+func mergeBlocklist(base, patch *BlocklistSnapshot) *BlocklistSnapshot {
+	if base == nil {
+		base = &BlocklistSnapshot{}
+	}
+	out := *base
+	if patch.Enabled != nil {
+		out.Enabled = patch.Enabled
+	}
+	if patch.SyncInterval != nil {
+		out.SyncInterval = patch.SyncInterval
+	}
+	if patch.FailMode != nil {
+		out.FailMode = patch.FailMode
+	}
+	if patch.CacheFile != nil {
+		out.CacheFile = patch.CacheFile
+	}
+	if patch.Sources != nil {
+		out.Sources = patch.Sources
+	}
+	return &out
+}
+
+func mergeAuditMonitor(base, patch *AuditMonitorSnapshot) *AuditMonitorSnapshot {
+	if base == nil {
+		base = &AuditMonitorSnapshot{}
+	}
+	out := *base
+	if patch.Enabled != nil {
+		out.Enabled = patch.Enabled
+	}
+	if patch.Interval != nil {
+		out.Interval = patch.Interval
+	}
+	if patch.LookbackHours != nil {
+		out.LookbackHours = patch.LookbackHours
+	}
+	if patch.AuthFailureThreshold != nil {
+		out.AuthFailureThreshold = patch.AuthFailureThreshold
+	}
+	if patch.BlocklistRejectThreshold != nil {
+		out.BlocklistRejectThreshold = patch.BlocklistRejectThreshold
+	}
+	if patch.HighFreqThreshold != nil {
+		out.HighFreqThreshold = patch.HighFreqThreshold
+	}
+	if patch.RetentionDays != nil {
+		out.RetentionDays = patch.RetentionDays
+	}
+	if patch.CleanupInterval != nil {
+		out.CleanupInterval = patch.CleanupInterval
+	}
+	return &out
+}
+
+func mergeRPCGateway(base, patch *RPCGatewaySnapshot) *RPCGatewaySnapshot {
+	if base == nil {
+		base = &RPCGatewaySnapshot{}
+	}
+	out := *base
+	if patch.BaseURL != nil {
+		out.BaseURL = patch.BaseURL
+	}
+	if patch.APIKey != nil {
+		out.APIKey = patch.APIKey
+	}
+	if patch.CacheTTL != nil {
+		out.CacheTTL = patch.CacheTTL
+	}
+	return &out
+}
+
+func mergeMaterialCheck(base, patch *MaterialCheckSnapshot) *MaterialCheckSnapshot {
+	if base == nil {
+		base = &MaterialCheckSnapshot{}
+	}
+	out := *base
+	if patch.Enabled != nil {
+		out.Enabled = patch.Enabled
+	}
+	if patch.StartupCheck != nil {
+		out.StartupCheck = patch.StartupCheck
+	}
+	if patch.Interval != nil {
+		out.Interval = patch.Interval
+	}
+	return &out
+}
+
+func mergeWeb(base, patch *WebSnapshot) *WebSnapshot {
+	if base == nil {
+		base = DefaultWeb()
+	}
+	out := *base
+	if patch.Enabled != nil {
+		out.Enabled = patch.Enabled
+	}
+	if patch.DevProxy != nil {
+		out.DevProxy = patch.DevProxy
+	}
+	return &out
+}
+
+// mergeNotify 比别的深一层,见 NotifySnapshot 的类型注释:
+// 顶层两块各自判 nil,providers 再逐个 provider 判 nil —— 这样「只改 Slack」
+// 不会把 Pushover / Webhook / Telegram 一起抹掉。
+func mergeNotify(base, patch *NotifySnapshot) *NotifySnapshot {
+	if base == nil {
+		base = &NotifySnapshot{}
+	}
+	out := *base
+	if patch.Providers != nil {
+		out.Providers = mergeNotifyProviders(out.Providers, patch.Providers)
+	}
+	if patch.Channels != nil {
+		out.Channels = patch.Channels
+	}
+	return &out
+}
+
+func mergeNotifyProviders(base, patch *NotifyProviders) *NotifyProviders {
+	if base == nil {
+		base = &NotifyProviders{}
+	}
+	out := *base
+	if patch.Slack != nil {
+		out.Slack = patch.Slack
+	}
+	if patch.Pushover != nil {
+		out.Pushover = patch.Pushover
+	}
+	if patch.Webhook != nil {
+		out.Webhook = patch.Webhook
+	}
+	if patch.Telegram != nil {
+		out.Telegram = patch.Telegram
+	}
+	return &out
 }
 
 func (m *Manager) put(ctx context.Context, key Group, value any, actor string) error {

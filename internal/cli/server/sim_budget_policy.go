@@ -31,7 +31,9 @@ func (p *settingsSimBudgetPolicy) AutoCreate() bool {
 	if s == nil {
 		return false
 	}
-	return s.AutoCreateBudget
+	// ⛔ 兜底必须是 false,与上面 `p.mgr == nil` 那条分支同一个理由(见函数注释):
+	// 读不到配置时**不**写合成预算行,而不是按某个默认值去写。
+	return settings.Deref(s.AutoCreateBudget, false)
 }
 
 // Defaults projects the snapshot's budget fields into the shape the
@@ -46,10 +48,10 @@ func (p *settingsSimBudgetPolicy) Defaults() *evm.SimBudgetDefaults {
 		return nil
 	}
 	return &evm.SimBudgetDefaults{
-		NativeMaxTotal:  s.BudgetNativeMaxTotal,
-		NativeMaxPerTx:  s.BudgetNativeMaxPerTx,
-		ERC20MaxTotal:   s.BudgetERC20MaxTotal,
-		ERC20MaxPerTx:   s.BudgetERC20MaxPerTx,
-		MaxDynamicUnits: s.MaxDynamicUnits,
+		NativeMaxTotal:  settings.Deref(s.BudgetNativeMaxTotal, ""),
+		NativeMaxPerTx:  settings.Deref(s.BudgetNativeMaxPerTx, ""),
+		ERC20MaxTotal:   settings.Deref(s.BudgetERC20MaxTotal, ""),
+		ERC20MaxPerTx:   settings.Deref(s.BudgetERC20MaxPerTx, ""),
+		MaxDynamicUnits: settings.Deref(s.MaxDynamicUnits, 0),
 	}
 }

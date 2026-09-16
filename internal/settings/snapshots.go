@@ -167,12 +167,19 @@ func DefaultSecurity() *SecuritySnapshot {
 }
 
 // FoundrySnapshot — placeholder for PR7d. Fields land when consumers switch.
+// ⛔ 指针的含义与 SecuritySnapshot 一致(见那边的长注释):nil = 这次请求没有提到
+// 这个字段,而不是「把它设成零值」。
+//
+// ⚠️ 与 security 的**一处不同**:这一组没有 DefaultFoundry(),NewManager 播种的是
+// `&FoundrySnapshot{}`(全 nil)。那不是疏漏 —— 它的出厂默认**本来就是零值**,
+// 所以「没配过」与「配成零值」在结果上相同,用 nil 表达「没配过」更诚实。
+// 读取侧一律走 Deref 兜到零值。
 type FoundrySnapshot struct {
-	Enabled   bool          `json:"enabled"`
-	ForgePath string        `json:"forge_path"`
-	CacheDir  string        `json:"cache_dir"`
-	TempDir   string        `json:"temp_dir"`
-	Timeout   time.Duration `json:"timeout"`
+	Enabled   *bool          `json:"enabled,omitempty"`
+	ForgePath *string        `json:"forge_path,omitempty"`
+	CacheDir  *string        `json:"cache_dir,omitempty"`
+	TempDir   *string        `json:"temp_dir,omitempty"`
+	Timeout   *time.Duration `json:"timeout,omitempty"`
 }
 
 // SimulationSnapshot is the runtime view of the simulation engine knobs.
@@ -187,28 +194,31 @@ type FoundrySnapshot struct {
 // single signer can accumulate, defending against budget-amplification
 // attacks where a hostile caller targets many tokens.
 type SimulationSnapshot struct {
-	Enabled              bool          `json:"enabled"`
-	Timeout              time.Duration `json:"timeout"`
-	BatchWindow          time.Duration `json:"batch_window"`
-	BatchMaxSize         int           `json:"batch_max_size"`
-	AutoCreateBudget     bool          `json:"auto_create_budget"`
-	MaxDynamicUnits      int           `json:"max_dynamic_units"`
-	BudgetNativeMaxTotal string        `json:"budget_native_max_total"`
-	BudgetNativeMaxPerTx string        `json:"budget_native_max_per_tx"`
-	BudgetERC20MaxTotal  string        `json:"budget_erc20_max_total"`
-	BudgetERC20MaxPerTx  string        `json:"budget_erc20_max_per_tx"`
+	Enabled              *bool          `json:"enabled,omitempty"`
+	Timeout              *time.Duration `json:"timeout,omitempty"`
+	BatchWindow          *time.Duration `json:"batch_window,omitempty"`
+	BatchMaxSize         *int           `json:"batch_max_size,omitempty"`
+	AutoCreateBudget     *bool          `json:"auto_create_budget,omitempty"`
+	MaxDynamicUnits      *int           `json:"max_dynamic_units,omitempty"`
+	BudgetNativeMaxTotal *string        `json:"budget_native_max_total,omitempty"`
+	BudgetNativeMaxPerTx *string        `json:"budget_native_max_per_tx,omitempty"`
+	BudgetERC20MaxTotal  *string        `json:"budget_erc20_max_total,omitempty"`
+	BudgetERC20MaxPerTx  *string        `json:"budget_erc20_max_per_tx,omitempty"`
 }
 
 // BlocklistSnapshot mirrors config.DynamicBlocklistConfig. SyncInterval is
 // kept as the human-readable string ("1h", "30m") that YAML uses; the
 // overlay layer parses it into time.Duration when assigning to the runtime
 // config so cfg consumers see no behaviour change.
+// ⚠️ Sources 保持 slice,**不**加指针:slice 自己就有 nil 语义 —— JSON 里不提供
+// 解成 nil(= 没提到),`[]` 解成非 nil 的空切片(= 明确要求清空)。再包一层指针
+// 只会多出一个无意义的「指向 nil 切片的非 nil 指针」状态。
 type BlocklistSnapshot struct {
-	Enabled      bool             `json:"enabled"`
-	SyncInterval string           `json:"sync_interval"`
-	FailMode     string           `json:"fail_mode"`
-	CacheFile    string           `json:"cache_file"`
-	Sources      []BlocklistEntry `json:"sources"`
+	Enabled      *bool            `json:"enabled,omitempty"`
+	SyncInterval *string          `json:"sync_interval,omitempty"`
+	FailMode     *string          `json:"fail_mode,omitempty"`
+	CacheFile    *string          `json:"cache_file,omitempty"`
+	Sources      []BlocklistEntry `json:"sources,omitempty"`
 }
 
 // BlocklistEntry mirrors config.DynamicBlocklistSource (one address-list source).
@@ -221,23 +231,32 @@ type BlocklistEntry struct {
 
 // AuditMonitorSnapshot mirrors audit.MonitorConfig.
 type AuditMonitorSnapshot struct {
-	Enabled                  bool          `json:"enabled"`
-	Interval                 time.Duration `json:"interval"`
-	LookbackHours            int           `json:"lookback_hours"`
-	AuthFailureThreshold     int           `json:"auth_failure_threshold"`
-	BlocklistRejectThreshold int           `json:"blocklist_reject_threshold"`
-	HighFreqThreshold        int           `json:"high_freq_threshold"`
-	RetentionDays            int           `json:"retention_days"`
-	CleanupInterval          time.Duration `json:"cleanup_interval"`
+	Enabled                  *bool          `json:"enabled,omitempty"`
+	Interval                 *time.Duration `json:"interval,omitempty"`
+	LookbackHours            *int           `json:"lookback_hours,omitempty"`
+	AuthFailureThreshold     *int           `json:"auth_failure_threshold,omitempty"`
+	BlocklistRejectThreshold *int           `json:"blocklist_reject_threshold,omitempty"`
+	HighFreqThreshold        *int           `json:"high_freq_threshold,omitempty"`
+	RetentionDays            *int           `json:"retention_days,omitempty"`
+	CleanupInterval          *time.Duration `json:"cleanup_interval,omitempty"`
 }
 
 // NotifySnapshot mirrors what used to live under the YAML `notify` and
 // `notify_channels` blocks. The two are bundled into a single snapshot so
 // admins can update provider credentials and recipient routing atomically;
 // the API exposes this as a single group "notify".
+// ⚠️ 合并粒度到 **provider 为止**,不再往下拆。
+//
+// Providers / Channels 指针化(nil = 没提到整块),而 NotifyProviders 里那四个
+// provider 本来就是指针,mergeNotify 逐个判 nil —— 所以「只改 Slack」不会丢掉
+// Pushover/Webhook/Telegram。
+//
+// ⛔ 但 provider **内部**字段(enabled / bot_token …)仍是裸值:改一个 provider
+// 要把它那一块整体发上来。那是有意的取舍 —— 一个 provider 的 enabled 与凭据
+// 本来就是一件事,而再往下拆是 16 个字段加 4 个嵌套 merge。
 type NotifySnapshot struct {
-	Providers NotifyProviders `json:"providers"`
-	Channels  NotifyChannels  `json:"channels"`
+	Providers *NotifyProviders `json:"providers,omitempty"`
+	Channels  *NotifyChannels  `json:"channels,omitempty"`
 }
 
 // NotifyProviders holds per-provider service config (tokens, timeouts).
@@ -290,25 +309,28 @@ type NotifyChannels struct {
 // RPCGatewaySnapshot mirrors evm.RPCGatewayConfig (read-only EVM RPC proxy
 // used by the JS rule sandbox).
 type RPCGatewaySnapshot struct {
-	BaseURL  string        `json:"base_url"`
-	APIKey   string        `json:"api_key,omitempty"`
-	CacheTTL time.Duration `json:"cache_ttl"`
+	BaseURL  *string        `json:"base_url,omitempty"`
+	APIKey   *string        `json:"api_key,omitempty"`
+	CacheTTL *time.Duration `json:"cache_ttl,omitempty"`
 }
 
 // MaterialCheckSnapshot mirrors config.SignerMaterialCheckConfig.
 type MaterialCheckSnapshot struct {
-	Enabled      bool          `json:"enabled"`
-	StartupCheck bool          `json:"startup_check"`
-	Interval     time.Duration `json:"interval"`
+	Enabled      *bool          `json:"enabled,omitempty"`
+	StartupCheck *bool          `json:"startup_check,omitempty"`
+	Interval     *time.Duration `json:"interval,omitempty"`
 }
 
 // WebSnapshot controls the embedded web UI. Enabled gates whether the
 // catch-all "/" handler is registered at all; DevProxy, when non-empty,
 // switches the handler from embed.FS to a reverse proxy pointed at a
 // running Vite dev server (the front-end developer's workflow).
+// ⚠️ Web 与其余七组不同,它**有**实质默认值(Enabled=true),所以像 security 一样
+// 由 DefaultWeb() 播种出完整快照 —— 对它而言 nil 不等于零值:漏掉 enabled 会
+// 关掉整个 Web UI,而默认是开着的。
 type WebSnapshot struct {
-	Enabled  bool   `json:"enabled"`
-	DevProxy string `json:"dev_proxy,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
+	DevProxy *string `json:"dev_proxy,omitempty"`
 }
 
 // DefaultWeb returns the secure-by-default snapshot. Enabled=true is the
@@ -316,5 +338,5 @@ type WebSnapshot struct {
 // flip it off via `remote-signer settings set web enabled=false` without
 // losing any other configuration.
 func DefaultWeb() *WebSnapshot {
-	return &WebSnapshot{Enabled: true}
+	return &WebSnapshot{Enabled: Ptr(true), DevProxy: Ptr("")}
 }

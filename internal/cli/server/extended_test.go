@@ -91,10 +91,10 @@ func TestApplyNotifySnapshot(t *testing.T) {
 	cfg := &notify.Config{}
 	channels := &notify.Channel{}
 	snap := &settings.NotifySnapshot{
-		Providers: settings.NotifyProviders{
+		Providers: &settings.NotifyProviders{
 			Pushover: &settings.NotifyPushoverProvider{Enabled: true, AppToken: "po-token", Retry: 30},
 		},
-		Channels: settings.NotifyChannels{
+		Channels: &settings.NotifyChannels{
 			Pushover: []string{"user1"},
 		},
 	}
@@ -112,28 +112,28 @@ func TestEVMSnapshotConversionRoundTrip(t *testing.T) {
 	solidityEnabled := true
 	foundryCfg := config.FoundryConfig{Enabled: &solidityEnabled, ForgePath: "/usr/bin/forge", Timeout: 30 * time.Second}
 	foundrySnap := foundryToSnapshot(foundryCfg)
-	if !foundrySnap.Enabled || foundrySnap.ForgePath != "/usr/bin/forge" {
+	if !*foundrySnap.Enabled || *foundrySnap.ForgePath != "/usr/bin/forge" {
 		t.Fatalf("foundry: %+v", foundrySnap)
 	}
 
 	simCfg := config.SimulationConfig{Enabled: true, Timeout: 5 * time.Second}
 	simSnap := simulationToSnapshot(simCfg)
-	if !simSnap.Enabled || simSnap.AutoCreateBudget != true {
+	if !*simSnap.Enabled || *simSnap.AutoCreateBudget != true {
 		t.Fatalf("simulation: %+v", simSnap)
 	}
-	if simSnap.MaxDynamicUnits != 100 {
-		t.Fatalf("MaxDynamicUnits = %d", simSnap.MaxDynamicUnits)
+	if *simSnap.MaxDynamicUnits != 100 {
+		t.Fatalf("MaxDynamicUnits = %d", *simSnap.MaxDynamicUnits)
 	}
 
 	rpcCfg := evm.RPCGatewayConfig{BaseURL: "https://rpc.example.com", CacheTTL: 24 * time.Hour}
 	rpcSnap := rpcGatewayToSnapshot(rpcCfg)
-	if rpcSnap.BaseURL != "https://rpc.example.com" {
+	if *rpcSnap.BaseURL != "https://rpc.example.com" {
 		t.Fatalf("rpc: %+v", rpcSnap)
 	}
 
 	matCfg := config.SignerMaterialCheckConfig{Enabled: true, StartupCheck: true}
 	matSnap := materialCheckToSnapshot(matCfg)
-	if !matSnap.Enabled || !matSnap.StartupCheck {
+	if !*matSnap.Enabled || !*matSnap.StartupCheck {
 		t.Fatalf("material: %+v", matSnap)
 	}
 }
@@ -147,7 +147,7 @@ func TestBlocklistToSnapshot(t *testing.T) {
 		},
 	}
 	snap := blocklistToSnapshot(b)
-	if !snap.Enabled || snap.SyncInterval != "1h" {
+	if !*snap.Enabled || *snap.SyncInterval != "1h" {
 		t.Fatalf("basic: %+v", snap)
 	}
 	if len(snap.Sources) != 1 || snap.Sources[0].Name != "ofac" {
@@ -155,7 +155,7 @@ func TestBlocklistToSnapshot(t *testing.T) {
 	}
 
 	nilSnap := blocklistToSnapshot(nil)
-	if nilSnap == nil || nilSnap.Enabled {
+	if nilSnap == nil || settings.Deref(nilSnap.Enabled, false) {
 		t.Fatal("nil input should yield empty snapshot")
 	}
 }
@@ -168,10 +168,10 @@ func TestAuditMonitorToSnapshot(t *testing.T) {
 		BlocklistRejectThreshold: 5,
 	}
 	snap := auditMonitorToSnapshot(m)
-	if !snap.Enabled || snap.Interval != 5*time.Minute {
+	if !*snap.Enabled || *snap.Interval != 5*time.Minute {
 		t.Fatalf("basic: %+v", snap)
 	}
-	if snap.AuthFailureThreshold != 10 {
+	if *snap.AuthFailureThreshold != 10 {
 		t.Fatalf("threshold = %d", snap.AuthFailureThreshold)
 	}
 }
@@ -179,10 +179,10 @@ func TestAuditMonitorToSnapshot(t *testing.T) {
 func TestApplyEVMSnapshots(t *testing.T) {
 	cfg := &config.Config{Chains: config.ChainsConfig{EVM: &config.EVMConfig{}}}
 	applyEVMSnapshots(cfg,
-		&settings.FoundrySnapshot{Enabled: true, ForgePath: "/test/forge"},
-		&settings.SimulationSnapshot{Enabled: true, Timeout: 10 * time.Second},
-		&settings.RPCGatewaySnapshot{BaseURL: "https://rpc.test"},
-		&settings.MaterialCheckSnapshot{Enabled: true, Interval: 1 * time.Hour},
+		&settings.FoundrySnapshot{Enabled: settings.Ptr(true), ForgePath: settings.Ptr("/test/forge")},
+		&settings.SimulationSnapshot{Enabled: settings.Ptr(true), Timeout: settings.Ptr(10 * time.Second)},
+		&settings.RPCGatewaySnapshot{BaseURL: settings.Ptr("https://rpc.test")},
+		&settings.MaterialCheckSnapshot{Enabled: settings.Ptr(true), Interval: settings.Ptr(1 * time.Hour)},
 	)
 	if !cfg.Chains.EVM.Foundry.FoundryEnabled() || cfg.Chains.EVM.Foundry.ForgePath != "/test/forge" {
 		t.Fatal("foundry not applied")
@@ -200,7 +200,7 @@ func TestApplyEVMSnapshots(t *testing.T) {
 	// nil EVM should be a no-op
 	cfg2 := &config.Config{}
 	applyEVMSnapshots(cfg2,
-		&settings.FoundrySnapshot{Enabled: true},
+		&settings.FoundrySnapshot{Enabled: settings.Ptr(true)},
 		nil, nil, nil,
 	)
 }
@@ -208,7 +208,7 @@ func TestApplyEVMSnapshots(t *testing.T) {
 func TestApplyBlocklistSnapshot(t *testing.T) {
 	cfg := &config.Config{}
 	applyBlocklistSnapshot(cfg, &settings.BlocklistSnapshot{
-		Enabled: true, SyncInterval: "30m",
+		Enabled: settings.Ptr(true), SyncInterval: settings.Ptr("30m"),
 		Sources: []settings.BlocklistEntry{{Name: "test"}},
 	})
 	if cfg.DynamicBlocklist == nil || !cfg.DynamicBlocklist.Enabled {
@@ -222,7 +222,7 @@ func TestApplyBlocklistSnapshot(t *testing.T) {
 func TestApplyAuditMonitorSnapshot(t *testing.T) {
 	cfg := &config.Config{}
 	applyAuditMonitorSnapshot(cfg, &settings.AuditMonitorSnapshot{
-		Enabled: true, LookbackHours: 24,
+		Enabled: settings.Ptr(true), LookbackHours: settings.Ptr(24),
 	})
 	if !cfg.AuditMonitor.Enabled || cfg.AuditMonitor.LookbackHours != 24 {
 		t.Fatal("audit monitor not applied")

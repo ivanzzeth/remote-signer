@@ -3583,18 +3583,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.AuditMonitorSnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -3647,7 +3647,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the audit-monitor settings",
+                "summary": "Update the audit-monitor settings (partial patch)",
                 "tags": [
                     "settings"
                 ]
@@ -3692,18 +3692,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.BlocklistSnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -3756,7 +3756,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the dynamic-blocklist settings",
+                "summary": "Update the dynamic-blocklist settings (partial patch)",
                 "tags": [
                     "settings"
                 ]
@@ -3801,18 +3801,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.FoundrySnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -3865,7 +3865,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the Foundry settings",
+                "summary": "Update the Foundry settings (partial patch)",
                 "tags": [
                     "settings"
                 ]
@@ -3910,18 +3910,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.MaterialCheckSnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -3974,7 +3974,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the material-check settings",
+                "summary": "Update the material-check settings (partial patch)",
                 "tags": [
                     "settings"
                 ]
@@ -4019,18 +4019,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.RPCGatewaySnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -4083,7 +4083,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the RPC-gateway settings",
+                "summary": "Update the RPC-gateway settings (partial patch)",
                 "tags": [
                     "settings"
                 ]
@@ -4128,18 +4128,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.SimulationSnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -4192,7 +4192,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the simulation settings",
+                "summary": "Update the simulation settings (partial patch)",
                 "tags": [
                     "settings"
                 ]
@@ -4237,18 +4237,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.NotifySnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -4301,7 +4301,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the notification settings",
+                "summary": "Update the notification settings (partial patch)",
                 "tags": [
                     "settings"
                 ]
@@ -4455,18 +4455,18 @@
                 ]
             },
             "put": {
-                "description": "⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
+                "description": "⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `\"\"` — absence (an omitted key) is the only thing that means \"leave it alone\", so a switch stays switchable off.\n⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.\n⚠️ Error bodies here are a bare text/plain line, NOT the `{\"error\":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/settings.WebSnapshot",
                                 "summary": "body",
-                                "description": "the complete replacement snapshot"
+                                "description": "partial patch — omitted fields keep their current value"
                             }
                         }
                     },
-                    "description": "the complete replacement snapshot",
+                    "description": "partial patch — omitted fields keep their current value",
                     "required": true
                 },
                 "responses": {
@@ -4519,7 +4519,7 @@
                         "Ed25519Signature": []
                     }
                 ],
-                "summary": "Replace the Web UI settings",
+                "summary": "Update the Web UI settings (partial patch)",
                 "tags": [
                     "settings"
                 ]

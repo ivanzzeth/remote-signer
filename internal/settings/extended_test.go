@@ -18,7 +18,7 @@ func TestManagerGetSetSnapshot(t *testing.T) {
 	if mgr.Notify() == nil {
 		t.Fatal("Notify() is nil")
 	}
-	if mgr.Web() == nil || !mgr.Web().Enabled {
+	if mgr.Web() == nil || !*mgr.Web().Enabled {
 		t.Fatal("Web default should be enabled")
 	}
 	if mgr.Blocklist() == nil {
@@ -32,10 +32,10 @@ func TestUpdateNotifyRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	patch := &NotifySnapshot{
-		Providers: NotifyProviders{
+		Providers: &NotifyProviders{
 			Slack: &NotifySlackProvider{Enabled: true, BotToken: "xoxb-test"},
 		},
-		Channels: NotifyChannels{
+		Channels: &NotifyChannels{
 			Slack: []string{"#alerts"},
 		},
 	}
@@ -82,7 +82,7 @@ func TestConcurrentReadsOnAllSnapshots(t *testing.T) {
 	mgr := NewManager(store, discardLog())
 	ctx := context.Background()
 
-	if err := mgr.UpdateWeb(ctx, &WebSnapshot{Enabled: false}, "test"); err != nil {
+	if err := mgr.UpdateWeb(ctx, &WebSnapshot{Enabled: Ptr(false)}, "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +109,7 @@ func TestConcurrentReadsOnAllSnapshots(t *testing.T) {
 	wg.Wait()
 
 	// After concurrent reads, the web update must still be visible.
-	if mgr.Web().Enabled {
+	if *mgr.Web().Enabled {
 		t.Fatal("web should be disabled after update")
 	}
 }
@@ -127,7 +127,7 @@ func TestSeedDataInitialization(t *testing.T) {
 	if err := SeedWeb(ctx, store, DefaultWeb()); err != nil {
 		t.Fatal(err)
 	}
-	if err := SeedFoundry(ctx, store, &FoundrySnapshot{Enabled: true}); err != nil {
+	if err := SeedFoundry(ctx, store, &FoundrySnapshot{Enabled: Ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,10 +144,10 @@ func TestSeedDataInitialization(t *testing.T) {
 	if *mgr.Security().IPRateLimit != 200 {
 		t.Fatalf("IPRateLimit = %d", *mgr.Security().IPRateLimit)
 	}
-	if mgr.Web().Enabled != true {
+	if *mgr.Web().Enabled != true {
 		t.Fatal("web should be enabled")
 	}
-	if !mgr.Foundry().Enabled {
+	if !*mgr.Foundry().Enabled {
 		t.Fatal("foundry should be enabled after seed")
 	}
 }
@@ -218,7 +218,7 @@ func TestSnapshotDefaultsWebEnabled(t *testing.T) {
 	if snap == nil {
 		t.Fatal("DefaultWeb() returned nil")
 	}
-	if !snap.Enabled {
+	if !*snap.Enabled {
 		t.Fatal("DefaultWeb().Enabled should be true")
 	}
 }

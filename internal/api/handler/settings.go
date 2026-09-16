@@ -231,16 +231,16 @@ func (h *SettingsHandler) PutSecurity(w http.ResponseWriter, r *http.Request) {
 		func() any { return h.mgr.Security() }, h.onSecurityUpdated)
 }
 
-// PutNotify replaces the notification snapshot.
+// PutNotify merges a patch into the notification snapshot.
 //
-//	@Summary	Replace the notification settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the notification settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.NotifySnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.NotifySnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.NotifySnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
@@ -252,16 +252,16 @@ func (h *SettingsHandler) PutNotify(w http.ResponseWriter, r *http.Request) {
 		func() any { return h.mgr.Notify() }, nil)
 }
 
-// PutAuditMonitor replaces the audit-monitor snapshot.
+// PutAuditMonitor merges a patch into the audit-monitor snapshot.
 //
-//	@Summary	Replace the audit-monitor settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the audit-monitor settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.AuditMonitorSnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.AuditMonitorSnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.AuditMonitorSnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
@@ -273,16 +273,16 @@ func (h *SettingsHandler) PutAuditMonitor(w http.ResponseWriter, r *http.Request
 		func() any { return h.mgr.AuditMonitor() }, nil)
 }
 
-// PutBlocklist replaces the dynamic-blocklist snapshot.
+// PutBlocklist merges a patch into the dynamic-blocklist snapshot.
 //
-//	@Summary	Replace the dynamic-blocklist settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the dynamic-blocklist settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.BlocklistSnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.BlocklistSnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.BlocklistSnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
@@ -294,16 +294,16 @@ func (h *SettingsHandler) PutBlocklist(w http.ResponseWriter, r *http.Request) {
 		func() any { return h.mgr.Blocklist() }, nil)
 }
 
-// PutSimulation replaces the simulation snapshot.
+// PutSimulation merges a patch into the simulation snapshot.
 //
-//	@Summary	Replace the simulation settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the simulation settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.SimulationSnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.SimulationSnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.SimulationSnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
@@ -315,16 +315,16 @@ func (h *SettingsHandler) PutSimulation(w http.ResponseWriter, r *http.Request) 
 		func() any { return h.mgr.Simulation() }, nil)
 }
 
-// PutFoundry replaces the Foundry snapshot.
+// PutFoundry merges a patch into the Foundry snapshot.
 //
-//	@Summary	Replace the Foundry settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the Foundry settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.FoundrySnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.FoundrySnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.FoundrySnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
@@ -336,16 +336,16 @@ func (h *SettingsHandler) PutFoundry(w http.ResponseWriter, r *http.Request) {
 		func() any { return h.mgr.Foundry() }, nil)
 }
 
-// PutRPCGateway replaces the RPC-gateway snapshot.
+// PutRPCGateway merges a patch into the RPC-gateway snapshot.
 //
-//	@Summary	Replace the RPC-gateway settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the RPC-gateway settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.RPCGatewaySnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.RPCGatewaySnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.RPCGatewaySnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
@@ -357,16 +357,16 @@ func (h *SettingsHandler) PutRPCGateway(w http.ResponseWriter, r *http.Request) 
 		func() any { return h.mgr.RPCGateway() }, nil)
 }
 
-// PutMaterialCheck replaces the material-check snapshot.
+// PutMaterialCheck merges a patch into the material-check snapshot.
 //
-//	@Summary	Replace the material-check settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the material-check settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.MaterialCheckSnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.MaterialCheckSnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.MaterialCheckSnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
@@ -378,16 +378,16 @@ func (h *SettingsHandler) PutMaterialCheck(w http.ResponseWriter, r *http.Reques
 		func() any { return h.mgr.MaterialCheck() }, nil)
 }
 
-// PutWeb replaces the Web UI snapshot.
+// PutWeb merges a patch into the Web UI snapshot.
 //
-//	@Summary	Replace the Web UI settings
-//	@Description	⛔ This REPLACES the whole group, it does not merge. The handler decodes the body into a zero-valued snapshot and persists that struct as it stands, so **every field absent from the body is written as its zero value** — omitting a field turns it off rather than leaving it alone. Read the group first and send it back with your edit applied.
+//	@Summary	Update the Web UI settings (partial patch)
+//	@Description	⭐ MERGE semantics, since 2026-09-16: a field **absent from the body keeps its current value**; only fields actually present are written. To change one setting, send just that field. ⚠️ Values you do write still apply, including `false`, `0` and `""` — absence (an omitted key) is the only thing that means "leave it alone", so a switch stays switchable off.
 //	@Description	⚠️ The 200 body is the manager's snapshot re-read after the write, so it can differ from what was sent if the store normalised anything.
 //	@Description	⚠️ Error bodies here are a bare text/plain line, NOT the `{"error":...}` JSON every other endpoint answers with — the handler uses http.Error. ⛔ The 400 and 500 below still say `application/json` because swag's @Produce is per-operation and cannot vary by response; the schema is `string` and this sentence is the correction. Documented rather than fixed: making the handler answer JSON is a response-shape change.
 //	@Tags	settings
 //	@Accept	json
 //	@Produce	json
-//	@Param	body	body	settings.WebSnapshot	true	"the complete replacement snapshot"
+//	@Param	body	body	settings.WebSnapshot	true	"partial patch — omitted fields keep their current value"
 //	@Success	200	{object}	settings.WebSnapshot
 //	@Failure	400	{string}	string	"invalid JSON (text/plain)"
 //	@Failure	401	{object}	map[string]string
