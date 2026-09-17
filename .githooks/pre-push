@@ -16,8 +16,21 @@ while read -r local_ref local_oid remote_ref remote_oid; do
     if [ "$local_oid" != "$ZERO" ] && [ "$remote_oid" != "$ZERO" ]; then
         RANGES+=("$remote_oid..$local_oid")
     elif [ "$local_oid" != "$ZERO" ]; then
-        # 新分支 — 检查所有 commit
-        RANGES+=("$local_oid")
+        # 新分支 — 只检查**远端还没有的** commit。
+        #
+        # ⛔ 这里原本是 `RANGES+=("$local_oid")`,而 `git rev-list <oid>` 是
+        # **整个历史**,不是「这个分支新增的东西」。实测:推一个只改了 1 个文件的
+        # 新分支,它要扫 756 个 commit(正确答案是 1 个)。
+        #
+        # ⚠️ 后果不是「慢一点」,是**任何新分支都推不上去**:那 756 个 commit 里
+        # 有 internal/web/dist/assets/*.js —— 前端 minified bundle,里面的
+        # `password:"…"` / `api_key:…` 必然命中下面的密钥正则,于是 VIOLATIONS>0
+        # 直接 exit 1。而 `echo "$match" | head -2` 打印两行 minified JS 是 121 KB,
+        # 把真正的失败原因冲得无影无踪。
+        #
+        # ⭐ 那些 dist 产物今天已经出库(git ls-files 里是 0),但**历史里的 20 份还在**,
+        # 而这里扫的是历史 —— 所以「产物出库」并不会让这个问题自己消失。
+        RANGES+=("$local_oid --not --remotes=origin")
     fi
     if echo "$local_ref" | grep -Eq "^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+"; then
         IS_TAG_PUSH=true
@@ -40,7 +53,11 @@ SECRET_PATTERNS=(
 EXCLUDE_REGEX='(extension/|tests/|__tests__/|test_|\.spec\.|mock|fixtures|factories|testdata/|e2e/|\.env\.example|\.example|\.gitignore|node_modules)'
 
 for range in "${RANGES[@]}"; do
-    for commit in $(git rev-list "$range" 2>/dev/null); do
+    # ⛔ $range 故意不加引号:新分支那一档是 `<oid> --not --remotes=origin`,
+    # 是三个参数。加引号会被当成单个 revision,git 报
+    # `fatal: ambiguous argument` —— 而它被 2>/dev/null 吞掉,循环空转,于是
+    # **密钥扫描静默地什么都没扫**,还照样打印 "✅ No secrets detected."
+    for commit in $(git rev-list $range 2>/dev/null); do
         for f in $(git diff --name-only "$commit^" "$commit" 2>/dev/null); do
             echo "$f" | grep -Eq "$EXCLUDE_REGEX" && continue
             content=$(git show "$commit:$f" 2>/dev/null || true)
@@ -68,7 +85,8 @@ LARGE_COUNT=0
 MAX_SIZE=$((50 * 1024 * 1024))
 
 for range in "${RANGES[@]}"; do
-    git rev-list --objects "$range" 2>/dev/null | while read -r sha path; do
+    # ⛔ 同上,$range 不加引号 —— 理由见密钥扫描那一处。
+    git rev-list --objects $range 2>/dev/null | while read -r sha path; do
         [ -z "$path" ] && continue
         [ -z "$sha" ] && continue
         size=$(git cat-file -s "$sha" 2>/dev/null || echo 0)
