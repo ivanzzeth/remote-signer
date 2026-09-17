@@ -41,6 +41,41 @@ func tuneSQLite(db *gorm.DB, dsn string) error {
 	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
 		return fmt.Errorf("enable foreign_keys pragma: %w", err)
 	}
+
+	// ⛔ journal_mode 与 busy_timeout 必须在这里设,**不能指望 DSN**。
+	//
+	// 配置里写的是 `?_journal_mode=WAL&_busy_timeout=5000` —— 那是
+	// **mattn/go-sqlite3 的参数格式**,而这里用的是 modernc.org/sqlite
+	// (为了 CGO_ENABLED=0,理由见文件顶部的 import 注释)。modernc 不认那种写法,
+	// 它认的是 `_pragma=journal_mode(WAL)`。三种写法实测:
+	//
+	//   _journal_mode=WAL&_busy_timeout=5000  → journal_mode=delete, busy_timeout=0
+	//   _pragma=journal_mode(WAL)             → journal_mode=wal,    busy_timeout=5000
+	//   (什么参数都不写)                        → journal_mode=delete, busy_timeout=0
+	//
+	// ⚠️ 也就是说现用的 DSN 参数与「什么都不写」**逐字等价**,静默无效了很久。
+	// 后果是两条,都与配置文件写的相反:库跑在 rollback 模式(一次写独占整个库,
+	// 连读都被挡在外面,而 WAL 下读写可并发),且 busy_timeout=0 —— 撞锁**立即
+	// 失败,一秒都不等**。
+	//
+	// ⭐ 它露头的地方是 e2e:CI 上 web-e2e 长期 10 个用例红,报错五花八门
+	// (cannot start a transaction within a transaction / no ownership record /
+	// element(s) not found),底下其实是同一件事换了马甲。⚠️ 本地 141 个全绿 ——
+	// 连 taskset 锁到 2 核也全绿 —— 因为 NVMe 上写事务快到锁几乎不持有;
+	// CI 的慢磁盘只是把同一个隐患的窗口放大了。⛔ 所以这不是「CI 环境问题」。
+	//
+	// ⚠️ 为什么修这里而不是改 DSN 字符串:PRAGMA 走 Exec 与驱动无关,将来换驱动
+	// 不会再次静默归零;而 DSN 参数格式是驱动私有约定,换一个驱动就又悄悄失效,
+	// 且失效时**没有任何报错** —— 正是它能潜伏这么久的原因。
+	if err := db.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
+		return fmt.Errorf("enable WAL journal mode: %w", err)
+	}
+	// ⚠️ 这里写死 5000,与现有配置里那个从未生效过的数字一致。让 DSN 里用户写的
+	// 值真正可配置是**另一件事**(要连 config 层一起改),⛔ 不在这次改动里 ——
+	// 先让「配置里要的两件事成立」,别夹带。
+	if err := db.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+		return fmt.Errorf("set busy_timeout pragma: %w", err)
+	}
 	return nil
 }
 
