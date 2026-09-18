@@ -1,0 +1,324 @@
+# Permit2 PermitSingle (EIP-712 typed data) — the off-chain grant, not a transaction.
+#
+# WHY THIS IS ITS OWN TEMPLATE, AND WHY IT MATTERS MOST:
+# a signed PermitSingle never reaches the chain. It costs no gas, occupies no
+# block, and leaves no trace an explorer can show. It is simply valid until its
+# expiration. So the two numbers inside it — details.amount and
+# details.expiration — are the entire security of any flow that uses Permit2 to
+# move tokens, and nothing downstream will ever report them as wrong. A swap that
+# spends the grant looks identical whether the grant was for one trade or for
+# everything, forever.
+#
+# A transaction rule cannot cover this: sign_type here is typed_data, and the
+# grant is signed independently of (and usually before) the transaction that
+# spends it. uniswap.yaml and dex_swap.yaml are both sign_type_filter
+# "transaction" and therefore never see this request at all.
+#
+# SECURITY: max_amount and max_expiration are the point of this template. Left
+# unbounded they turn a per-trade approval into a standing one — the shape behind
+# "a router bug drained a wallet that had stopped using it years before".
+#
+# SECURITY: allowed_spenders is REQUIRED and has no "empty = any" fallback,
+# unlike the address lists in the swap templates. An unrestricted spender on a
+# permit is not a lenient configuration; it is the absence of the rule.
+#
+# NOTE ON THE DOMAIN: Permit2's EIP-712 domain has NO "version" field. Adding one
+# produces a different domain separator, so the signature verifies against
+# nothing and the on-chain symptom is a reverted swap. The domain used here was
+# checked byte-for-byte against the contract's own DOMAIN_SEPARATOR() on BSC
+# (0x024cdb51...c86e, 2026-09-17).
+#
+# NOTE ON THE ADDRESS: PancakeSwap deploys its own Permit2 on BSC at
+# 0x31c2f6fcff4f8759b3bd5bf0e1084a055615c768. It is NOT Uniswap's well-known
+# 0x000000000022D473030F116dDEE9F6B43aC78BA3, which is what most tooling
+# defaults to.
+
+name: Permit2 PermitSingle (EIP-712)
+variables:
+  - name: permit2_address
+    type: address
+    description: "Permit2 contract — the EIP-712 domain verifyingContract. On BSC PancakeSwap uses its own deployment, not Uniswap's."
+    required: true
+  - name: allowed_spenders
+    type: address_list
+    description: "Addresses allowed as the permit spender, normally the Universal Router. REQUIRED — an unrestricted spender is the absence of this rule."
+    required: true
+  - name: allowed_tokens
+    type: address_list
+    description: "Tokens this signer may grant over. Empty = any."
+    required: false
+    default: ""
+  - name: max_amount
+    type: string
+    description: "Max details.amount, in the token's smallest unit. -1 = no cap, which is an unlimited approval."
+    required: false
+    default: "-1"
+  - name: max_expiration
+    type: string
+    description: "Max details.expiration as a unix timestamp — when the allowance itself dies. -1 = no limit, which outlives the trade it was signed for."
+    required: false
+    default: "-1"
+  - name: max_sig_deadline
+    type: string
+    description: "Max sigDeadline as a unix timestamp — when the signature stops being usable. -1 = no limit."
+    required: false
+    default: "-1"
+test_variables:
+  chain_id: "56"
+  permit2_address: "0x31c2f6fcff4f8759b3bd5bf0e1084a055615c768"
+  allowed_spenders: "0xd9c500dff816a1da21a48a732d3498bf09dc9aeb"
+  allowed_tokens: "0x82ec31d69b3c289e541b50e30681fd1acad24444"
+  max_amount: "1000000000000000000"
+  max_expiration: "1788674172"
+  max_sig_deadline: "1788674172"
+rules:
+  - id: "permit2-permit-single"
+    name: "Permit2 PermitSingle (EIP-712)"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Validates an off-chain Permit2 grant: domain, spender, token, amount cap and expiry bound"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          var td = rs.typedData.require(input, 'PermitSingle');
+
+          // The domain binds this signature to one Permit2 deployment on one
+          // chain. A wrong verifyingContract means the grant belongs to a
+          // contract nobody chose.
+          rs.typedData.requireDomain(td.domain, {
+            chainId: config.chain_id,
+            requireVerifyingContract: true,
+            allowedContracts: config.permit2_address
+          });
+
+          var msg = td.message;
+          require(msg, 'missing message');
+          var d = msg.details;
+          require(d, 'missing details');
+          require(isAddress(d.token), 'invalid token');
+          require(isAddress(msg.spender), 'invalid spender');
+
+          // Who may pull the tokens. No "empty = any" here, deliberately.
+          rs.addr.requireInList(msg.spender, config.allowed_spenders, 'spender not allowed');
+          rs.addr.requireInListIfNonEmpty(d.token, config.allowed_tokens, 'token not allowed');
+
+          // How much, and for how long. These two are the whole security of a
+          // permit, and nothing downstream reports them as wrong.
+          rs.bigint.requireLte(d.amount, config.max_amount, 'permit amount exceeds cap');
+          rs.bigint.requireLte(d.expiration, config.max_expiration, 'permit outlives its bound');
+          rs.bigint.requireLte(msg.sigDeadline, config.max_sig_deadline, 'sigDeadline too far out');
+
+          return ok();
+        }
+    test_cases:
+      - name: "pass: a single-trade grant inside every bound"
+        input:
+          sign_type: "typed_data"
+          chain_id: 56
+          signer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - {name: "name", type: "string"}
+                - {name: "chainId", type: "uint256"}
+                - {name: "verifyingContract", type: "address"}
+              PermitDetails:
+                - {name: "token", type: "address"}
+                - {name: "amount", type: "uint160"}
+                - {name: "expiration", type: "uint48"}
+                - {name: "nonce", type: "uint48"}
+              PermitSingle:
+                - {name: "details", type: "PermitDetails"}
+                - {name: "spender", type: "address"}
+                - {name: "sigDeadline", type: "uint256"}
+            primaryType: "PermitSingle"
+            domain:
+              name: "Permit2"
+              chainId: "56"
+              verifyingContract: "0x31c2f6fcff4f8759b3bd5bf0e1084a055615c768"
+            message:
+              details:
+                token: "0x82ec31d69b3c289e541b50e30681fd1acad24444"
+                amount: "1000000000000000000"
+                expiration: "1788674172"
+                nonce: "0"
+              spender: "0xd9c500dff816a1da21a48a732d3498bf09dc9aeb"
+              sigDeadline: "1788674172"
+        expect_pass: true
+      - name: "reject: uint160 max amount — a standing approval, not a trade"
+        input:
+          sign_type: "typed_data"
+          chain_id: 56
+          signer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - {name: "name", type: "string"}
+                - {name: "chainId", type: "uint256"}
+                - {name: "verifyingContract", type: "address"}
+              PermitDetails:
+                - {name: "token", type: "address"}
+                - {name: "amount", type: "uint160"}
+                - {name: "expiration", type: "uint48"}
+                - {name: "nonce", type: "uint48"}
+              PermitSingle:
+                - {name: "details", type: "PermitDetails"}
+                - {name: "spender", type: "address"}
+                - {name: "sigDeadline", type: "uint256"}
+            primaryType: "PermitSingle"
+            domain:
+              name: "Permit2"
+              chainId: "56"
+              verifyingContract: "0x31c2f6fcff4f8759b3bd5bf0e1084a055615c768"
+            message:
+              details:
+                token: "0x82ec31d69b3c289e541b50e30681fd1acad24444"
+                amount: "1461501637330902918203684832716283019655932542975"
+                expiration: "1788674172"
+                nonce: "0"
+              spender: "0xd9c500dff816a1da21a48a732d3498bf09dc9aeb"
+              sigDeadline: "1788674172"
+        expect_pass: false
+        expect_reason: "permit amount exceeds cap"
+      - name: "reject: expiration far past the trade it was signed for"
+        input:
+          sign_type: "typed_data"
+          chain_id: 56
+          signer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - {name: "name", type: "string"}
+                - {name: "chainId", type: "uint256"}
+                - {name: "verifyingContract", type: "address"}
+              PermitDetails:
+                - {name: "token", type: "address"}
+                - {name: "amount", type: "uint160"}
+                - {name: "expiration", type: "uint48"}
+                - {name: "nonce", type: "uint48"}
+              PermitSingle:
+                - {name: "details", type: "PermitDetails"}
+                - {name: "spender", type: "address"}
+                - {name: "sigDeadline", type: "uint256"}
+            primaryType: "PermitSingle"
+            domain:
+              name: "Permit2"
+              chainId: "56"
+              verifyingContract: "0x31c2f6fcff4f8759b3bd5bf0e1084a055615c768"
+            message:
+              details:
+                token: "0x82ec31d69b3c289e541b50e30681fd1acad24444"
+                amount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+              spender: "0xd9c500dff816a1da21a48a732d3498bf09dc9aeb"
+              sigDeadline: "1788674172"
+        expect_pass: false
+        expect_reason: "permit outlives its bound"
+      - name: "reject: spender is not the configured router"
+        input:
+          sign_type: "typed_data"
+          chain_id: 56
+          signer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - {name: "name", type: "string"}
+                - {name: "chainId", type: "uint256"}
+                - {name: "verifyingContract", type: "address"}
+              PermitDetails:
+                - {name: "token", type: "address"}
+                - {name: "amount", type: "uint160"}
+                - {name: "expiration", type: "uint48"}
+                - {name: "nonce", type: "uint48"}
+              PermitSingle:
+                - {name: "details", type: "PermitDetails"}
+                - {name: "spender", type: "address"}
+                - {name: "sigDeadline", type: "uint256"}
+            primaryType: "PermitSingle"
+            domain:
+              name: "Permit2"
+              chainId: "56"
+              verifyingContract: "0x31c2f6fcff4f8759b3bd5bf0e1084a055615c768"
+            message:
+              details:
+                token: "0x82ec31d69b3c289e541b50e30681fd1acad24444"
+                amount: "1000000000000000000"
+                expiration: "1788674172"
+                nonce: "0"
+              spender: "0x000000000000000000000000000000000000dEaD"
+              sigDeadline: "1788674172"
+        expect_pass: false
+        expect_reason: "spender not allowed"
+      - name: "reject: Uniswap's Permit2 deployment, not PancakeSwap's"
+        input:
+          sign_type: "typed_data"
+          chain_id: 56
+          signer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - {name: "name", type: "string"}
+                - {name: "chainId", type: "uint256"}
+                - {name: "verifyingContract", type: "address"}
+              PermitDetails:
+                - {name: "token", type: "address"}
+                - {name: "amount", type: "uint160"}
+                - {name: "expiration", type: "uint48"}
+                - {name: "nonce", type: "uint48"}
+              PermitSingle:
+                - {name: "details", type: "PermitDetails"}
+                - {name: "spender", type: "address"}
+                - {name: "sigDeadline", type: "uint256"}
+            primaryType: "PermitSingle"
+            domain:
+              name: "Permit2"
+              chainId: "56"
+              verifyingContract: "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+            message:
+              details:
+                token: "0x82ec31d69b3c289e541b50e30681fd1acad24444"
+                amount: "1000000000000000000"
+                expiration: "1788674172"
+                nonce: "0"
+              spender: "0xd9c500dff816a1da21a48a732d3498bf09dc9aeb"
+              sigDeadline: "1788674172"
+        expect_pass: false
+        expect_reason: "invalid verifying contract"
+      - name: "reject: a token this wallet may not grant over"
+        input:
+          sign_type: "typed_data"
+          chain_id: 56
+          signer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - {name: "name", type: "string"}
+                - {name: "chainId", type: "uint256"}
+                - {name: "verifyingContract", type: "address"}
+              PermitDetails:
+                - {name: "token", type: "address"}
+                - {name: "amount", type: "uint160"}
+                - {name: "expiration", type: "uint48"}
+                - {name: "nonce", type: "uint48"}
+              PermitSingle:
+                - {name: "details", type: "PermitDetails"}
+                - {name: "spender", type: "address"}
+                - {name: "sigDeadline", type: "uint256"}
+            primaryType: "PermitSingle"
+            domain:
+              name: "Permit2"
+              chainId: "56"
+              verifyingContract: "0x31c2f6fcff4f8759b3bd5bf0e1084a055615c768"
+            message:
+              details:
+                token: "0x000000000000000000000000000000000000bEEF"
+                amount: "1000000000000000000"
+                expiration: "1788674172"
+                nonce: "0"
+              spender: "0xd9c500dff816a1da21a48a732d3498bf09dc9aeb"
+              sigDeadline: "1788674172"
+        expect_pass: false
+        expect_reason: "token not allowed"
