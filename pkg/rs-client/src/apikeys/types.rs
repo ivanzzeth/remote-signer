@@ -17,11 +17,15 @@ pub struct ApiKey {
     pub allowed_hd_wallets: Vec<String>,
     #[serde(default)]
     pub allowed_chain_types: Vec<String>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub last_used_at: Option<OffsetDateTime>,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub expires_at: Option<OffsetDateTime>,
 }
 

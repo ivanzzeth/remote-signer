@@ -276,6 +276,92 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Async Usage
+
+Enable the `async` feature and use `AsyncClient`:
+
+```toml
+[dependencies]
+remote-signer-client = { path = "../remote-signer/pkg/rs-client", features = ["async"] }
+```
+
+```rust
+use remote_signer_client::{AsyncClient, Config};
+use remote_signer_client::evm::{SignRequest, SIGN_TYPE_PERSONAL};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = AsyncClient::new(Config {
+        base_url: "http://127.0.0.1:8548".to_string(),
+        api_key_id: "my-key".to_string(),
+        private_key_hex: Some("0x...".to_string()),
+        ..Default::default()
+    })?;
+
+    let req = SignRequest {
+        chain_id: "1".to_string(),
+        signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+        sign_type: SIGN_TYPE_PERSONAL.to_string(),
+        payload: serde_json::json!({"message": "hello"}),
+    };
+
+    let resp = client.evm.sign.execute(&req).await?;
+    println!("status={} sig={:?}", resp.status, resp.signature);
+
+    Ok(())
+}
+```
+
+`AsyncClient` accepts the same `Config` and exposes the same EVM surface as
+`Client`, so migrating is a matter of adding `.await`.
+
+> **The blocking client cannot be used from inside a Tokio runtime.** It is built
+> on `reqwest::blocking`, which panics when a runtime is already running on the
+> thread. Async callers should enable the `async` feature rather than wrapping
+> `Client` in `spawn_blocking`.
+
+#### Automated callers and pending approvals
+
+`execute()` waits for a request that lands in `pending`/`authorizing` to be
+approved by a human. Callers on a latency budget should use
+`execute_no_wait()` instead: it returns `Error::Sign` immediately, carrying the
+request id. A request reaching `pending` in an automated flow usually means a
+rule is missing rather than that a human is about to approve it.
+
+### Signer Traits
+
+Signing sits behind object-safe traits (`signer::TransactionSigner`,
+`signer::PersonalSigner`, …) mirroring the `ethsig` interfaces the Go SDK
+implements. `RemoteSigner` / `AsyncRemoteSigner` are the remote-signer-backed
+implementations; a local keystore, HSM/KMS client or test double satisfies the
+same traits, so the backend is swappable at runtime.
+
+```rust
+use remote_signer_client::evm::Transaction;
+use remote_signer_client::signer::{AsyncRemoteSigner, AsyncTransactionSigner};
+
+let signer: Box<dyn AsyncTransactionSigner> = Box::new(AsyncRemoteSigner::new(
+    client.evm.sign.clone(),
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "56",
+));
+
+let tx = Transaction::eip1559("0", 210_000, "1000000000", "5000000000")
+    .to("0x...")
+    .data("0x...")
+    .nonce(41);
+
+let signed_tx_bytes = signer.sign_transaction(&tx).await?;
+```
+
+`evm::Transaction` and the `*Payload` types produce the exact JSON the server
+expects, replacing hand-built `serde_json::Value` payloads.
+
+**Nonce:** an unset `nonce` makes the server fetch it with a single
+`eth_getTransactionCount` — safe for interactive wallets, unsafe for concurrent
+automated signing on one address. Automated callers should assign nonces
+themselves and always set it.
+
 ### Authentication
 
 Requests are signed with Ed25519. The message format matches the server middleware:

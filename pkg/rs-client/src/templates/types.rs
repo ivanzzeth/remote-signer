@@ -30,7 +30,9 @@ pub struct Template {
     #[serde(default)]
     pub budget_metering: Option<serde_json::Value>,
     pub enabled: bool,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
 }
 
@@ -93,6 +95,7 @@ pub struct BudgetConfig {
 pub struct ScheduleConfig {
     pub period: String,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub start_at: Option<OffsetDateTime>,
 }
 
@@ -112,6 +115,7 @@ pub struct InstantiateRequest {
     #[serde(default)]
     pub signer_address: Option<String>,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub expires_at: Option<OffsetDateTime>,
     #[serde(default)]
     pub expires_in: Option<String>,

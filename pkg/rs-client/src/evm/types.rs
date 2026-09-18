@@ -63,10 +63,14 @@ pub struct RequestStatus {
     #[serde(default)]
     pub approved_by: Option<String>,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub approved_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub completed_at: Option<OffsetDateTime>,
 }
 
@@ -156,12 +160,16 @@ pub struct Rule {
     #[serde(default)]
     pub config: Option<serde_json::Value>,
     pub enabled: bool,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub expires_at: Option<OffsetDateTime>,
     pub match_count: u64,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub last_matched_at: Option<OffsetDateTime>,
     #[serde(default)]
     pub budget_period: Option<String>,
@@ -306,7 +314,9 @@ pub struct RuleBudget {
     pub alert_sent: bool,
     pub tx_count: i32,
     pub max_tx_count: i32,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
 }
 
@@ -325,6 +335,7 @@ pub struct Signer {
     pub enabled: bool,
     pub locked: bool,
     #[serde(default)]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub unlocked_at: Option<OffsetDateTime>,
     #[serde(default)]
     pub allowed_keys: Vec<AllowedKeyInfo>,
@@ -444,6 +455,7 @@ pub struct GrantAccessRequest {
 pub struct SignerAccessEntry {
     pub api_key_id: String,
     pub granted_by: String,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
 }
 
@@ -557,4 +569,100 @@ pub struct ChainStatus {
     pub dirty: bool,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The server (Go `time.Time`) emits RFC3339 strings. Without an explicit
+    /// `time::serde::rfc3339` annotation `OffsetDateTime` uses its own
+    /// component format and every response carrying a timestamp fails to
+    /// deserialize — including the approval-polling response.
+    #[test]
+    fn request_status_parses_rfc3339_timestamps() {
+        let body = serde_json::json!({
+            "id": "req-1",
+            "api_key_id": "key-1",
+            "chain_type": "evm",
+            "chain_id": "56",
+            "signer_address": "0xabc",
+            "sign_type": "transaction",
+            "status": STATUS_COMPLETED,
+            "created_at": "2026-06-07T10:11:12Z",
+            "updated_at": "2026-06-07T10:11:12.345678Z",
+            "completed_at": "2026-06-07T10:11:13+02:00",
+            "approved_at": null,
+        });
+
+        let parsed: RequestStatus = serde_json::from_value(body).expect("deserialize");
+
+        assert_eq!(parsed.created_at.year(), 2026);
+        assert_eq!(parsed.created_at.second(), 12);
+        // Fractional seconds must survive.
+        assert_eq!(parsed.updated_at.microsecond(), 345_678);
+        // Non-UTC offsets must be preserved, not silently coerced.
+        assert_eq!(
+            parsed.completed_at.expect("completed_at").offset(),
+            time::UtcOffset::from_hms(2, 0, 0).unwrap()
+        );
+        // An explicit null optional stays None.
+        assert!(parsed.approved_at.is_none());
+    }
+
+    #[test]
+    fn request_status_tolerates_missing_optional_timestamps() {
+        let body = serde_json::json!({
+            "id": "req-1",
+            "api_key_id": "key-1",
+            "chain_type": "evm",
+            "chain_id": "56",
+            "signer_address": "0xabc",
+            "sign_type": "transaction",
+            "status": STATUS_PENDING,
+            "created_at": "2026-06-07T10:11:12Z",
+            "updated_at": "2026-06-07T10:11:12Z",
+        });
+
+        let parsed: RequestStatus = serde_json::from_value(body).expect("deserialize");
+        assert!(parsed.completed_at.is_none());
+        assert!(parsed.approved_at.is_none());
+    }
+
+    #[test]
+    fn request_status_round_trips_through_json() {
+        let body = serde_json::json!({
+            "id": "req-1",
+            "api_key_id": "key-1",
+            "chain_type": "evm",
+            "chain_id": "56",
+            "signer_address": "0xabc",
+            "sign_type": "transaction",
+            "status": STATUS_COMPLETED,
+            "created_at": "2026-06-07T10:11:12Z",
+            "updated_at": "2026-06-07T10:11:12Z",
+            "completed_at": "2026-06-07T10:11:13Z",
+        });
+
+        let parsed: RequestStatus = serde_json::from_value(body).expect("deserialize");
+        let encoded = serde_json::to_value(&parsed).expect("serialize");
+        let reparsed: RequestStatus = serde_json::from_value(encoded).expect("re-deserialize");
+
+        assert_eq!(reparsed.created_at, parsed.created_at);
+        assert_eq!(reparsed.completed_at, parsed.completed_at);
+    }
+
+    #[test]
+    fn signer_parses_optional_unlocked_at() {
+        let body = serde_json::json!({
+            "address": "0xabc",
+            "type": "keystore",
+            "enabled": true,
+            "locked": false,
+            "unlocked_at": "2026-06-07T10:11:12Z",
+        });
+
+        let parsed: Signer = serde_json::from_value(body).expect("deserialize");
+        assert_eq!(parsed.unlocked_at.expect("unlocked_at").year(), 2026);
+    }
 }
