@@ -95,6 +95,10 @@ for name in $layers; do
 
     printf '==> %s 层%s\n' "$name" "${tag:+ (tags=$tag)}"
     # shellcheck disable=SC2086
-    $GO test "${tagflag[@]}" "${countflag[@]}" "${runflag[@]}" $pkgs || rc=1
+    # ⛔ `${arr[@]+"${arr[@]}"}` 而不是 `"${arr[@]}"`:bash 3.2(macOS 自带的那个)
+    # 在 `set -u` 下展开**空数组**会报 `unbound variable` 而不是展开成零个参数。
+    # 这三个数组平时就是空的,所以 `make test` 在 macOS 上一次都跑不起来 ——
+    # 报错还指着 `tagflag[@]`,看起来像脚本写错了,而不是 bash 版本的事。
+    $GO test ${tagflag[@]+"${tagflag[@]}"} ${countflag[@]+"${countflag[@]}"} ${runflag[@]+"${runflag[@]}"} $pkgs || rc=1
 done
 exit "$rc"
