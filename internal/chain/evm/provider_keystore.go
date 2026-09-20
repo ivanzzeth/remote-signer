@@ -58,7 +58,23 @@ func NewKeystoreProvider(
 		}
 
 		expectedAddr := common.HexToAddress(ks.Address)
-		keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(ks.Path, expectedAddr, string(password), nil)
+		// ⛔ WithKeyHeldUnlocked: an unlocked signer holds its key, and signing no
+		// longer re-runs scrypt per request.
+		//
+		// The default path calls SignHashWithPassphrase, which go-ethereum
+		// implements as decrypt → sign → wipe. With the standard kdfparams these
+		// keystores carry (N=262144) that is ~500ms **per signature** — longer
+		// than a BSC block, on the one synchronous hop between "approved" and
+		// "broadcast".
+		//
+		// The key stays decrypted until the signer is closed. That is exactly what
+		// "unlocked" already means here: LockSigner / UnregisterSigner now Close it
+		// (see SignerRegistry.closeSignerLocked), so the lock state and the key
+		// state are the same fact rather than two that can drift apart.
+		keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(
+			ks.Path, expectedAddr, string(password), nil,
+			ethsig.WithKeyHeldUnlocked(),
+		)
 		keystore.SecureZeroize(password)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load keystore for %s: %w", ks.Address, err)
@@ -146,7 +162,11 @@ func (p *KeystoreProvider) CreateSigner(ctx context.Context, params interface{})
 
 	// Register the new signer in the shared registry
 	expectedAddr := common.HexToAddress(address)
-	keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(keystorePath, expectedAddr, string(password), nil)
+	// Held unlocked for the same reason as the discovery path above.
+	keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(
+		keystorePath, expectedAddr, string(password), nil,
+		ethsig.WithKeyHeldUnlocked(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load newly created keystore: %w", err)
 	}
@@ -217,7 +237,12 @@ func (p *KeystoreProvider) UnlockSigner(ctx context.Context, address string, pas
 
 	expectedAddr := common.HexToAddress(address)
 	passwordBytes := []byte(password)
-	keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(filePath, expectedAddr, string(passwordBytes), nil)
+	// This is the unlock path itself, so holding the key is precisely what the
+	// caller asked for.
+	keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(
+		filePath, expectedAddr, string(passwordBytes), nil,
+		ethsig.WithKeyHeldUnlocked(),
+	)
 	keystore.SecureZeroize(passwordBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unlock keystore for %s: %w", address, err)

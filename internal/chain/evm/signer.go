@@ -285,6 +285,15 @@ func (r *SignerRegistry) LockSigner(address string) error {
 		return types.ErrSignerLocked
 	}
 
+	// ⛔ Close before dropping the reference, or "locked" is a lie.
+	//
+	// Dropping it only removes our pointer; whatever the signer holds lives on
+	// until the GC gets to it, and the GC does not wipe memory. With a keystore
+	// signer built WithKeyHeldUnlocked that is the **decrypted private key** —
+	// so the UI would say locked while the key sat in an orphaned KeyStore.
+	// Close relocks the account and zeroizes the password.
+	r.closeSignerLocked(addrKey)
+
 	r.signers[addrKey] = nil
 	info.Locked = true
 	info.Enabled = false
@@ -300,9 +309,28 @@ func (r *SignerRegistry) UnregisterSigner(address string) {
 	defer r.mu.Unlock()
 
 	addrKey := normalizeAddress(address)
+	// Same reason as LockSigner: deleting the map entry is not releasing the key.
+	r.closeSignerLocked(addrKey)
 	delete(r.signers, addrKey)
 	delete(r.info, addrKey)
 	logger.EVM().Info().Str("address", address).Msg("registry: UnregisterSigner")
+}
+
+// closeSignerLocked releases whatever the registered signer holds.
+//
+// Caller must already hold r.mu — hence the name. Errors are logged rather than
+// returned: the caller is on its way to forgetting this signer either way, and
+// a failure to relock is something an operator needs to see, not something the
+// lock operation should be rolled back for.
+func (r *SignerRegistry) closeSignerLocked(addrKey string) {
+	signer := r.signers[addrKey]
+	if signer == nil {
+		return
+	}
+	if err := signer.Close(); err != nil {
+		logger.EVM().Warn().Str("address", addrKey).Err(err).
+			Msg("registry: closing signer failed — its key material may still be resident")
+	}
 }
 
 // IsLocked returns true if signer exists but is locked.

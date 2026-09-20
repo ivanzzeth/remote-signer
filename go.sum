@@ -179,6 +179,8 @@ github.com/influxdata/line-protocol v0.0.0-20200327222509-2487e7298839 h1:W9WBk7
 github.com/influxdata/line-protocol v0.0.0-20200327222509-2487e7298839/go.mod h1:xaLFMmpvUxqXtVkUJfg9QmT88cDaCJ3ZKgdZ78oO8Qo=
 github.com/ivanzzeth/ethsig v0.5.3 h1:KNv0mWGCIujybuLiZJE2q/hFUL31QPB5/ZlKJkRqjqE=
 github.com/ivanzzeth/ethsig v0.5.3/go.mod h1:QxaWgToYmbmTM5MRaCAweMCDWjRayjSfjRqSQgXzwPI=
+github.com/ivanzzeth/ethsig v0.6.0 h1:1SdMMOPM6MTm5IFoNXCQD7GGlJG+nDIIueQWHL/8pmI=
+github.com/ivanzzeth/ethsig v0.6.0/go.mod h1:QxaWgToYmbmTM5MRaCAweMCDWjRayjSfjRqSQgXzwPI=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
