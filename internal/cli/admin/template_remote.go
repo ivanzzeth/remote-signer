@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
 )
@@ -115,7 +114,7 @@ func runTemplateCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	var req templates.CreateRequest
-	if err := yaml.Unmarshal(data, &req); err != nil {
+	if err := decodeRequestFile(data, &req); err != nil {
 		return fmt.Errorf("unmarshal template definition: %w", err)
 	}
 
@@ -150,7 +149,7 @@ func runTemplateUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	var req templates.UpdateRequest
-	if err := yaml.Unmarshal(data, &req); err != nil {
+	if err := decodeRequestFile(data, &req); err != nil {
 		return fmt.Errorf("unmarshal template update: %w", err)
 	}
 
@@ -204,7 +203,7 @@ func runTemplateInstantiate(cmd *cobra.Command, args []string) error {
 	}
 
 	var req templates.InstantiateRequest
-	if err := yaml.Unmarshal(data, &req); err != nil {
+	if err := decodeRequestFile(data, &req); err != nil {
 		return fmt.Errorf("unmarshal instantiate request: %w", err)
 	}
 

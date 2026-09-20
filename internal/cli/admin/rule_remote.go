@@ -10,7 +10,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
@@ -122,7 +121,7 @@ func runRuleCreate(cmd *cobra.Command, args []string) error {
 
 	var req evm.CreateRuleRequest
 	// Try YAML first (superset of JSON)
-	if err := yaml.Unmarshal(data, &req); err != nil {
+	if err := decodeRequestFile(data, &req); err != nil {
 		return fmt.Errorf("unmarshal rule definition: %w", err)
 	}
 
